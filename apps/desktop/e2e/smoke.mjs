@@ -374,6 +374,10 @@ try {
   await u.page.getByText(`v${appVersion}`, { exact: true }).waitFor()
   await nav(u.page, 'Settings').click()
   await u.page.getByText(`${appVersion} (development build)`).waitFor()
+  assert.equal(
+    await u.page.getByRole('link', { name: 'Release notes' }).getAttribute('href'),
+    `https://github.com/deanbirnie/termterm/releases/tag/v${appVersion}`,
+  )
   await u.page.getByRole('button', { name: 'Check for updates' }).click()
   await u.page.getByText('Version 9.9.9 is available.').waitFor()
   await shot(u.page, '12-update-available')
