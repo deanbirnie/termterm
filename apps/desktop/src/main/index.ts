@@ -1,6 +1,7 @@
 import { join } from 'node:path'
-import { BrowserWindow, Menu, app, clipboard, ipcMain, shell } from 'electron'
+import { BrowserWindow, Menu, app, clipboard, ipcMain, powerMonitor, shell } from 'electron'
 import type { ConnectTarget } from '../shared/api'
+import { SettingsStore } from './settings'
 import { SshManager } from './ssh'
 import { VaultService } from './vault-service'
 
@@ -64,6 +65,8 @@ if (!app.requestSingleInstanceLock()) {
     prompt: (prompt) => emit('ssh:prompt', prompt),
   })
 
+  const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
+
   /** Only our own top-level page may talk to the main process. */
   const trusted = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) =>
     !!win && e.sender === win.webContents && e.senderFrame === win.webContents.mainFrame
@@ -87,10 +90,14 @@ if (!app.requestSingleInstanceLock()) {
   handle('vault:create', (password: string) => vault.create(password))
   handle('vault:signIn', (input) => vault.signIn(input))
   handle('vault:unlock', (password: string) => vault.unlock(password))
-  handle('vault:lock', () => {
-    ssh.closeAll()
-    vault.lock()
-  })
+  // Locking wipes the vault key but leaves established SSH sessions running;
+  // they no longer need the vault, and the UI hides them until it is unlocked.
+  handle('vault:lock', () => vault.lock())
+  handle('vault:changePassword', (current: string, next: string) =>
+    vault.changePassword(current, next),
+  )
+  handle('settings:get', () => settings.get())
+  handle('settings:save', (input) => settings.save(input))
   handle('vault:snapshot', () => vault.snapshot())
   handle('host:save', (id: string | null, input) => vault.saveHost(id, input))
   handle('key:generate', (label: string, type: 'ed25519' | 'rsa') => vault.generateKey(label, type))
@@ -118,6 +125,21 @@ if (!app.requestSingleInstanceLock()) {
     // macOS needs the default menu for standard edit shortcuts.
     if (!devUrl && process.platform !== 'darwin') Menu.setApplicationMenu(null)
     createWindow()
+
+    // Auto-lock: after a period without keyboard or mouse input anywhere on the
+    // system, and whenever the machine sleeps or its screen is locked.
+    const autoLock = () => {
+      if (settings.get().autoLockMinutes > 0) vault.lock()
+    }
+    powerMonitor.on('suspend', autoLock)
+    powerMonitor.on('lock-screen', autoLock)
+    setInterval(() => {
+      const minutes = settings.get().autoLockMinutes
+      if (minutes > 0 && vault.phase() === 'unlocked' && powerMonitor.getSystemIdleTime() >= minutes * 60) {
+        vault.lock()
+      }
+    }, 15_000).unref()
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

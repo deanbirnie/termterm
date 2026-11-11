@@ -116,6 +116,21 @@ export class SyncApi {
     return out
   }
 
+  /** Rotates the account's auth key and wrapped vault key; signs out every other device. */
+  changePassword(
+    currentAuthKey: Uint8Array,
+    newAuthKey: Uint8Array,
+    kdf: KdfParams,
+    wrappedVaultKey: string,
+  ): Promise<unknown> {
+    return this.call('POST', '/password', {
+      authKey: toBase64(currentAuthKey),
+      newAuthKey: toBase64(newAuthKey),
+      kdf,
+      wrappedVaultKey,
+    })
+  }
+
   logout(): Promise<unknown> {
     return this.call('POST', '/logout')
   }

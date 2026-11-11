@@ -81,6 +81,10 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     session: db.prepare('SELECT user_id, last_used_at FROM sessions WHERE token_hash = ?'),
     touchSession: db.prepare('UPDATE sessions SET last_used_at = ? WHERE token_hash = ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
+    deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?'),
+    updateCredentials: db.prepare(
+      'UPDATE users SET kdf = ?, auth_salt = ?, auth_hash = ?, wrapped_vault_key = ? WHERE id = ?',
+    ),
     pruneSessions: db.prepare(
       `DELETE FROM sessions WHERE user_id = ? AND token_hash NOT IN
          (SELECT token_hash FROM sessions WHERE user_id = ? ORDER BY last_used_at DESC LIMIT ?)`,
@@ -258,6 +262,30 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
         token: newSession(user.id),
         wrappedVaultKey: user.wrapped_vault_key,
       }
+    },
+
+    // Master password change. Requires both a live session and the current
+    // auth key, and signs out every other device so they must re-authenticate
+    // with the new password.
+    'POST /v1/password': async (req) => {
+      const { user, tokenHash } = authenticate(req)
+      const body = await readJson(req)
+      const authKey = authKeyOf(body.authKey)
+      const newAuthKey = authKeyOf(body.newAuthKey)
+      const kdf = kdfOf(body.kdf)
+      const wrappedVaultKey = str(body.wrappedVaultKey, 'wrappedVaultKey', 1024, B64_RE)
+      const keys = throttleKeys(clientIp(req), user.username)
+      checkThrottle(keys)
+      const hash = await scryptAsync(authKey, Buffer.from(user.auth_salt))
+      if (!timingSafeEqual(hash, Buffer.from(user.auth_hash))) {
+        recordFailure(keys)
+        throw new HttpError(401, 'Incorrect master password')
+      }
+      const salt = randomBytes(16)
+      const newHash = await scryptAsync(newAuthKey, salt)
+      q.updateCredentials.run(kdf, salt, newHash, wrappedVaultKey, user.id)
+      q.deleteOtherSessions.run(user.id, tokenHash)
+      return { ok: true }
     },
 
     'POST /v1/logout': (req) => {

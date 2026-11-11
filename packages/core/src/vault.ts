@@ -92,6 +92,61 @@ export class Vault {
     return authKey
   }
 
+  /**
+   * First half of a master password change: verifies the current password and
+   * builds the new key material without applying it, so a synced vault can
+   * update the server before committing locally with `commitRekey`.
+   */
+  async prepareRekey(
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{
+    kdf: KdfParams
+    wrappedVaultKey: string
+    currentAuthKey: Uint8Array
+    newAuthKey: Uint8Array
+  }> {
+    const currentAuthKey = await this.authKeyFor(currentPassword)
+    const kdf = newKdfParams()
+    const { wrapKey, authKey } = await deriveKeys(newPassword, kdf)
+    return {
+      kdf,
+      wrappedVaultKey: seal(wrapKey, this.vaultKey, VAULT_KEY_AAD),
+      currentAuthKey,
+      newAuthKey: authKey,
+    }
+  }
+
+  commitRekey(kdf: KdfParams, wrappedVaultKey: string): void {
+    this.file.kdf = kdf
+    this.file.wrappedVaultKey = wrappedVaultKey
+    this.emit()
+  }
+
+  /**
+   * The master password was changed on another device. Given the account's
+   * current key material and the new password, confirm it wraps this same
+   * vault key and adopt it, so this device unlocks with the new password too.
+   */
+  async adoptAccountKeys(
+    kdf: KdfParams,
+    wrappedVaultKey: string,
+    password: string,
+  ): Promise<Uint8Array> {
+    const { wrapKey, authKey } = await deriveKeys(password, kdf)
+    let key: Uint8Array
+    try {
+      key = open(wrapKey, wrappedVaultKey, VAULT_KEY_AAD)
+    } catch {
+      throw new WrongPasswordError()
+    }
+    const same = key.length === this.vaultKey.length && key.every((b, i) => b === this.vaultKey[i])
+    key.fill(0)
+    if (!same) throw new Error('That account holds a different vault than this device')
+    this.commitRekey(kdf, wrappedVaultKey)
+    return authKey
+  }
+
   get kdf(): KdfParams {
     return this.file.kdf
   }

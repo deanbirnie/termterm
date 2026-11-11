@@ -49,10 +49,10 @@ Decisions worth knowing before changing things:
 - [x] Desktop: SSH terminal sessions in tabs (password, key, keyboard-interactive auth)
 - [x] End-to-end smoke test driving the real app against a test SSH server
 
-Verified so far: `npm test` (16 tests) and `npm run e2e` (two app instances:
+Verified so far: `npm test` (18 tests) and `npm run e2e` (two app instances:
 create vault, generate key, save host, register sync, password and public-key
-logins, second-device sign-in, edit propagation, lock/unlock, changed host key
-refused). The sync server Docker image builds and passes its health check, and a
+logins, second-device sign-in, edit propagation, master password change across both
+devices, lock/unlock with sessions surviving, changed host key refused). The sync server Docker image builds and passes its health check, and a
 packaged Linux build of the app starts and works. **Not yet verified by hand:**
 the app on Windows and macOS. The Windows installer is built by
 `.github/workflows/build.yml` on a Windows runner (it cannot be built on Linux
@@ -62,16 +62,20 @@ Known gaps inside phase 1 scope:
 
 - An existing local vault cannot join an existing sync account (only a fresh
   device can sign in). Merging two vaults needs a re-key step.
-- Locking closes all sessions; there is no auto-lock.
+- If the app dies between the server accepting a password change and the local
+  vault file being rewritten, this device still unlocks with the old password
+  while the account uses the new one. Recovery path: none yet (needs a retry
+  journal).
 - `ssh2` occasionally generates an Ed25519 key its own parser rejects;
   `apps/desktop/src/main/keys.ts` retries until the key parses.
 
 ## Phase 2 — Vault hardening and account management
 
-- [ ] Change master password (re-wrap vault key, rotate `authKey` on server; needs a new `POST /v1/password` endpoint)
+- [x] Change master password: re-wraps the vault key and rotates `authKey` via `POST /v1/password`, which signs out other devices; they adopt the new keys on "Sign in again" (`Vault.adoptAccountKeys`)
 - [ ] "Remember on this device": store the vault key with Electron `safeStorage`
       (OS keychain / DPAPI), optional biometric gate (Windows Hello / Touch ID)
-- [ ] Auto-lock after inactivity / on system sleep
+- [x] Auto-lock after system idle time and on sleep / screen lock (device-local `settings.json`, default 15 minutes). The idle timer itself has no automated test.
+- [x] Locking keeps established SSH sessions running (hidden until unlock)
 - [ ] Device/session list and remote sign-out (server already stores sessions)
 - [ ] Rollback protection: sign a per-device view of the highest seen `seq`
       so a malicious server cannot silently serve stale data

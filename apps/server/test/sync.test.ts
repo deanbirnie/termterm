@@ -4,6 +4,7 @@ import {
   SyncApi,
   SyncError,
   Vault,
+  WrongPasswordError,
   deriveKeys,
   syncVault,
   type HostData,
@@ -176,6 +177,54 @@ describe('accounts', () => {
 
     await new SyncApi(url, a.syncToken()).logout()
     await expect(syncVault(a)).rejects.toMatchObject({ status: 401 })
+  })
+
+  it('changes the master password and moves other devices over', async () => {
+    const a = await firstDevice('dean', 'old-master')
+    const h = a.put('host', host('kept'))
+    await syncVault(a)
+    const b = await newDevice('dean', 'old-master')
+    await syncVault(b)
+
+    // Device A changes the password.
+    const apiA = new SyncApi(url, a.syncToken())
+    await expect(a.prepareRekey('wrong', 'new-master')).rejects.toBeInstanceOf(WrongPasswordError)
+    const rekey = await a.prepareRekey('old-master', 'new-master')
+    await expect(
+      apiA.changePassword(new Uint8Array(32), rekey.newAuthKey, rekey.kdf, rekey.wrappedVaultKey),
+    ).rejects.toMatchObject({ status: 401 })
+    await apiA.changePassword(rekey.currentAuthKey, rekey.newAuthKey, rekey.kdf, rekey.wrappedVaultKey)
+    a.commitRekey(rekey.kdf, rekey.wrappedVaultKey)
+
+    // A keeps working and now unlocks only with the new password.
+    await syncVault(a)
+    await expect(Vault.unlock(a.toFile(), 'old-master')).rejects.toBeInstanceOf(WrongPasswordError)
+    expect((await Vault.unlock(a.toFile(), 'new-master')).get(h.id)).toBeDefined()
+
+    // The old password no longer signs in; B was signed out.
+    await expect(newDevice('dean', 'old-master')).rejects.toMatchObject({ status: 401 })
+    await expect(syncVault(b)).rejects.toMatchObject({ status: 401 })
+
+    // B re-authenticates with the new password and adopts the new keys.
+    const apiB = new SyncApi(url)
+    const kdf = await apiB.prelogin('dean')
+    const { authKey } = await deriveKeys('new-master', kdf)
+    const { token, wrappedVaultKey } = await apiB.login('dean', authKey)
+    await expect(b.adoptAccountKeys(kdf, wrappedVaultKey, 'old-master')).rejects.toBeInstanceOf(
+      WrongPasswordError,
+    )
+    await b.adoptAccountKeys(kdf, wrappedVaultKey, 'new-master')
+    b.setSyncToken(token)
+    await syncVault(b)
+    expect((await Vault.unlock(b.toFile(), 'new-master')).get<HostData>(h.id)?.data.label).toBe('kept')
+  })
+
+  it('refuses to adopt keys for a different vault', async () => {
+    const mine = await Vault.create('pw')
+    const other = await Vault.create('pw')
+    await expect(mine.adoptAccountKeys(other.kdf, other.wrappedVaultKey, 'pw')).rejects.toThrow(
+      /different vault/,
+    )
   })
 
   it('can disable registration', async () => {

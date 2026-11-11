@@ -60,6 +60,11 @@ export interface VaultSnapshot {
   sync: SyncStatus
 }
 
+export interface Settings {
+  /** Lock after this many minutes without input, and on sleep or screen lock. 0 = never. */
+  autoLockMinutes: number
+}
+
 export type AppPhase = 'new' | 'locked' | 'unlocked'
 
 export interface HostInput {
@@ -117,7 +122,13 @@ export interface TermtermApi {
   /** New device: fetch the account's vault from a sync server. */
   signIn(input: AccountInput): Promise<void>
   unlock(password: string): Promise<void>
+  /** Wipes the vault key from memory. Open SSH sessions keep running. */
   lock(): Promise<void>
+  /** With sync on, this also signs out your other devices until they enter the new password. */
+  changePassword(current: string, next: string): Promise<void>
+
+  settings(): Promise<Settings>
+  saveSettings(settings: Settings): Promise<Settings>
 
   snapshot(): Promise<VaultSnapshot>
   onSnapshot(cb: (snapshot: VaultSnapshot) => void): () => void
