@@ -58,7 +58,7 @@ xvfb-run -a npm run e2e
 npm run e2e:mobile
 ```
 
-(`xvfb-run -a` is only needed on Linux without a display. The mobile test needs a Chromium: `npx playwright install chromium` in `apps/mobile`, or set `CHROME_PATH`.) If the baseline is
+(`xvfb-run -a` is only needed on Linux without a display. The mobile test needs a Chromium-based browser: set `CHROME_PATH` to an installed one, or run `npx playwright install chromium` in `apps/mobile`.) If the baseline is
 already failing, fix or report that first: do not start upgrades on a red tree.
 
 ### 2. Security
@@ -185,6 +185,7 @@ each run whether the cause has gone away.
   dependencies (build-time tooling, not shipped in the app).
 - `npm outdated`: only `@types/node`, held at 22.x on purpose to match the
   Node 22 runtime.
+- GitHub Actions: the `actions/*` steps are on `v4`, which GitHub now runs on a newer Node than they target and flags as deprecated. Newer majors exist (for example `actions/checkout@v7`, `actions/upload-artifact@v7`, `actions/download-artifact@v8`). Move to them one action at a time, checking each one's inputs against its release notes, since `release.yml` and `cleanup.yml` depend on artifact options.
 - No deprecation warnings from the app's own code. Node prints an
   `ExperimentalWarning` for `node:sqlite` in tests (expected, see above).
 
