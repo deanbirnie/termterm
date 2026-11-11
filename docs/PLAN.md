@@ -49,6 +49,20 @@ Decisions worth knowing before changing things:
 - [x] Desktop: SSH terminal sessions in tabs (password, key, keyboard-interactive auth)
 - [x] End-to-end smoke test driving the real app against a test SSH server
 
+Verified so far: `npm test` (16 tests) and `npm run e2e` (two app instances:
+create vault, generate key, save host, register sync, password and public-key
+logins, second-device sign-in, edit propagation, lock/unlock, changed host key
+refused). **Not yet verified:** packaged installers (`npm run dist`), and the
+app on Windows and macOS; development and tests so far ran on Linux only.
+
+Known gaps inside phase 1 scope:
+
+- An existing local vault cannot join an existing sync account (only a fresh
+  device can sign in). Merging two vaults needs a re-key step.
+- Locking closes all sessions; there is no auto-lock.
+- `ssh2` occasionally generates an Ed25519 key its own parser rejects;
+  `apps/desktop/src/main/keys.ts` retries until the key parses.
+
 ## Phase 2 — Vault hardening and account management
 
 - [ ] Change master password (re-wrap vault key, rotate `authKey` on server; needs a new `POST /v1/password` endpoint)

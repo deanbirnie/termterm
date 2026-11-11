@@ -32,6 +32,7 @@ function hostKey() {
   }
 }
 const logins = []
+let authorizedKey = null // public key line the server accepts, set once the app generates one
 const sshServer = new Server({ hostKeys: [hostKey()] }, (client) => {
   client
     .on('authentication', (ctx) => {
@@ -39,7 +40,15 @@ const sshServer = new Server({ hostKeys: [hostKey()] }, (client) => {
         logins.push('password')
         return ctx.accept()
       }
-      ctx.reject(['password'])
+      if (ctx.method === 'publickey' && ctx.username === 'tester' && authorizedKey) {
+        const allowed = utils.parseKey(authorizedKey)
+        const matches = ctx.key.algo === allowed.type && ctx.key.data.equals(allowed.getPublicSSH())
+        if (matches && (!ctx.signature || allowed.verify(ctx.blob, ctx.signature, ctx.hashAlgo))) {
+          if (ctx.signature) logins.push('publickey')
+          return ctx.accept()
+        }
+      }
+      ctx.reject(['publickey', 'password'])
     })
     .on('ready', () => {
       client.on('session', (accept) => {
@@ -103,7 +112,8 @@ try {
   await a.page.getByLabel('Label').fill('deploy key')
   await a.page.getByRole('button', { name: 'Generate', exact: true }).click()
   await a.page.getByText('SHA256:').waitFor()
-  assert.match(await a.page.getByLabel('Public key').inputValue(), /^ssh-ed25519 AAAA/)
+  authorizedKey = await a.page.getByLabel('Public key').inputValue()
+  assert.match(authorizedKey, /^ssh-ed25519 AAAA/)
   await shot(a.page, '02-keychain')
   step('key generated')
 
@@ -160,6 +170,15 @@ try {
   await shot(a.page, '06-terminal')
   step('terminal session works (stored password, host key trusted, snippet run)')
 
+  await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
+  await a.page.locator('.card', { hasText: 'Test box' }).click()
+  await a.page.getByLabel('Key', { exact: true }).selectOption({ label: 'deploy key' })
+  await a.page.getByRole('button', { name: 'Save and connect' }).click()
+  await termA.getByText('Welcome to the test box').waitFor()
+  assert.equal(logins.at(-1), 'publickey')
+  assert.equal(await a.page.getByRole('dialog').count(), 0)
+  step('second tab logged in with the vault key, no trust prompt this time')
+
   // ---- device B: sign in, everything arrives, no trust prompt --------------------
   const b = await launch('device-b')
   await b.page.getByRole('tab', { name: 'I already have one' }).click()
@@ -182,8 +201,10 @@ try {
   const termB = b.page.locator('.pane:not([hidden]) .xterm-rows')
   await termB.getByText('Welcome to the test box').waitFor()
   assert.equal(await b.page.getByRole('dialog').count(), 0)
+  assert.equal(logins.at(-1), 'publickey')
+  assert.equal(logins.filter((l) => l === 'publickey').length, 2)
   await shot(b.page, '07-device-b-terminal')
-  step('second device connected with synced password and known host, no prompt')
+  step('second device logged in with the synced private key and known host, no prompt')
 
   // ---- an edit on B reaches A ---------------------------------------------------
   await b.page.getByRole('button', { name: 'Vault', exact: true }).click()
