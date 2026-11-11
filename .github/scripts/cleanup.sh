@@ -10,7 +10,7 @@
 set -euo pipefail
 
 KEEP_ARTIFACTS="${KEEP_ARTIFACTS:-3}"
-KEEP_RELEASES="${KEEP_RELEASES:-4}"
+KEEP_RELEASES="${KEEP_RELEASES:-3}"
 RUN_LOG_DAYS="${RUN_LOG_DAYS:-30}"
 CACHE_IDLE_DAYS="${CACHE_IDLE_DAYS:-7}"
 DRY_RUN="${DRY_RUN:-false}"
@@ -27,7 +27,7 @@ days_ago() { date -u -d "$1 days ago" +%Y-%m-%dT%H:%M:%SZ; }
 hours_ago() { date -u -d "$1 hours ago" +%Y-%m-%dT%H:%M:%SZ; }
 
 artifacts() {
-  # Release staging artifacts ("desktop-*") are copies of what is already
+  # Release staging artifacts ("release-*") are copies of what is already
   # attached to the release, so none are kept once they are an hour old (a
   # release still in progress may be using younger ones). Of everything else,
   # the newest $KEEP_ARTIFACTS of each name are kept.
@@ -38,7 +38,7 @@ artifacts() {
     sort -t "$(printf '\t')" -k1,1 -k2,2r |
     awk -F '\t' -v keep="$KEEP_ARTIFACTS" -v cutoff="$staging_cutoff" '
       { seen[$1]++ }
-      $1 ~ /^desktop-/ { if ($2 < cutoff) print; next }
+      $1 ~ /^release-/ { if ($2 < cutoff) print; next }
       seen[$1] > keep { print }
     ' |
     while IFS="$(printf '\t')" read -r name created id size; do

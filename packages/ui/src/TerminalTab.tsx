@@ -30,6 +30,19 @@ const THEME = {
   brightWhite: '#f0f6fc',
 }
 
+const EXTRA_KEYS = [
+  { label: 'Esc', name: 'Escape', send: '\x1b' },
+  { label: 'Tab', name: 'Tab', send: '\t' },
+  { label: '↑', name: 'Up', send: '\x1b[A' },
+  { label: '↓', name: 'Down', send: '\x1b[B' },
+  { label: '←', name: 'Left', send: '\x1b[D' },
+  { label: '→', name: 'Right', send: '\x1b[C' },
+  { label: '/', name: 'Slash', send: '/' },
+  { label: '-', name: 'Dash', send: '-' },
+  { label: '|', name: 'Pipe', send: '|' },
+  { label: '~', name: 'Tilde', send: '~' },
+]
+
 export function TerminalTab({
   tab,
   active,
@@ -46,6 +59,14 @@ export function TerminalTab({
   const fitRef = useRef<FitAddon | null>(null)
   const [status, setStatus] = useState<SessionStatus>({ state: 'connecting' })
   const [attempt, setAttempt] = useState(0)
+  // On a touch screen there is no Esc, Tab, Ctrl or arrow key: offer them.
+  const [touch] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false)
+  const [ctrl, setCtrl] = useState(false)
+  const ctrlRef = useRef(false)
+  const armCtrl = (on: boolean) => {
+    ctrlRef.current = on
+    setCtrl(on)
+  }
   const [snippetsOpen, setSnippetsOpen] = useState(false)
 
   useEffect(() => {
@@ -78,7 +99,15 @@ export function TerminalTab({
     })
 
     const subscriptions = [
-      term.onData((data) => api.sshWrite(tab.id, data)),
+      term.onData((data) => {
+        // With Ctrl armed from the key row, the next letter becomes its control character.
+        if (ctrlRef.current && data.length === 1) {
+          const code = data.toUpperCase().charCodeAt(0)
+          if (code >= 64 && code <= 95) data = String.fromCharCode(code - 64)
+          armCtrl(false)
+        }
+        api.sshWrite(tab.id, data)
+      }),
       term.onResize(({ cols, rows }) => api.sshResize(tab.id, cols, rows)),
     ]
     const off = [
@@ -119,9 +148,28 @@ export function TerminalTab({
     termRef.current?.focus()
   }
 
+  const sendKey = (sequence: string) => {
+    api.sshWrite(tab.id, sequence)
+    termRef.current?.focus()
+  }
+
   return (
     <div className="terminal-tab">
       <div className="terminal-host" ref={hostRef} />
+      {touch && status.state === 'connected' && (
+        // preventDefault on pointer down keeps focus in the terminal, so the
+        // on-screen keyboard stays open while these are tapped.
+        <div className="key-row" role="toolbar" aria-label="Extra keys" onPointerDown={(e) => e.preventDefault()}>
+          {EXTRA_KEYS.map((key) => (
+            <button key={key.label} aria-label={key.name} onClick={() => sendKey(key.send)}>
+              {key.label}
+            </button>
+          ))}
+          <button aria-pressed={ctrl} className={ctrl ? 'armed' : ''} onClick={() => armCtrl(!ctrl)}>
+            Ctrl
+          </button>
+        </div>
+      )}
       {status.state === 'connected' && snippets.length > 0 && (
         <div className="snippet-menu">
           <button

@@ -145,7 +145,7 @@ try {
   step('an edit on one device reached the other')
 
   await nav(a, 'Settings').click()
-  await a.getByText('Install new versions of the mobile app from the releases page.').waitFor()
+  await a.getByText('To update, download the new APK from the releases page and install it over this one.').waitFor()
   await a.screenshot({ path: join(shots, '03-settings.png') })
   console.log('\nMobile E2E smoke test passed')
 } finally {

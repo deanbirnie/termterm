@@ -25,8 +25,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  KEEP_RELEASES: 4 # GitHub releases (installers); the one marked latest is always kept
-  KEEP_IMAGE_VERSIONS: 4 # tagged server images, besides `latest` and `edge`
+  KEEP_RELEASES: 3 # GitHub releases with all their files (installers, APK); the one marked latest is always kept
+  KEEP_IMAGE_VERSIONS: 3 # tagged server images, besides `latest` and `edge`
   KEEP_ARTIFACTS: 3 # of each kind of build artifact (e.g. the Windows installer from CI)
   RUN_LOG_DAYS: 30 # workflow runs and their logs
   CACHE_IDLE_DAYS: 7 # dependency caches not used for this long

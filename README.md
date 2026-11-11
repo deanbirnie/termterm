@@ -22,7 +22,7 @@ dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENAN
 | `packages/app` | App logic shared by every client: the vault service and the contract between the interface and the platform |
 | `packages/ui` | The React interface, shared by desktop and mobile |
 | `apps/desktop` | Electron desktop app |
-| `apps/mobile` | Android app: the shared interface in a Capacitor shell (in progress) |
+| `apps/mobile` | Android app: the shared interface in a Capacitor shell, with a native SSH plugin |
 | `apps/server` | Sync server: Node 22, built-in SQLite, no runtime dependencies |
 
 ## Getting started
@@ -65,6 +65,7 @@ Download the latest version from the repository's
   choose **More info → Run anyway**. A `-portable.exe` that runs without
   installing is there too.
 - **Linux:** `termterm-<version>-x86_64.AppImage`.
+- **Android:** `termterm-<version>.apk` (see [Android app](#android-app)).
 
 Installed copies update themselves. When a newer release exists an **Update**
 button appears in the top bar; you can also check by hand under
@@ -75,36 +76,82 @@ portable build and builds run from source do not self-update.
 To build installers yourself (Node 22.18+): `npm install`, then `npm run dist`.
 The files land in `apps/desktop/release/`.
 
-## Android app (in progress)
+## Android app
 
-`apps/mobile` is the Android app. Today it does the vault and sync: create or
-sign in to a vault, view and edit hosts, snippets and known hosts, and sync
-with your other devices. **It cannot open SSH sessions or create keys yet**;
-those arrive with the native SSH plugin (see the plan).
+`apps/mobile` is the Android app: the same interface in a native shell, with
+SSH provided by a native plugin. It does vault, sync and terminal sessions
+(password, key and keyboard-interactive logins, host key verification), with an
+extra key row for Esc, Tab, Ctrl and the arrows. Unlocking with a fingerprint
+and keeping sessions alive in the background are not there yet.
 
-Every build that touches the mobile app produces a debug APK as the
-**termterm-android-debug** artifact on its Actions run. It is for trying
-out: each run signs with a different throwaway key, so a newer one will not
-install over an older one. Uninstalling removes the vault stored on the phone,
-so set up sync first; signing in again brings everything back. Properly signed
-APKs on the releases page come later.
+**Installing:** download `termterm-<version>.apk` from the
+[Releases](https://github.com/deanbirnie/termterm/releases/latest) page and
+open it on the phone. Android asks once to allow installs from your browser
+or file manager. A newer version installs over an older one and keeps the
+vault. The app does not update itself: Settings → About tells you where to
+get the new APK.
 
-To work on it:
+The app accepts a plain `http://` sync server address, for a server on your
+home network, and warns when you enter one. Use `https://` for anything
+reachable from outside.
+
+### Android signing key
+
+Android only installs an update over an existing app when both are signed
+with the same key, so releases need one fixed signing key. It is kept in
+repository secrets, never in the repository. **Until it is set up, releases
+are published without an APK.** Set it up once:
+
+1. Create a keystore (any machine with Docker; choose your own password in
+   both places):
+
+```bash
+docker run --rm -v "$PWD":/out eclipse-temurin:21-jdk keytool -genkeypair -keystore /out/termterm-release.jks -alias termterm -keyalg RSA -keysize 4096 -validity 10000 -storepass 'CHOOSE-A-PASSWORD' -keypass 'CHOOSE-A-PASSWORD' -dname "CN=termterm"
+```
+
+2. Print it as one line of text:
+
+```bash
+base64 -w0 termterm-release.jks
+```
+
+3. In the repository on GitHub, open **Settings → Secrets and variables →
+   Actions → New repository secret** and add four secrets:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | the output of step 2 |
+| `ANDROID_KEYSTORE_PASSWORD` | the password you chose |
+| `ANDROID_KEY_ALIAS` | `termterm` |
+| `ANDROID_KEY_PASSWORD` | the same password |
+
+4. Keep `termterm-release.jks` and its password somewhere safe (a password
+   manager). **If they are lost, no future version can install over the ones
+   already on your phones**: you would have to uninstall and reinstall.
+
+Builds on pull requests and `main` still produce a debug APK as the
+`termterm-android-debug` artifact. That one is signed with a throwaway key
+and will not install over a release version or another debug build.
+
+### Working on it
 
 ```bash
 npm run dev:mobile
 ```
 
 opens the interface in a browser, where phone emulation in the developer tools
-is enough for most work. Building the APK needs JDK 21 and the Android SDK:
+is enough for interface work (SSH needs the real app). The SSH core is plain
+Java and has its own test, which needs only a JDK and Node:
+
+```bash
+npm run test:ssh -w @termterm/mobile
+```
+
+Building the APK needs JDK 21 and the Android SDK:
 
 ```bash
 npm run apk -w @termterm/mobile
 ```
-
-The app accepts a plain `http://` sync server address, for a server on your
-home network, and warns when you enter one. Use `https://` for anything
-reachable from outside.
 
 ## Running the sync server
 
@@ -177,7 +224,7 @@ git push origin v0.2.0
 
 The workflow runs the tests, then:
 
-1. builds the Windows installer and Linux AppImage stamped with that version;
+1. builds the Windows installer, the Linux AppImage and the signed Android APK, all stamped with that version;
 2. pushes `ghcr.io/deanbirnie/termterm-server` tagged `0.2.0`, `0.2` and `latest`;
 3. creates the GitHub release `v0.2.0` with the installers and the update
    metadata the in-app updater reads.
@@ -197,8 +244,8 @@ removes what is no longer needed:
 
 | What | Kept |
 |---|---|
-| GitHub releases (installers) | the newest 4, and always the one marked latest; git tags are kept |
-| Server image versions | `latest`, `edge` and the newest 4 tagged versions; untagged leftovers are removed |
+| GitHub releases, with all their files (installers, APK) | the newest 3, and always the one marked latest; git tags are kept |
+| Server image versions | `latest`, `edge` and the newest 3 tagged versions; untagged leftovers are removed |
 | CI build artifacts | the newest 3 of each kind, and at most 7 days; release staging copies for 1 day |
 | Workflow runs and logs | 30 days |
 | Dependency caches | those used in the last 7 days; none for closed pull requests |

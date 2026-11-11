@@ -13,3 +13,11 @@ export function fingerprintOfPublicLine(line: string): string {
     return 'SHA256:(unreadable)'
   }
 }
+
+/** Reads the algorithm name ("ssh-ed25519", ...) from the start of a public key blob. */
+export function keyTypeOfBlob(blob: Uint8Array): string {
+  if (blob.length < 4) return 'unknown'
+  const length = ((blob[0]! << 24) | (blob[1]! << 16) | (blob[2]! << 8) | blob[3]!) >>> 0
+  if (length === 0 || length > blob.length - 4) return 'unknown'
+  return String.fromCharCode(...blob.subarray(4, 4 + length))
+}
