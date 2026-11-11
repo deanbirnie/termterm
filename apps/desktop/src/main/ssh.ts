@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { userInfo } from 'node:os'
 import { Client, utils, type ClientChannel, type NextAuthHandler } from 'ssh2'
-import type { ConnectTarget, SessionStatus, SshPrompt, SshPromptReply } from '../shared/api'
-import { fingerprintOf, keyTypeOfBlob } from './keys'
-import type { VaultService } from './vault-service'
+import type { ConnectTarget, SessionStatus, SshPrompt, SshPromptReply } from '@termterm/app'
+import { fingerprintOf, type VaultService } from '@termterm/app'
+import { keyTypeOfBlob } from './keys'
 
 type PromptBody = SshPrompt extends infer P
   ? P extends SshPrompt

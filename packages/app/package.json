@@ -1,0 +1,15 @@
+{
+  "name": "@termterm/app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "@termterm/core": "*"
+  }
+}

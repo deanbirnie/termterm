@@ -36,6 +36,17 @@ const USERNAME_RE = /^[a-z0-9][a-z0-9._@+-]{2,63}$/
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/
 
+// The mobile app runs in a WebView, whose requests are cross-origin. Any
+// origin may call the API: it is authenticated by a bearer token the caller
+// must already hold, never by cookies, so there is nothing for another site
+// to ride on.
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'authorization, content-type',
+  'access-control-max-age': '86400',
+}
+
 class HttpError extends Error {
   readonly status: number
   constructor(status: number, message: string) {
@@ -409,12 +420,17 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     const send = (status: number, body: unknown) => {
       const json = JSON.stringify(body)
       res.writeHead(status, {
+        ...CORS_HEADERS,
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(json),
         'cache-control': 'no-store',
         'x-content-type-options': 'nosniff',
       })
       res.end(json)
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS)
+      return res.end()
     }
     const handler = routes[`${req.method} ${url.pathname.replace(/\/+$/, '')}`]
     if (!handler) return send(404, { error: 'Not found' })

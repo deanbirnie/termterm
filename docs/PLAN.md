@@ -15,8 +15,11 @@ procedure in [MAINTENANCE.md](MAINTENANCE.md).
 | Piece | Location | Stack |
 |---|---|---|
 | Vault crypto, item model, sync client | `packages/core` | TypeScript, `hash-wasm` (Argon2id), `@noble/ciphers` (XChaCha20-Poly1305). No Node or DOM specifics, so it can be reused by a future mobile app or CLI. |
+| App logic shared by every client | `packages/app` | The UI-to-platform contract (`contract.ts`) and `VaultService`: unlock, edit, save, sync. Platform specifics (storage, OS credential store, SSH key handling) are injected as a `Platform`. |
+| Shared interface | `packages/ui` | React screens and terminal, used by desktop and mobile. Talks only to `window.termterm` (the contract). |
 | Sync server | `apps/server` | Node 22 `node:http` + `node:sqlite`, zero runtime dependencies, Docker image. |
-| Desktop app | `apps/desktop` | Electron, electron-vite, React, xterm.js, `ssh2`. |
+| Android app | `apps/mobile` | Capacitor shell around `packages/ui`. `src/api.ts` implements the contract in the WebView on top of `VaultService`; storage is Capacitor Filesystem in the app's private directory. The native project is in `apps/mobile/android` (committed). Unlike desktop, the unlocked vault lives in the same process as the interface, so the app must never load remote content. |
+| Desktop app | `apps/desktop` | Electron shell: implements the contract over IPC, with `ssh2` for SSH and Electron `safeStorage` for the device key. |
 
 Decisions worth knowing before changing things:
 
@@ -107,13 +110,23 @@ Known gaps inside phase 1 scope:
 
 ## Phase 4 — Distribution and more devices
 
-- [x] CI (`build.yml`): typecheck, tests, e2e, server image check, Windows installer artifact; pushes to `main` publish the server image as `edge`
+- [x] CI (`build.yml`): typecheck and unit tests always; the desktop e2e, Windows installer and server image jobs run only when that app or shared code changed (`.github/scripts/changed-areas.sh`); pushes to `main` that touch the server publish its image as `edge`
 - [x] Releases (`release.yml`): one version from a tag or a manual run stamps the app, publishes Windows + Linux installers on a GitHub release, and pushes the multi-arch server image to ghcr.io (`X.Y.Z`, `X.Y`, `latest`)
 - [x] In-app updates with electron-updater from GitHub releases (Settings → About, plus an Update button in the top bar); version shown in the sidebar and About
 - [x] Storage cleanup (`cleanup.yml` + `.github/scripts/cleanup.sh`): prunes artifacts, run logs, caches, old releases and old image versions. The script's selection logic was tested against sample data; the workflow itself and the image cleanup action have not yet run for real
 - [ ] **Run the first real release** and confirm on Windows that an installed older version updates itself. Until then the release workflow and the Windows update path are unproven (the updater is tested against a fake feed on Linux only)
 - [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
-- [ ] Mobile app (React Native or Capacitor) reusing `packages/core`
+- [ ] Android app (`apps/mobile`, Capacitor) reusing `packages/core`, `packages/app` and `packages/ui`:
+  - [x] Step 1: shared UI and vault logic moved out of the desktop app into `packages/ui` and `packages/app`
+  - [x] Step 2: Android app with vault and sync (no SSH yet). The web layer is
+        covered by `npm run e2e:mobile` in a phone-sized browser (vault, storage,
+        cross-origin sync between two profiles). **The APK is built in CI but has
+        not been run on a device or emulator yet.** The sync server now sends CORS
+        headers for it. Still to do here: app icon and splash screen (currently
+        Capacitor's defaults), and an emulator test in CI.
+  - [ ] Step 3: native SSH plugin (Kotlin) and the terminal
+  - [ ] Step 4: biometric unlock, extra keyboard row, background sessions
+  - [ ] Step 5: signed APK in the Release workflow
 - [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
 
 ## Working on the repo

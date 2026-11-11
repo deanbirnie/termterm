@@ -19,8 +19,11 @@ dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENAN
 | Path | What |
 |---|---|
 | `packages/core` | Vault crypto, item model and sync client (portable TypeScript) |
+| `packages/app` | App logic shared by every client: the vault service and the contract between the interface and the platform |
+| `packages/ui` | The React interface, shared by desktop and mobile |
+| `apps/desktop` | Electron desktop app |
+| `apps/mobile` | Android app: the shared interface in a Capacitor shell (in progress) |
 | `apps/server` | Sync server: Node 22, built-in SQLite, no runtime dependencies |
-| `apps/desktop` | Electron + React desktop app |
 
 ## Getting started
 
@@ -71,6 +74,36 @@ portable build and builds run from source do not self-update.
 
 To build installers yourself (Node 22.18+): `npm install`, then `npm run dist`.
 The files land in `apps/desktop/release/`.
+
+## Android app (in progress)
+
+`apps/mobile` is the Android app. Today it does the vault and sync: create or
+sign in to a vault, view and edit hosts, snippets and known hosts, and sync
+with your other devices. **It cannot open SSH sessions or create keys yet**;
+those arrive with the native SSH plugin (see the plan).
+
+Every build that touches the mobile app produces a debug APK as the
+**termterm-android-debug** artifact on its Actions run. It is for trying
+out: each run signs with a different throwaway key, so a newer one will not
+install over an older one. Uninstalling removes the vault stored on the phone,
+so set up sync first; signing in again brings everything back. Properly signed
+APKs on the releases page come later.
+
+To work on it:
+
+```bash
+npm run dev:mobile
+```
+
+opens the interface in a browser, where phone emulation in the developer tools
+is enough for most work. Building the APK needs JDK 21 and the Android SDK:
+
+```bash
+npm run apk -w @termterm/mobile
+```
+
+The sync server address must be `https://` on Android, which blocks plain
+HTTP from apps by default.
 
 ## Running the sync server
 

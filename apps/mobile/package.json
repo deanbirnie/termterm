@@ -1,0 +1,27 @@
+{
+  "name": "@termterm/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "termterm for Android: the shared interface in a Capacitor shell",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
+    "e2e": "vite build && node e2e/smoke.mjs",
+    "sync": "vite build && cap sync android",
+    "apk": "npm run sync && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/filesystem": "^8.1.5"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "playwright": "^1.63.0",
+    "vite": "^8.3.8"
+  }
+}

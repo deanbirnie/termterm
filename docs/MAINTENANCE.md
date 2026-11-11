@@ -23,10 +23,11 @@ changing, plus a new row in the [run log](#run-log) at the bottom of this file.
 
 | Area | Where | Notes |
 |---|---|---|
-| npm packages | `package.json`, `packages/core/package.json`, `apps/server/package.json`, `apps/desktop/package.json`, one root `package-lock.json` | npm workspaces. The server has no runtime dependencies on purpose. |
+| npm packages | the root `package.json` and one in each folder under `packages/` and `apps/`, with a single root `package-lock.json` | npm workspaces. The server has no runtime dependencies on purpose. |
 | Electron | `apps/desktop/package.json` (`electron`, pinned exactly) | Security-critical: it bundles Chromium and Node. electron-builder needs an exact version. |
 | Node.js | `engines` in `package.json`, `node-version` in `.github/workflows/*.yml`, `FROM node:…` in `apps/server/Dockerfile` | All three must agree on the major version. The server relies on type stripping and `node:sqlite`. |
 | GitHub Actions | `uses:` lines in `.github/workflows/*.yml` | Pinned by major version tag. Includes one third-party action with delete rights over the image registry (`dataaxiom/ghcr-cleanup-action` in `cleanup.yml`): review its changes before moving to a new major. |
+| Android toolchain | `apps/mobile/android` (`variables.gradle`, `build.gradle`, `gradle/wrapper/gradle-wrapper.properties`), `java-version` in `build.yml` | Capacitor sets the expected Gradle, Android Gradle Plugin, JDK and SDK levels. Upgrade Capacitor majors with its migration guide (`npx cap migrate`), and raise `targetSdkVersion` when Google Play's requirement moves. |
 | Docker base image | `apps/server/Dockerfile` | Rebuilt on every release and every push to `main`. |
 | Cryptography | `packages/core/src/crypto.ts` | Argon2id parameters, HKDF, XChaCha20-Poly1305. See "Cryptography review". |
 
@@ -53,7 +54,11 @@ npm test
 xvfb-run -a npm run e2e
 ```
 
-(`xvfb-run -a` is only needed on Linux without a display.) If the baseline is
+```bash
+npm run e2e:mobile
+```
+
+(`xvfb-run -a` is only needed on Linux without a display. The mobile test needs a Chromium: `npx playwright install chromium` in `apps/mobile`, or set `CHROME_PATH`.) If the baseline is
 already failing, fix or report that first: do not start upgrades on a red tree.
 
 ### 2. Security

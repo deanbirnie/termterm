@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": [],
+    "paths": {
+      "@termterm/core": ["../core/src/index.ts"],
+      "@termterm/app": ["../app/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

@@ -4,7 +4,11 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "types": ["node", "vite/client"],
-    "paths": { "@termterm/core": ["../../packages/core/src/index.ts"] }
+    "paths": {
+      "@termterm/core": ["../../packages/core/src/index.ts"],
+      "@termterm/app": ["../../packages/app/src/index.ts"],
+      "@termterm/ui": ["../../packages/ui/src/index.tsx"]
+    }
   },
   "include": ["src", "electron.vite.config.ts"]
 }
