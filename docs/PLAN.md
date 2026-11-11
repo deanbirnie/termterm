@@ -125,9 +125,16 @@ Known gaps inside phase 1 scope:
         not been run on a device or emulator yet.** The sync server now sends CORS
         headers for it. Still to do here: app icon and splash screen (currently
         Capacitor's defaults), and an emulator test in CI.
-  - [ ] Step 3: native SSH plugin (Kotlin) and the terminal
-  - [ ] Step 4: biometric unlock, extra keyboard row, background sessions
-  - [ ] Step 5: signed APK in the Release workflow
+  - [x] Step 3: native SSH plugin and the terminal. The SSH core
+        (`apps/mobile/android/app/src/main/java/dev/termterm/app/ssh`, plain Java
+        on JSch) is tested on a JVM by `npm run test:ssh -w @termterm/mobile`.
+        `SshPlugin.java` bridges it to the WebView and `apps/mobile/src/ssh.ts`
+        makes the vault decisions (credentials, host key trust), mirroring the
+        desktop. Includes the extra key row and keyboard-aware sizing.
+        **The plugin bridge, the on-screen keyboard behaviour and the terminal
+        have not been run on a device.**
+  - [ ] Step 4: biometric unlock (Android Keystore), background sessions (foreground service), app icon and splash screen
+  - [x] Step 5: signed `termterm-<version>.apk` on each release, when the signing key secrets are set (README, "Android signing key"). **Not yet exercised: needs the secrets and a real release.**
 - [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
 
 ## Working on the repo

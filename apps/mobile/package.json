@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "e2e": "vite build && node e2e/smoke.mjs",
     "sync": "vite build && cap sync android",
-    "apk": "npm run sync && cd android && ./gradlew assembleDebug"
+    "apk": "npm run sync && cd android && ./gradlew assembleDebug",
+    "test:ssh": "bash ssh-test/run.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",

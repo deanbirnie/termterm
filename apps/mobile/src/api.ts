@@ -7,17 +7,23 @@ import { Capacitor } from '@capacitor/core'
 import {
   VaultService,
   type AppPhase,
+  type SessionStatus,
   type Settings,
+  type SshPrompt,
   type TermtermApi,
   type UpdateState,
   type VaultSnapshot,
 } from '@termterm/app'
+import { createSsh, nativeKeyTools } from './ssh'
 import { vaultStorage } from './storage'
 
 declare const __APP_VERSION__: string
 
-const SSH_UNAVAILABLE = 'SSH sessions are not available in the mobile app yet'
-const KEYS_UNAVAILABLE = 'Keys cannot be created in the mobile app yet. Add them in the desktop app.'
+// SSH and key handling live in the native Android plugin, so they exist only
+// in the installed app, not when this code runs in a desktop browser.
+const NATIVE = Capacitor.isNativePlatform()
+const SSH_UNAVAILABLE = 'SSH sessions are only available in the installed app'
+const KEYS_UNAVAILABLE = 'Keys can only be created in the installed app'
 const SETTINGS_KEY = 'termterm.settings'
 
 class Emitter<Args extends unknown[]> {
@@ -68,20 +74,33 @@ export function createApi(): TermtermApi {
         load: async () => null,
         clear: () => undefined,
       },
-      keys: {
-        generate: () => {
-          throw new Error(KEYS_UNAVAILABLE)
-        },
-        import: () => {
-          throw new Error(KEYS_UNAVAILABLE)
-        },
-      },
+      keys: NATIVE
+        ? nativeKeyTools
+        : {
+            generate: () => {
+              throw new Error(KEYS_UNAVAILABLE)
+            },
+            import: () => {
+              throw new Error(KEYS_UNAVAILABLE)
+            },
+          },
       deviceName: () => (Capacitor.getPlatform() === 'android' ? 'Android device' : 'Mobile browser'),
       rememberDevice: () => false,
     },
     (s) => snapshot.emit(s),
     (p) => phase.emit(p),
   )
+
+  const sshData = new Emitter<[string, Uint8Array]>()
+  const sshStatus = new Emitter<[string, SessionStatus]>()
+  const sshPrompt = new Emitter<[SshPrompt]>()
+  const ssh = NATIVE
+    ? createSsh(vault, {
+        data: (id, data) => sshData.emit(id, data),
+        status: (id, status) => sshStatus.emit(id, status),
+        prompt: (prompt) => sshPrompt.emit(prompt),
+      })
+    : null
 
   // Auto-lock: a phone has no idle timer worth trusting, so lock when the app
   // has been in the background for longer than the chosen time.
@@ -98,7 +117,7 @@ export function createApi(): TermtermApi {
 
   const updateState: UpdateState = {
     status: 'unsupported',
-    reason: 'Install new versions of the mobile app from the releases page.',
+    reason: 'To update, download the new APK from the releases page and install it over this one.',
   }
 
   return {
@@ -136,21 +155,22 @@ export function createApi(): TermtermApi {
     syncDevices: () => vault.syncDevices(),
     syncRevokeDevice: (id) => vault.syncRevokeDevice(id),
 
-    sshConnect: async () => {
-      throw new Error(SSH_UNAVAILABLE)
+    sshConnect: async (sessionId, target, cols, rows) => {
+      if (!ssh) throw new Error(SSH_UNAVAILABLE)
+      await ssh.connect(sessionId, target, cols, rows)
     },
-    sshWrite: () => undefined,
-    sshResize: () => undefined,
-    sshClose: () => undefined,
-    sshPromptReply: () => undefined,
-    onSshData: () => () => undefined,
-    onSshStatus: () => () => undefined,
-    onSshPrompt: () => () => undefined,
+    sshWrite: (sessionId, data) => ssh?.write(sessionId, data),
+    sshResize: (sessionId, cols, rows) => ssh?.resize(sessionId, cols, rows),
+    sshClose: (sessionId) => ssh?.close(sessionId),
+    sshPromptReply: (promptId, reply) => ssh?.promptReply(promptId, reply),
+    onSshData: sshData.on,
+    onSshStatus: sshStatus.on,
+    onSshPrompt: sshPrompt.on,
 
     appInfo: async () => ({
       version: __APP_VERSION__,
       packaged: Capacitor.isNativePlatform(),
-      capabilities: { ssh: false, keys: false },
+      capabilities: { ssh: NATIVE, keys: NATIVE },
     }),
     updateState: async () => updateState,
     onUpdateState: () => () => undefined,

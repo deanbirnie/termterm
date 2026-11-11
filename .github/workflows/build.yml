@@ -181,6 +181,8 @@ jobs:
           echo "Using browser: $CHROME_PATH"
           test -n "$CHROME_PATH"
           npm run e2e -w @termterm/mobile
+      - name: SSH core test
+        run: npm run test:ssh -w @termterm/mobile
       - name: Build debug APK
         run: npm run apk -w @termterm/mobile
       # A debug build, signed with a throwaway key: for trying out, not for
