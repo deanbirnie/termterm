@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+release/
+*.log
+*.db
+*.db-*
+.env
+test-results/

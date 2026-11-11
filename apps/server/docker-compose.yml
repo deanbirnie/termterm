@@ -1,0 +1,18 @@
+# Run behind a TLS-terminating reverse proxy (Traefik, Caddy, nginx, Dokploy...).
+services:
+  termterm-server:
+    build:
+      context: ../..
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      TERMTERM_TRUST_PROXY: "true"
+      # Set to "false" once your account exists to close sign-ups.
+      TERMTERM_ALLOW_REGISTRATION: "true"
+    volumes:
+      - termterm-data:/data
+
+volumes:
+  termterm-data:

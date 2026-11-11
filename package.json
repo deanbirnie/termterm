@@ -1,0 +1,21 @@
+{
+  "name": "termterm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SSH client with an end-to-end encrypted, synced vault for hosts and credentials",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev": "npm run dev -w @termterm/desktop",
+    "build": "npm run build -w @termterm/server && npm run build -w @termterm/desktop",
+    "server": "npm run start -w @termterm/server",
+    "test": "vitest run",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "e2e": "npm run e2e -w @termterm/desktop"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "engines": { "node": ">=22.13" }
+}

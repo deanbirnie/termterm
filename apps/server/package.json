@@ -1,0 +1,11 @@
+{
+  "name": "@termterm/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}
