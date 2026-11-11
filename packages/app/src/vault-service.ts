@@ -418,6 +418,30 @@ export class VaultService {
   }
 
   /**
+   * Signs the open vault in to an existing account: the way back after sync
+   * was turned off, and the way to bring a vault that was started on its own
+   * into an account. Local items are kept; see `Vault.joinAccount`.
+   */
+  async syncSignIn(input: AccountInput): Promise<void> {
+    const v = this.v
+    if (v.sync) throw new Error('Sync is already set up')
+    const serverUrl = normalizeServerUrl(input.serverUrl)
+    const username = checkUsername(input.username)
+    const api = new SyncApi(serverUrl)
+    const kdf = await api.prelogin(username)
+    const { authKey } = await deriveKeys(input.password, kdf)
+    // The server checks the password first, so a wrong one changes nothing here.
+    const { token, wrappedVaultKey } = await api.login(username, authKey)
+    await v.joinAccount(kdf, wrappedVaultKey, input.password)
+    v.setSync(serverUrl, username, token)
+    this.save()
+    // The vault key may have changed, so refresh the copy in the OS credential store.
+    void this.applyRememberDevice().catch(() => undefined)
+    void this.labelDevice()
+    await this.syncNow()
+  }
+
+  /**
    * The server signed this device out. Sign in again with the master password,
    * which may have been changed on another device: in that case this device
    * adopts the account's new key material and unlocks with the new password

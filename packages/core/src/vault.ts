@@ -177,6 +177,53 @@ export class Vault {
     return authKey
   }
 
+  /**
+   * Connects this vault to an existing sync account, given the account's key
+   * material and master password.
+   *
+   * If the account holds this same vault (the device was synced before), only
+   * the password wrapping is adopted. If it holds a different vault, this
+   * vault's items are re-encrypted under the account's key so they can be
+   * uploaded into it; from then on this device unlocks with the account's
+   * master password. Either way nothing is deleted locally.
+   */
+  async joinAccount(
+    kdf: KdfParams,
+    wrappedVaultKey: string,
+    password: string,
+  ): Promise<{ authKey: Uint8Array; merged: boolean }> {
+    if (this.file.sync) throw new Error('Sync is already set up')
+    const { wrapKey, authKey } = await deriveKeys(password, kdf)
+    let accountKey: Uint8Array
+    try {
+      accountKey = open(wrapKey, wrappedVaultKey, VAULT_KEY_AAD)
+    } catch {
+      throw new WrongPasswordError()
+    }
+    const same =
+      accountKey.length === this.vaultKey.length && accountKey.every((b, i) => b === this.vaultKey[i])
+    if (same) {
+      accountKey.fill(0)
+    } else {
+      this.vaultKey.fill(0)
+      this.vaultKey = accountKey
+      this.file.keyCheck = seal(accountKey, utf8(KEY_CHECK), KEY_CHECK_AAD)
+      // Every item gets a fresh ciphertext under the new key; old tombstones
+      // mean nothing to the account being joined.
+      this.file.items = {}
+      for (const item of this.cache.values()) {
+        this.file.items[item.id] = {
+          blob: this.sealPayload(item.id, item),
+          seq: 0,
+          dirty: true,
+          deleted: false,
+        }
+      }
+    }
+    this.commitRekey(kdf, wrappedVaultKey)
+    return { authKey, merged: !same }
+  }
+
   get kdf(): KdfParams {
     return this.file.kdf
   }

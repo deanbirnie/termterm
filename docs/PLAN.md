@@ -55,7 +55,7 @@ Decisions worth knowing before changing things:
 - [x] Desktop: SSH terminal sessions in tabs (password, key, keyboard-interactive auth)
 - [x] End-to-end smoke test driving the real app against a test SSH server
 
-Verified so far: `npm test` (20 tests) and `npm run e2e` (two app instances:
+Verified so far: `npm test` (23 tests) and `npm run e2e` (two app instances:
 create vault, generate key, save host, register sync, password and public-key
 logins, second-device sign-in, edit propagation, master password change across both
 devices, remote sign-out, lock/unlock with sessions surviving, launching
@@ -67,8 +67,9 @@ without Wine); check that run's result before relying on it.
 
 Known gaps inside phase 1 scope:
 
-- An existing local vault cannot join an existing sync account (only a fresh
-  device can sign in). Merging two vaults needs a re-key step.
+- Signing an open vault in to an existing account (`Vault.joinAccount`) keeps
+  local items, but items deleted on that device while sync was off come back
+  from the account, because tombstones are not kept without sync.
 - If the app dies between the server accepting a password change and the local
   vault file being rewritten, this device still unlocks with the old password
   while the account uses the new one. Recovery path: none yet (needs a retry

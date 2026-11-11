@@ -179,6 +179,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 
 .form-card { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 4px; }
 .form-card > .muted { margin-bottom: 12px; }
+.form-card > .segmented { margin: 0 0 12px; }
 .note, .warning { display: flex; gap: 10px; margin-top: 14px; color: var(--text-muted); font-size: 13px; }
 .note svg, .warning svg { flex: none; margin-top: 2px; }
 .note svg { color: var(--accent); }

@@ -179,6 +179,11 @@ export interface TermtermApi {
   deleteItem(id: string): Promise<void>
 
   syncRegister(input: AccountInput): Promise<void>
+  /**
+   * Connects the open vault to an account that already exists, for example
+   * after sync was turned off. Items on this device are kept and merged in.
+   */
+  syncSignIn(input: AccountInput): Promise<void>
   syncReauth(password: string): Promise<void>
   syncNow(): Promise<void>
   syncDisconnect(): Promise<void>
