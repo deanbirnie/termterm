@@ -102,8 +102,9 @@ is enough for most work. Building the APK needs JDK 21 and the Android SDK:
 npm run apk -w @termterm/mobile
 ```
 
-The sync server address must be `https://` on Android, which blocks plain
-HTTP from apps by default.
+The app accepts a plain `http://` sync server address, for a server on your
+home network, and warns when you enter one. Use `https://` for anything
+reachable from outside.
 
 ## Running the sync server
 

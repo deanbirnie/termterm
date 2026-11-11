@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { api } from './api'
-import { Button, ErrorText, Field, useAction } from './ui'
+import { Button, ErrorText, Field, InsecureUrlHint, useAction } from './ui'
 
 function Shell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
@@ -97,6 +97,7 @@ export function Onboarding() {
                 onChange={(e) => setServerUrl(e.target.value)}
               />
             </Field>
+            <InsecureUrlHint url={serverUrl} />
             <Field label="Username">
               <input value={username} onChange={(e) => setUsername(e.target.value)} />
             </Field>

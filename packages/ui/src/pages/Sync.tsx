@@ -2,7 +2,7 @@ import { CloudOff, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { DeviceView, SyncStatus } from '@termterm/app'
 import { api } from '../api'
-import { Button, ErrorText, Field, useAction } from '../ui'
+import { Button, ErrorText, Field, InsecureUrlHint, useAction } from '../ui'
 
 export function SyncPage({ sync }: { sync: SyncStatus }) {
   return (
@@ -40,6 +40,7 @@ function Setup() {
       <Field label="Sync server">
         <input placeholder="https://sync.example.com" value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} />
       </Field>
+      <InsecureUrlHint url={serverUrl} />
       <Field label="Username">
         <input value={username} onChange={(e) => setUsername(e.target.value)} />
       </Field>

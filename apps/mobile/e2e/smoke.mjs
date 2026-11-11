@@ -97,7 +97,13 @@ try {
   step('stored vault contains no plaintext')
 
   await nav(a, 'Sync').click()
+  // A plain-http address on the network is accepted, with a warning; a local one needs none.
+  await a.getByLabel('Sync server').fill('http://192.168.1.50:8787')
+  await a.getByText('This address uses plain HTTP.').waitFor()
+  await a.getByLabel('Sync server').fill('https://sync.example.com')
+  assert.equal(await a.getByText('This address uses plain HTTP.').count(), 0)
   await a.getByLabel('Sync server').fill(syncUrl)
+  assert.equal(await a.getByText('This address uses plain HTTP.').count(), 0)
   await a.getByLabel('Username').fill('dean')
   await a.getByLabel('Master password').fill(MASTER)
   await a.getByRole('button', { name: 'Create account and sync' }).click()
