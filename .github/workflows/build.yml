@@ -94,9 +94,17 @@ jobs:
       - run: docker build -f apps/server/Dockerfile -t termterm-server .
       - name: Start the container and check it responds
         run: |
-          docker run -d --name termterm -p 8787:8787 termterm-server
+          # A bind mount Docker creates is owned by root: the case that used to
+          # leave the server unable to open its database.
+          docker run -d --name termterm -p 8787:8787 -e PUID=99 -e PGID=100 \
+            -v "$RUNNER_TEMP/termterm-data:/data" termterm-server
           for i in $(seq 1 20); do
-            curl -fsS http://127.0.0.1:8787/v1/health && exit 0
+            if curl -fsS http://127.0.0.1:8787/v1/health; then
+              echo
+              docker exec termterm sh -c 'echo "server runs as uid $(stat -c %u /proc/1)"; test "$(stat -c %u /proc/1)" = 99'
+              test "$(stat -c %u "$RUNNER_TEMP/termterm-data/termterm.db")" = 99
+              exit 0
+            fi
             sleep 1
           done
           docker logs termterm

@@ -13,7 +13,8 @@ LABEL org.opencontainers.image.title="termterm sync server" \
 WORKDIR /app
 COPY apps/server/src ./
 RUN echo '{"type":"module"}' > package.json && mkdir /data && chown node:node /data
-USER node
+# Starts as root only long enough to take ownership of /data, then drops to
+# PUID:PGID (default 1000:1000) before serving. See src/privileges.ts.
 VOLUME /data
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \

@@ -126,6 +126,20 @@ Caddy, nginx) and use that `https://` address in the app. On Dokploy, create a
 Compose service pointing at this repository and `docker-compose.yml`, then add
 a domain for port 8787. `GET /v1/health` reports the running version.
 
+The image name is `termterm-server` (not `termterm`). The server has no web
+page of its own: to check it is up, open `http://<host>:8787/v1/health`.
+
+Running the container directly, for example from Unraid's Docker tab:
+
+```bash
+docker run -d --name termterm-sync --restart unless-stopped -p 8787:8787 -e PUID=99 -e PGID=100 -v /mnt/user/appdata/termterm-sync:/data ghcr.io/deanbirnie/termterm-server:latest
+```
+
+The container takes ownership of the mounted `/data` folder for `PUID:PGID`
+and then runs as that user, so a folder Docker created as root works without
+any manual `chown`. `99:100` is Unraid's `nobody:users`; leave both out to use
+`1000:1000`.
+
 Without Docker, for local testing:
 
 ```bash
@@ -138,6 +152,7 @@ npm run server
 | `TERMTERM_DB` | `./data/termterm.db` | SQLite database path |
 | `TERMTERM_ALLOW_REGISTRATION` | `true` | Set to `false` once your account exists |
 | `TERMTERM_TRUST_PROXY` | `false` | Use `X-Forwarded-For` for login throttling; enable only behind your own proxy |
+| `PUID` / `PGID` | `1000` / `1000` | Docker only: the user and group the server runs as, and that will own the files in `/data` |
 
 Then in the app: **Sync → Create account and sync** on the first device, and
 **I already have one** on the start screen of every other device.
