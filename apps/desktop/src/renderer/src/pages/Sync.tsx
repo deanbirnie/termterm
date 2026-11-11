@@ -95,7 +95,10 @@ function Connected({ sync }: { sync: SyncStatus }) {
             void run(() => api.syncReauth(password)).then((ok) => ok && setPassword(''))
           }}
         >
-          <Field label="Master password">
+          <Field
+            label="Master password"
+            hint="If you changed it on another device, enter the new one. This device will use it from now on."
+          >
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </Field>
           <Button variant="primary" type="submit" disabled={busy || !password}>

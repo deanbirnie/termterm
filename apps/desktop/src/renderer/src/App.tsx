@@ -23,20 +23,30 @@ export function App() {
 
   if (phase === null) return null
   if (phase === 'new') return <Onboarding />
-  if (phase === 'locked') return <Unlock />
-  return <Workspace />
+  // The workspace stays mounted while locked so open sessions survive; it is
+  // hidden and holds no vault data until the vault is unlocked again.
+  return <Workspace locked={phase === 'locked'} />
 }
 
-function Workspace() {
+function Workspace({ locked }: { locked: boolean }) {
   const [snapshot, setSnapshot] = useState<VaultSnapshot | null>(null)
   const [tabs, setTabs] = useState<SessionTab[]>([])
   const [active, setActive] = useState('vault')
   const [prompts, setPrompts] = useState<SshPrompt[]>([])
 
   useEffect(() => {
-    void api.snapshot().then(setSnapshot)
-    return api.onSnapshot(setSnapshot)
-  }, [])
+    if (locked) {
+      setSnapshot(null)
+      return
+    }
+    let current = true
+    void api.snapshot().then((s) => current && setSnapshot(s))
+    const off = api.onSnapshot(setSnapshot)
+    return () => {
+      current = false
+      off()
+    }
+  }, [locked])
 
   useEffect(() => api.onSshPrompt((p) => setPrompts((q) => [...q, p])), [])
 
@@ -57,11 +67,13 @@ function Workspace() {
     })
   }, [])
 
-  if (!snapshot) return null
-  const prompt = prompts[0]
+  const ready = !locked && snapshot !== null
+  const prompt = ready ? prompts[0] : undefined
 
   return (
-    <div className="app">
+    <>
+    {locked && <Unlock sessions={tabs.length} />}
+    <div className="app" hidden={!ready}>
       <header className="tabbar">
         <button
           className={`tab tab-vault ${active === 'vault' ? 'active' : ''}`}
@@ -107,14 +119,14 @@ function Workspace() {
 
       <main className="content">
         <div className="pane" hidden={active !== 'vault'}>
-          <VaultView snapshot={snapshot} onConnect={connect} />
+          {snapshot && <VaultView snapshot={snapshot} onConnect={connect} />}
         </div>
         {tabs.map((tab) => (
           <div key={tab.id} className="pane" hidden={active !== tab.id}>
             <TerminalTab
               tab={tab}
               active={active === tab.id}
-              snippets={snapshot.snippets}
+              snippets={snapshot?.snippets ?? []}
               onClose={() => closeTab(tab.id)}
             />
           </div>
@@ -132,5 +144,6 @@ function Workspace() {
         />
       )}
     </div>
+    </>
   )
 }

@@ -17,7 +17,7 @@ function Shell({ title, subtitle, children }: { title: string; subtitle: string;
   )
 }
 
-export function Unlock() {
+export function Unlock({ sessions = 0 }: { sessions?: number }) {
   const [password, setPassword] = useState('')
   const { busy, error, run } = useAction()
   const submit = (e: FormEvent) => {
@@ -25,7 +25,14 @@ export function Unlock() {
     void run(() => api.unlock(password))
   }
   return (
-    <Shell title="Vault locked" subtitle="Enter your master password to unlock your hosts and keys.">
+    <Shell
+      title="Vault locked"
+      subtitle={
+        sessions > 0
+          ? `Enter your master password to unlock. ${sessions} open session${sessions > 1 ? 's are' : ' is'} still running.`
+          : 'Enter your master password to unlock your hosts and keys.'
+      }
+    >
       <form onSubmit={submit}>
         <Field label="Master password">
           <input

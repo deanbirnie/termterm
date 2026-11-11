@@ -21,6 +21,7 @@ const shots = process.env.E2E_SHOTS ?? join(appDir, 'test-results')
 mkdirSync(shots, { recursive: true })
 const tmp = mkdtempSync(join(tmpdir(), 'termterm-e2e-'))
 const MASTER = 'correct horse battery'
+const NEW_MASTER = 'staple gun orchestra'
 const SSH_PASSWORD = 'ssh-secret-pw'
 
 // ---- fixtures ---------------------------------------------------------------
@@ -220,19 +221,58 @@ try {
   await a.page.locator('.card', { hasText: 'Renamed on B' }).waitFor()
   step('edit on device B synced back to device A')
 
-  // ---- a changed host key is refused --------------------------------------------
+  // ---- master password change on A propagates to B ---------------------------------
+  const nav = (page, name) => page.getByRole('navigation').getByRole('button', { name, exact: true })
+  await nav(a.page, 'Settings').click()
+  await a.page.getByLabel('Current master password').fill('not it at all')
+  await a.page.getByLabel('New master password', { exact: true }).fill(NEW_MASTER)
+  await a.page.getByLabel('Confirm new master password').fill(NEW_MASTER)
+  await a.page.getByRole('button', { name: 'Change master password' }).click()
+  await a.page.getByText('Incorrect master password').waitFor()
+  await a.page.getByLabel('Current master password').fill(MASTER)
+  await a.page.getByRole('button', { name: 'Change master password' }).click()
+  await a.page.getByText('Master password changed.').waitFor()
+  await shot(a.page, '08-settings')
+  await nav(a.page, 'Sync').click()
+  await a.page.getByRole('button', { name: 'Sync now' }).click()
+  await a.page.getByText('Up to date').waitFor()
+  step('master password changed on device A, which stays signed in')
+
+  await nav(b.page, 'Sync').click()
+  await b.page.getByRole('button', { name: 'Sync now' }).click()
+  await b.page.getByRole('button', { name: 'Sign in again' }).waitFor()
+  await b.page.getByLabel('Master password').fill(MASTER)
+  await b.page.getByRole('button', { name: 'Sign in again' }).click()
+  await b.page.getByText('Incorrect username or master password').waitFor()
+  await b.page.getByLabel('Master password').fill(NEW_MASTER)
+  await b.page.getByRole('button', { name: 'Sign in again' }).click()
+  await b.page.getByText('Up to date').waitFor()
+  await b.page.getByRole('button', { name: 'Lock vault' }).click()
+  await b.page.getByText('1 open session is still running').waitFor()
+  await b.page.getByLabel('Master password').fill(MASTER)
+  await b.page.getByRole('button', { name: 'Unlock' }).click()
+  await b.page.getByText('Incorrect master password').waitFor()
+  await b.page.getByLabel('Master password').fill(NEW_MASTER)
+  await b.page.getByRole('button', { name: 'Unlock' }).click()
+  await b.page.locator('.card', { hasText: 'Renamed on B' }).waitFor()
+  step('device B was signed out, re-authenticated and now unlocks with the new password')
+
+  // ---- locking keeps sessions alive ------------------------------------------------
+  await b.page.getByRole('tab', { name: /Test box/ }).click()
+  await b.page.keyboard.type('still here')
+  await b.page.keyboard.press('Enter')
+  await termB.getByText('you ran: still here').waitFor()
+  step('session opened before the lock is still usable after unlocking')
   await b.app.close()
+
   await a.page.getByRole('button', { name: 'Lock vault' }).click()
   await a.page.getByText('Vault locked').waitFor()
-  await a.page.getByLabel('Master password').fill('nope nope nope')
-  await a.page.getByRole('button', { name: 'Unlock' }).click()
-  await a.page.getByText('Incorrect master password').waitFor()
-  await shot(a.page, '08-locked')
-  await a.page.getByLabel('Master password').fill(MASTER)
+  await shot(a.page, '09-locked')
+  await a.page.getByLabel('Master password').fill(NEW_MASTER)
   await a.page.getByRole('button', { name: 'Unlock' }).click()
   await a.page.locator('.card', { hasText: 'Renamed on B' }).waitFor()
-  step('lock, wrong password rejected, unlock')
 
+  // ---- a changed host key is refused --------------------------------------------
   sshServer.close()
   const impostor = new Server({ hostKeys: [hostKey()] }, (c) => {
     c.on('authentication', (ctx) => { logins.push('impostor'); ctx.reject() }).on('error', () => {})
@@ -240,7 +280,7 @@ try {
   await new Promise((r) => impostor.listen(sshPort, '127.0.0.1', r))
   await a.page.locator('.card', { hasText: 'Renamed on B' }).dblclick()
   await a.page.getByRole('dialog', { name: 'Host key has changed' }).waitFor()
-  await shot(a.page, '09-host-key-changed')
+  await shot(a.page, '10-host-key-changed')
   await a.page.getByRole('button', { name: 'Disconnect' }).click()
   await a.page.getByText('Disconnected: Host key mismatch').waitFor()
   assert.ok(!logins.includes('impostor'), 'credentials were offered to an untrusted host')

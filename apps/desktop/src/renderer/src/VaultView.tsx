@@ -1,9 +1,10 @@
-import { Braces, Fingerprint, KeyRound, RefreshCw, Server } from 'lucide-react'
+import { Braces, Fingerprint, KeyRound, RefreshCw, Server, Settings } from 'lucide-react'
 import { useState } from 'react'
 import type { ConnectTarget, VaultSnapshot } from '../../shared/api'
 import { HostsPage } from './pages/Hosts'
 import { KeychainPage } from './pages/Keychain'
 import { KnownHostsPage } from './pages/KnownHosts'
+import { SettingsPage } from './pages/Settings'
 import { SnippetsPage } from './pages/Snippets'
 import { SyncPage } from './pages/Sync'
 
@@ -13,6 +14,7 @@ const PAGES = [
   { id: 'snippets', label: 'Snippets', icon: Braces },
   { id: 'known', label: 'Known Hosts', icon: Fingerprint },
   { id: 'sync', label: 'Sync', icon: RefreshCw },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ] as const
 
 const SYNC_LABEL = { off: 'not set up', ok: 'up to date', busy: 'syncing', error: 'needs attention' }
@@ -53,6 +55,7 @@ export function VaultView({
         {page === 'snippets' && <SnippetsPage snapshot={snapshot} />}
         {page === 'known' && <KnownHostsPage snapshot={snapshot} />}
         {page === 'sync' && <SyncPage sync={sync} />}
+        {page === 'settings' && <SettingsPage synced={sync.configured} />}
       </section>
     </div>
   )

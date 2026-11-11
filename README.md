@@ -126,7 +126,12 @@ Then in the app: **Sync → Create account and sync** on the first device, and
   changed key is flagged on all your devices. Credentials are not sent until
   the host key is accepted.
 
-Known limits, also listed in the plan: there is no master password change or
-recovery yet, a malicious sync server could withhold updates or serve an older
-copy of an item (it cannot read or forge one), and the vault stays unlocked in
-memory until you lock it or quit.
+- The vault locks itself after 15 minutes without input (configurable) and
+  when the computer sleeps or its screen is locked. Open SSH sessions keep
+  running behind the lock screen.
+- Changing the master password re-wraps the vault key and signs your other
+  devices out of sync until they enter the new password.
+
+Known limits, also listed in the plan: a forgotten master password cannot be
+recovered, and a malicious sync server could withhold updates or serve an older
+copy of an item (it cannot read or forge one).

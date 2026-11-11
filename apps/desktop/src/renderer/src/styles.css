@@ -59,6 +59,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .muted { color: var(--text-muted); }
 .pad { padding: 16px 0; }
 .error { color: var(--danger); margin: 4px 0; }
+.success { color: var(--accent-strong); margin: 4px 0; }
+.section-title.spaced { margin-top: 26px; }
 .link { color: var(--accent-strong); text-decoration: underline; padding: 0; }
 
 /* ---- buttons ---- */

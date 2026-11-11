@@ -111,6 +111,24 @@ export class VaultService {
     this.onPhase('locked')
   }
 
+  async changePassword(current: string, next: string): Promise<void> {
+    const v = this.v
+    this.checkNewPassword(next)
+    if (next === current) throw new Error('The new password is the same as the current one')
+    const rekey = await v.prepareRekey(current, next)
+    if (v.sync) {
+      // Server first: if this fails nothing has changed anywhere.
+      await new SyncApi(v.sync.serverUrl, v.syncToken()).changePassword(
+        rekey.currentAuthKey,
+        rekey.newAuthKey,
+        rekey.kdf,
+        rekey.wrappedVaultKey,
+      )
+    }
+    v.commitRekey(rekey.kdf, rekey.wrappedVaultKey)
+    this.save()
+  }
+
   private adopt(vault: Vault): void {
     this.vault = vault
     vault.onChange(() => this.changed())
@@ -309,13 +327,26 @@ export class VaultService {
     await this.syncNow()
   }
 
-  /** The server signed this device out; prove the master password again. */
+  /**
+   * The server signed this device out. Sign in again with the master password,
+   * which may have been changed on another device: in that case this device
+   * adopts the account's new key material and unlocks with the new password
+   * from now on.
+   */
   async syncReauth(password: string): Promise<void> {
     const v = this.v
     if (!v.sync) throw new Error('Sync is not set up')
-    const authKey = await v.authKeyFor(password)
-    const { token } = await new SyncApi(v.sync.serverUrl).login(v.sync.username, authKey)
-    v.setSyncToken(token)
+    const api = new SyncApi(v.sync.serverUrl)
+    const kdf = await api.prelogin(v.sync.username)
+    if (kdf.salt === v.kdf.salt) {
+      const { token } = await api.login(v.sync.username, await v.authKeyFor(password))
+      v.setSyncToken(token)
+    } else {
+      const { authKey } = await deriveKeys(password, kdf)
+      const { token, wrappedVaultKey } = await api.login(v.sync.username, authKey)
+      await v.adoptAccountKeys(kdf, wrappedVaultKey, password)
+      v.setSyncToken(token)
+    }
     this.syncState = { state: 'idle', needsSignIn: false }
     await this.syncNow()
   }
