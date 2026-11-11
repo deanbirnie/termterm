@@ -43,11 +43,11 @@ Decisions worth knowing before changing things:
 - [x] Sync client: pull, push, conflict resolution
 - [x] Sync server: register, prelogin, login, logout, pull, push, throttling, limits
 - [x] Unit + integration tests (`npm test`)
-- [ ] Desktop: onboarding (create vault / sign in on a new device), unlock, lock
-- [ ] Desktop: hosts, keychain (generate + import), known hosts, snippets UI
-- [ ] Desktop: sync settings (create account, sign in, status, sync now, disconnect), auto-sync
-- [ ] Desktop: SSH terminal sessions in tabs (password, key, keyboard-interactive auth)
-- [ ] End-to-end smoke test driving the real app against a test SSH server
+- [x] Desktop: onboarding (create vault / sign in on a new device), unlock, lock
+- [x] Desktop: hosts, keychain (generate + import), known hosts, snippets UI
+- [x] Desktop: sync settings (create account, sign in, status, sync now, disconnect), auto-sync
+- [x] Desktop: SSH terminal sessions in tabs (password, key, keyboard-interactive auth)
+- [x] End-to-end smoke test driving the real app against a test SSH server
 
 ## Phase 2 — Vault hardening and account management
 

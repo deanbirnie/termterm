@@ -35,11 +35,10 @@ const ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/
 
 class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
+  readonly status: number
+  constructor(status: number, message: string) {
     super(message)
+    this.status = status
   }
 }
 

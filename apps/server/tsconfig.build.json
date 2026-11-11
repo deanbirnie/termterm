@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmit": false,
+    "erasableSyntaxOnly": true,
     "outDir": "dist",
     "rootDir": "src",
     "rewriteRelativeImportExtensions": true

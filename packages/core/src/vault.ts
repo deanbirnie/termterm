@@ -206,6 +206,13 @@ export class Vault {
     this.emit()
   }
 
+  /** Replaces the session token after signing in again; keeps cursor and item state. */
+  setSyncToken(token: string): void {
+    if (!this.file.sync) throw new Error('Sync is not configured')
+    this.file.sync.tokenBlob = seal(this.vaultKey, utf8(token), 'termterm:token')
+    this.emit()
+  }
+
   clearSync(): void {
     this.file.sync = null
     for (const [id, stored] of Object.entries(this.file.items)) {
