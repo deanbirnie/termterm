@@ -1,0 +1,189 @@
+name: Release
+
+# Publishes one version everywhere at once: the desktop installers on a GitHub
+# release (which the app's updater reads) and the sync server image on ghcr.io.
+#
+# Start it either way:
+#   - Actions -> Release -> Run workflow, and type a version such as 0.2.0
+#   - or push a tag:  git tag v0.2.0 && git push origin v0.2.0
+#
+# The version comes from that input or tag, never from package.json, so the
+# app, the release and the image tags cannot disagree.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, without the "v" (for example 0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION#v}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::\"$version\" is not a version like 1.2.3 or 1.2.3-beta.1"
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && \
+             git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version has already been released. Choose a higher version."
+            exit 1
+          fi
+          case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version (prerelease: $prerelease)" >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - run: npm run typecheck
+      - run: npm test
+      - run: xvfb-run -a npm run e2e
+
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    needs: [version, test]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            files: |
+              apps/desktop/release/*.exe
+              apps/desktop/release/*.exe.blockmap
+              apps/desktop/release/latest.yml
+          - name: Linux
+            os: ubuntu-latest
+            files: |
+              apps/desktop/release/*.AppImage
+              apps/desktop/release/latest-linux.yml
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - name: Stamp version ${{ needs.version.outputs.version }}
+        run: >
+          npm version "${{ needs.version.outputs.version }}"
+          --workspaces --include-workspace-root
+          --no-git-tag-version --allow-same-version
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  image:
+    name: Sync server image
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tags
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/termterm-server"
+          tags="$image:$VERSION"
+          # Moving tags only follow stable releases.
+          if [ "$PRERELEASE" = "false" ]; then
+            tags="$tags,$image:${VERSION%.*},$image:latest"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ needs.version.outputs.version }}
+          tags: ${{ steps.tags.outputs.tags }}
+
+  publish:
+    name: Publish release
+    needs: [version, desktop, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist
+      # Created in one step, with every file attached, so the updater never
+      # sees a release that is only half uploaded.
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: termterm ${{ needs.version.outputs.version }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*
+          body: |
+            **Desktop app**
+            - Windows: run `termterm-${{ needs.version.outputs.version }}-setup.exe`. The installer is not code-signed, so choose *More info → Run anyway* if SmartScreen appears. Installed copies update themselves from Settings → About.
+            - Linux: `termterm-${{ needs.version.outputs.version }}-x86_64.AppImage`.
+
+            **Sync server**
+            ```
+            docker pull ghcr.io/${{ github.repository_owner }}/termterm-server:${{ needs.version.outputs.version }}
+            ```

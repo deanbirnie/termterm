@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Settings } from '../shared/api'
 
-const DEFAULTS: Settings = { autoLockMinutes: 15, rememberDevice: false }
+const DEFAULTS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: true }
 
 /** Device-local preferences. Nothing secret lives here, so it is plain JSON outside the vault. */
 export class SettingsStore {
@@ -22,8 +22,9 @@ export class SettingsStore {
     return { ...this.current }
   }
 
+  /** Applies a partial change; fields not mentioned keep their saved value. */
   save(input: unknown): Settings {
-    this.current = this.clean(input)
+    this.current = this.clean({ ...this.current, ...(input as object) })
     mkdirSync(dirname(this.path), { recursive: true })
     writeFileSync(this.path, JSON.stringify(this.current, null, 2))
     return this.get()
@@ -34,6 +35,7 @@ export class SettingsStore {
     const minutes = Number(raw?.autoLockMinutes)
     return {
       rememberDevice: raw?.rememberDevice === true,
+      autoCheckUpdates: raw?.autoCheckUpdates !== false,
       autoLockMinutes:
         Number.isFinite(minutes) && minutes >= 0 && minutes <= 24 * 60
           ? Math.floor(minutes)

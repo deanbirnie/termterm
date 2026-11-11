@@ -11,10 +11,11 @@ const { server } = createApp({
   dbPath,
   allowRegistration: process.env.TERMTERM_ALLOW_REGISTRATION !== 'false',
   trustProxy: process.env.TERMTERM_TRUST_PROXY === 'true',
+  version: process.env.TERMTERM_VERSION,
 })
 
 server.listen(port, host, () => {
-  console.log(`termterm sync server listening on http://${host}:${port} (db: ${dbPath})`)
+  console.log(`termterm sync server ${process.env.TERMTERM_VERSION ?? 'dev'} listening on http://${host}:${port} (db: ${dbPath})`)
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

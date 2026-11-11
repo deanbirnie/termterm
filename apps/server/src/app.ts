@@ -14,6 +14,8 @@ import { openDb } from './db.ts'
 export interface ServerOptions {
   dbPath: string
   allowRegistration?: boolean
+  /** Release version reported by the health endpoint. */
+  version?: string
   /** Honour X-Forwarded-For (set only when behind a reverse proxy you control). */
   trustProxy?: boolean
 }
@@ -64,6 +66,7 @@ interface UserRow {
 export function createApp(options: ServerOptions): { server: Server; db: DatabaseSync } {
   const db = openDb(options.dbPath)
   const allowRegistration = options.allowRegistration ?? true
+  const version = options.version ?? 'dev'
   const serverSecret = Buffer.from(
     (db.prepare('SELECT value FROM meta WHERE key = ?').get('server_secret') as { value: Uint8Array })
       .value,
@@ -216,7 +219,7 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
   type Handler = (req: IncomingMessage, url: URL) => Promise<unknown> | unknown
 
   const routes: Record<string, Handler> = {
-    'GET /v1/health': () => ({ ok: true, registration: allowRegistration }),
+    'GET /v1/health': () => ({ ok: true, version, registration: allowRegistration }),
 
     // Returns the KDF parameters a client needs to derive its auth key. Unknown
     // usernames get stable fake parameters so accounts cannot be enumerated.

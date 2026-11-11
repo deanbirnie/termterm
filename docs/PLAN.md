@@ -7,6 +7,9 @@ and the decisions already made so work can resume in a fresh session.
 
 **Update the status boxes in this file whenever a phase item lands.**
 
+Routine upkeep (dependency, security and deprecation checks) has its own
+procedure in [MAINTENANCE.md](MAINTENANCE.md).
+
 ## Architecture (decided)
 
 | Piece | Location | Stack |
@@ -104,9 +107,11 @@ Known gaps inside phase 1 scope:
 
 ## Phase 4 — Distribution and more devices
 
-- [x] CI: typecheck, tests, e2e, server image, unsigned Windows installer (artifact + release on `v*` tags)
-- [ ] Code signing for the Windows installer, auto-update, macOS and Linux release builds
-- [ ] Publish the server image to a registry (ghcr.io)
+- [x] CI (`build.yml`): typecheck, tests, e2e, server image check, Windows installer artifact; pushes to `main` publish the server image as `edge`
+- [x] Releases (`release.yml`): one version from a tag or a manual run stamps the app, publishes Windows + Linux installers on a GitHub release, and pushes the multi-arch server image to ghcr.io (`X.Y.Z`, `X.Y`, `latest`)
+- [x] In-app updates with electron-updater from GitHub releases (Settings → About, plus an Update button in the top bar); version shown in the sidebar and About
+- [ ] **Run the first real release** and confirm on Windows that an installed older version updates itself. Until then the release workflow and the Windows update path are unproven (the updater is tested against a fake feed on Linux only)
+- [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
 - [ ] Mobile app (React Native or Capacitor) reusing `packages/core`
 - [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
 

@@ -11,7 +11,8 @@ host yourself.
 - **Terminal** — SSH sessions in tabs (xterm.js), password / key /
   keyboard-interactive login, host key verification, run snippets in a session.
 
-What comes next is tracked in [docs/PLAN.md](docs/PLAN.md).
+What comes next is tracked in [docs/PLAN.md](docs/PLAN.md). Keeping
+dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENANCE.md).
 
 ## Layout
 
@@ -51,46 +52,46 @@ npm run e2e
 throwaway SSH server and sync server. On Linux without a display, run it as
 `xvfb-run -a npm run e2e`.
 
-## Installing on Windows
+## Installing the app
 
-Every push builds a Windows installer in GitHub Actions:
+Download the latest version from the repository's
+[Releases](https://github.com/deanbirnie/termterm/releases/latest) page:
 
-1. Open the repository's **Actions** tab and pick the latest **Build** run.
-2. Download the **termterm-windows** artifact and unzip it.
-3. Run `termterm-<version>-setup.exe` to install, or
-   `termterm-<version>-portable.exe` to run without installing.
+- **Windows:** `termterm-<version>-setup.exe`. The installer is not
+  code-signed yet, so Windows SmartScreen shows a warning the first time:
+  choose **More info → Run anyway**. A `-portable.exe` that runs without
+  installing is there too.
+- **Linux:** `termterm-<version>-x86_64.AppImage`.
 
-Pushing a tag such as `v0.1.0` also attaches both files to a GitHub release.
+Installed copies update themselves. When a newer release exists an **Update**
+button appears in the top bar; you can also check by hand under
+**Settings → About**, which shows the version you are running. The app
+downloads the new installer only when you click, then asks to restart. The
+portable build and builds run from source do not self-update.
 
-The installer is not code-signed yet, so Windows SmartScreen shows a warning
-the first time: choose **More info → Run anyway**.
-
-To build it yourself on a Windows machine (Node 22.18+):
-
-```bash
-npm install
-```
-
-```bash
-npm run dist
-```
-
-The files land in `apps/desktop/release/`. The same command produces a DMG on
-macOS and an AppImage on Linux.
+To build installers yourself (Node 22.18+): `npm install`, then `npm run dist`.
+The files land in `apps/desktop/release/`.
 
 ## Running the sync server
 
-With Docker, from the repository root:
+The server is published as a Docker image for amd64 and arm64:
 
 ```bash
-docker compose up -d --build
+docker pull ghcr.io/deanbirnie/termterm-server:latest
 ```
 
-This starts the server on `127.0.0.1:8787` with its database in a named
-volume. Put a reverse proxy that terminates TLS in front of it (Traefik,
+| Tag | What it tracks |
+|---|---|
+| `latest` | the newest stable release |
+| `0.2`, `0.2.0` | a release line, or one exact release |
+| `edge` | the current `main` branch |
+
+From a checkout, `docker compose up -d` starts it on `127.0.0.1:8787` with its
+database in a named volume, and `docker compose pull && docker compose up -d`
+updates it. Put a reverse proxy that terminates TLS in front of it (Traefik,
 Caddy, nginx) and use that `https://` address in the app. On Dokploy, create a
 Compose service pointing at this repository and `docker-compose.yml`, then add
-a domain for port 8787.
+a domain for port 8787. `GET /v1/health` reports the running version.
 
 Without Docker, for local testing:
 
@@ -107,6 +108,38 @@ npm run server
 
 Then in the app: **Sync → Create account and sync** on the first device, and
 **I already have one** on the start screen of every other device.
+
+## Releasing
+
+One version number covers the app, the GitHub release and the server image.
+It comes from the release itself, not from `package.json` (whose `0.1.0` is
+only what source builds report).
+
+To publish a version, open **Actions → Release → Run workflow** and enter a
+version such as `0.2.0`. Pushing a tag does the same:
+
+```bash
+git tag v0.2.0
+```
+
+```bash
+git push origin v0.2.0
+```
+
+The workflow runs the tests, then:
+
+1. builds the Windows installer and Linux AppImage stamped with that version;
+2. pushes `ghcr.io/deanbirnie/termterm-server` tagged `0.2.0`, `0.2` and `latest`;
+3. creates the GitHub release `v0.2.0` with the installers and the update
+   metadata the in-app updater reads.
+
+Use [semantic versioning](https://semver.org). A version with a suffix, such as
+`0.3.0-beta.1`, is published as a pre-release: it gets its own image tag but
+does not move `latest`, and installed apps are not offered it.
+
+The first time the image is published, GitHub creates the package as private.
+To pull it without logging in, open the package on your GitHub profile →
+**Package settings → Change visibility → Public**.
 
 ## Security model
 

@@ -14,6 +14,7 @@
     "dist": "electron-vite build && electron-builder --publish never"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
@@ -64,7 +65,8 @@
     },
     "linux": {
       "target": "AppImage",
-      "category": "Development"
+      "category": "Development",
+      "artifactName": "termterm-${version}-${arch}.${ext}"
     },
     "artifactName": "termterm-${version}-${os}-${arch}.${ext}",
     "npmRebuild": false,
@@ -76,7 +78,19 @@
     "portable": {
       "artifactName": "termterm-${version}-portable.${ext}"
     },
-    "executableName": "termterm"
+    "executableName": "termterm",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "deanbirnie",
+        "repo": "termterm",
+        "releaseType": "release"
+      }
+    ]
   },
-  "author": "termterm"
+  "author": "termterm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deanbirnie/termterm.git"
+  }
 }

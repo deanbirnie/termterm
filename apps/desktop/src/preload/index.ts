@@ -55,6 +55,12 @@ const api: TermtermApi = {
   onSshData: on('ssh:data'),
   onSshStatus: on('ssh:status'),
   onSshPrompt: on('ssh:prompt'),
+  appInfo: invoke('app:info'),
+  updateState: invoke('update:state'),
+  onUpdateState: on('update:state'),
+  updateCheck: invoke('update:check'),
+  updateDownload: invoke('update:download'),
+  updateInstall: invoke('update:install'),
   clipboardWrite: send('clipboard:write'),
   clipboardRead: invoke('clipboard:read'),
 }

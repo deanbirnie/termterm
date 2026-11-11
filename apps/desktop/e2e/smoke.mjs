@@ -4,7 +4,7 @@
 //
 //   npm run e2e            (Linux without a display: xvfb-run -a npm run e2e)
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -83,13 +83,39 @@ const sync = createApp({ dbPath: ':memory:' })
 await new Promise((r) => sync.server.listen(0, '127.0.0.1', r))
 const syncUrl = `http://127.0.0.1:${sync.server.address().port}`
 
-async function launch(name) {
+// A fake release feed: version 9.9.9 with a small stand-in "installer".
+import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
+const fakeInstaller = Buffer.from('not a real installer, just bytes to download and verify')
+const feedFiles = {
+  '/latest-linux.yml': [
+    'version: 9.9.9',
+    'files:',
+    '  - url: termterm-9.9.9-x86_64.AppImage',
+    `    sha512: ${createHash('sha512').update(fakeInstaller).digest('base64')}`,
+    `    size: ${fakeInstaller.length}`,
+    'path: termterm-9.9.9-x86_64.AppImage',
+    `sha512: ${createHash('sha512').update(fakeInstaller).digest('base64')}`,
+    "releaseDate: '2026-01-01T00:00:00.000Z'",
+    '',
+  ].join('\n'),
+  '/termterm-9.9.9-x86_64.AppImage': fakeInstaller,
+}
+const feed = createServer((req, res) => {
+  const body = feedFiles[new URL(req.url, 'http://x').pathname]
+  if (!body) return res.writeHead(404).end()
+  res.writeHead(200, { 'content-length': Buffer.byteLength(body) }).end(body)
+})
+await new Promise((r) => feed.listen(0, '127.0.0.1', r))
+const feedUrl = `http://127.0.0.1:${feed.address().port}`
+
+async function launch(name, extraEnv = {}) {
   const dataDir = join(tmp, name)
   const app = await electron.launch({
     executablePath: require('electron'),
     // The basic password store stands in for a real OS keyring, which CI lacks.
     args: [appDir, '--no-sandbox', '--password-store=basic'],
-    env: { ...process.env, TERMTERM_DATA_DIR: dataDir, TERMTERM_INSECURE_KEYSTORE: '1' },
+    env: { ...process.env, TERMTERM_DATA_DIR: dataDir, TERMTERM_INSECURE_KEYSTORE: '1', ...extraEnv },
   })
   const page = await app.firstWindow()
   page.on('pageerror', (e) => { throw e })
@@ -338,10 +364,37 @@ try {
   assert.ok(existsSync(join(a.dataDir, 'device-key.bin')), 'unlock did not re-store the device key')
   step('locking forgot the stored key: the next launch needed the master password')
 
+  // ---- version display and the updater -------------------------------------------------
+  const appVersion = JSON.parse(readFileSync(join(appDir, 'package.json'), 'utf8')).version
+  // (Device A opens unlocked from here on: the stored key was restored above.)
+  // On Linux the updater replaces the AppImage it runs from, so give it one.
+  const fakeAppImage = join(tmp, 'termterm-current.AppImage')
+  writeFileSync(fakeAppImage, 'current version')
+  const u = await launch('device-a', { TERMTERM_UPDATE_FEED: feedUrl, APPIMAGE: fakeAppImage })
+  await u.page.getByText(`v${appVersion}`, { exact: true }).waitFor()
+  await nav(u.page, 'Settings').click()
+  await u.page.getByText(`${appVersion} (development build)`).waitFor()
+  await u.page.getByRole('button', { name: 'Check for updates' }).click()
+  await u.page.getByText('Version 9.9.9 is available.').waitFor()
+  await shot(u.page, '12-update-available')
+  await u.page.getByRole('banner').getByRole('button', { name: 'Update to 9.9.9' }).click()
+  await u.page.getByText('Version 9.9.9 is downloaded.').waitFor()
+  await u.page.getByRole('banner').getByRole('button', { name: 'Restart to update' }).waitFor()
+  await u.app.close()
+  step('updater found a newer release and downloaded it, ready to install on restart')
+
+  const noFeed = await launch('device-a')
+  await nav(noFeed.page, 'Settings').click()
+  await noFeed.page.getByText('Updates are only available in installed builds.').waitFor()
+  assert.equal(await noFeed.page.getByRole('button', { name: 'Check for updates' }).count(), 0)
+  await noFeed.app.close()
+  step('a build run from source reports that it cannot update itself')
+
   impostor.close()
   console.log('\nE2E smoke test passed')
 } finally {
   sync.server.close()
+  feed.close()
   sshServer.close()
   rmSync(tmp, { recursive: true, force: true })
 }

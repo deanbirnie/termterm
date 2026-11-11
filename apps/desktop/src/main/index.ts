@@ -4,6 +4,7 @@ import type { ConnectTarget, Settings } from '../shared/api'
 import { DeviceKeyStore } from './device-key'
 import { SettingsStore } from './settings'
 import { SshManager } from './ssh'
+import { Updater } from './updater'
 import { VaultService } from './vault-service'
 
 if (process.env.TERMTERM_DATA_DIR) app.setPath('userData', process.env.TERMTERM_DATA_DIR)
@@ -70,6 +71,8 @@ if (!app.requestSingleInstanceLock()) {
     prompt: (prompt) => emit('ssh:prompt', prompt),
   })
 
+  const updater = new Updater((state) => emit('update:state', state))
+
   /** Only our own top-level page may talk to the main process. */
   const trusted = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) =>
     !!win && e.sender === win.webContents && e.senderFrame === win.webContents.mainFrame
@@ -100,7 +103,7 @@ if (!app.requestSingleInstanceLock()) {
     vault.changePassword(current, next),
   )
   handle('settings:get', () => settings.get())
-  handle('settings:save', async (input: Settings) => {
+  handle('settings:save', async (input: Partial<Settings>) => {
     if (input?.rememberDevice && !(await deviceKey.available())) {
       throw new Error('No secure credential store is available on this device')
     }
@@ -125,6 +128,15 @@ if (!app.requestSingleInstanceLock()) {
   handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) =>
     ssh.connect(String(id), target, Number(cols) || 80, Number(rows) || 24),
   )
+  handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }))
+  handle('update:state', () => updater.get())
+  handle('update:check', () => updater.check())
+  handle('update:download', () => updater.download())
+  handle('update:install', () => {
+    ssh.closeAll()
+    vault.lock({ forget: false })
+    updater.install()
+  })
   handle('clipboard:read', () => clipboard.readText())
   listen('ssh:write', (id: string, data: string) => ssh.write(id, String(data)))
   listen('ssh:resize', (id: string, cols: number, rows: number) => {
@@ -153,6 +165,13 @@ if (!app.requestSingleInstanceLock()) {
         vault.lock()
       }
     }, 15_000).unref()
+
+    // The background check must not disturb anything the user already started.
+    if (settings.get().autoCheckUpdates) {
+      setTimeout(() => {
+        if (updater.get().status === 'idle') void updater.check()
+      }, 5_000).unref()
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
