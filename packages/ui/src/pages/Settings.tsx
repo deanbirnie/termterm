@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import type { Settings } from '../../../shared/api'
+import type { Settings } from '@termterm/app'
 import { api } from '../api'
 import { AboutCard } from '../Update'
 import { Button, ErrorText, Field, useAction } from '../ui'

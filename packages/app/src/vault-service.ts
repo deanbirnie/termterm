@@ -1,6 +1,3 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { hostname } from 'node:os'
-import { dirname } from 'node:path'
 import {
   SyncApi,
   SyncError,
@@ -24,9 +21,9 @@ import type {
   KeyImportInput,
   SyncStatus,
   VaultSnapshot,
-} from '../shared/api'
-import type { DeviceKeyStore } from './device-key'
-import { fingerprintOfPublicLine, generateKey, importKey } from './keys'
+} from './contract.ts'
+import { fingerprintOfPublicLine } from './fingerprint.ts'
+import type { Platform } from './platform.ts'
 
 const SYNC_DEBOUNCE_MS = 1500
 const SYNC_INTERVAL_MS = 60_000
@@ -48,8 +45,9 @@ function checkUsername(username: string): string {
 }
 
 /**
- * Owns the vault file and the unlocked vault. Everything that touches secrets
- * lives in the main process behind this class.
+ * Owns the vault file and the unlocked vault: unlocking, editing, saving and
+ * syncing. It is the same on every platform; what differs (storage, the OS
+ * credential store, SSH key handling) is supplied as a `Platform`.
  */
 export class VaultService {
   private vault: Vault | null = null
@@ -59,33 +57,62 @@ export class VaultService {
   }
   private syncRunning: Promise<void> | null = null
   private syncAgain = false
-  private syncTimer: NodeJS.Timeout | null = null
-  private interval: NodeJS.Timeout | null = null
+  private syncTimer: ReturnType<typeof setTimeout> | null = null
+  private interval: ReturnType<typeof setTimeout> | null = null
   private notifyQueued = false
 
+  /** Whether a vault file exists on this device; known once `ready` resolves. */
+  private exists = false
+  private readonly ready: Promise<void>
+  /** Writes are queued so a slow one can never be overtaken by an older copy. */
+  private writes: Promise<void> = Promise.resolve()
+
   constructor(
-    private readonly path: string,
+    private readonly platform: Platform,
     private readonly onSnapshot: (snapshot: VaultSnapshot) => void,
     private readonly onPhase: (phase: AppPhase) => void,
-    private readonly deviceKey: DeviceKeyStore,
-    private readonly rememberDevice: () => boolean,
-  ) {}
+  ) {
+    this.ready = platform.storage.read().then((data) => {
+      this.exists = data !== null
+    })
+  }
 
-  phase(): AppPhase {
+  private get deviceKey() {
+    return this.platform.deviceKey
+  }
+
+  async phase(): Promise<AppPhase> {
     if (this.vault) return 'unlocked'
-    return existsSync(this.path) ? 'locked' : 'new'
+    await this.ready
+    return this.vault ? 'unlocked' : this.exists ? 'locked' : 'new'
+  }
+
+  /** True once the vault is unlocked. */
+  get unlocked(): boolean {
+    return this.vault !== null
+  }
+
+  private async assertNoVault(): Promise<void> {
+    await this.ready
+    if (this.exists) throw new Error('A vault already exists on this device')
+  }
+
+  private async readFile(): Promise<VaultFile> {
+    const data = await this.platform.storage.read()
+    if (data === null) throw new Error('There is no vault on this device')
+    return JSON.parse(data) as VaultFile
   }
 
   // ---- lifecycle -------------------------------------------------------------
 
   async create(password: string): Promise<void> {
-    if (existsSync(this.path)) throw new Error('A vault already exists on this device')
+    await this.assertNoVault()
     this.checkNewPassword(password)
     this.adopt(await Vault.create(password))
   }
 
   async signIn(input: AccountInput): Promise<void> {
-    if (existsSync(this.path)) throw new Error('A vault already exists on this device')
+    await this.assertNoVault()
     const serverUrl = normalizeServerUrl(input.serverUrl)
     const username = checkUsername(input.username)
     const api = new SyncApi(serverUrl)
@@ -101,8 +128,8 @@ export class VaultService {
 
   async unlock(password: string): Promise<void> {
     if (this.vault) return
-    const file = JSON.parse(readFileSync(this.path, 'utf8')) as VaultFile
-    this.adopt(await Vault.unlock(file, password))
+    const vault = await Vault.unlock(await this.readFile(), password)
+    if (!this.vault) this.adopt(vault)
   }
 
   /**
@@ -110,14 +137,15 @@ export class VaultService {
    * if the user turned that on. Falls back to the password screen on any doubt.
    */
   async tryDeviceUnlock(): Promise<void> {
-    if (this.vault || !existsSync(this.path) || !this.rememberDevice()) return
+    await this.ready
+    if (this.vault || !this.exists || !this.platform.rememberDevice()) return
     const key = await this.deviceKey.load()
     if (!key || this.vault) return
     try {
-      const file = JSON.parse(readFileSync(this.path, 'utf8')) as VaultFile
-      this.adopt(Vault.unlockWithKey(file, key))
+      const vault = Vault.unlockWithKey(await this.readFile(), key)
+      if (!this.vault) this.adopt(vault)
     } catch {
-      this.deviceKey.clear()
+      await this.deviceKey.clear()
     } finally {
       key.fill(0)
     }
@@ -125,14 +153,17 @@ export class VaultService {
 
   /** Brings the stored device key in line with the setting. */
   async applyRememberDevice(): Promise<void> {
-    if (!this.rememberDevice()) return this.deviceKey.clear()
+    if (!this.platform.rememberDevice()) {
+      await this.deviceKey.clear()
+      return
+    }
     const vault = this.vault
     if (!vault) return
     const key = vault.exportKey()
     try {
       await this.deviceKey.save(key)
       // Locked while the key was being stored: the lock wins.
-      if (this.vault !== vault) this.deviceKey.clear()
+      if (this.vault !== vault) await this.deviceKey.clear()
     } finally {
       key.fill(0)
     }
@@ -144,7 +175,7 @@ export class VaultService {
    * (`forget: false`) keeps it for the next launch.
    */
   lock({ forget = true } = {}): void {
-    if (forget) this.deviceKey.clear()
+    if (forget) void this.deviceKey.clear()
     if (!this.vault) return
     this.save()
     if (this.syncTimer) clearTimeout(this.syncTimer)
@@ -196,13 +227,22 @@ export class VaultService {
     return this.vault
   }
 
-  /** Write-then-rename so a crash mid-write cannot corrupt the vault. */
+  /**
+   * Queues the current (encrypted) vault to be written. The copy is taken now,
+   * so it is correct even if the vault is locked before the write happens.
+   */
   private save(): void {
     if (!this.vault) return
-    mkdirSync(dirname(this.path), { recursive: true })
-    const tmp = `${this.path}.tmp`
-    writeFileSync(tmp, JSON.stringify(this.vault.toFile()), { mode: 0o600 })
-    renameSync(tmp, this.path)
+    const data = JSON.stringify(this.vault.toFile())
+    this.exists = true
+    this.writes = this.writes
+      .then(() => this.platform.storage.write(data))
+      .catch((err: unknown) => console.error('Could not save the vault:', err))
+  }
+
+  /** Resolves when every queued write has reached storage. Await before quitting. */
+  flush(): Promise<void> {
+    return this.writes
   }
 
   private changed(): void {
@@ -320,15 +360,17 @@ export class VaultService {
     return this.v.put('host', data, id ?? undefined).id
   }
 
-  generateKey(label: string, type: 'ed25519' | 'rsa'): string {
+  async generateKey(label: string, type: 'ed25519' | 'rsa'): Promise<string> {
     if (type !== 'ed25519' && type !== 'rsa') throw new Error('Unsupported key type')
-    return this.v.put('key', generateKey(required(label, 'Label', 128), type)).id
+    const key = await this.platform.keys.generate(required(label, 'Label', 128), type)
+    return this.v.put('key', key).id
   }
 
-  importKey(input: KeyImportInput): string {
+  async importKey(input: KeyImportInput): Promise<string> {
     const label = required(input.label, 'Label', 128)
     const privateKey = required(input.privateKey, 'Private key', 32 * 1024)
-    return this.v.put('key', importKey(label, privateKey, input.passphrase)).id
+    const key = await this.platform.keys.import(label, privateKey, input.passphrase)
+    return this.v.put('key', key).id
   }
 
   renameKey(id: string, label: string): void {
@@ -405,7 +447,7 @@ export class VaultService {
     const v = this.vault
     if (!v?.sync) return
     await new SyncApi(v.sync.serverUrl, v.syncToken())
-      .labelSession(v.sealText(hostname().slice(0, 64) || 'Unnamed device', 'device'))
+      .labelSession(v.sealText(this.platform.deviceName().slice(0, 64) || 'Unnamed device', 'device'))
       .catch(() => undefined) // cosmetic; the device list shows "Unnamed device"
   }
 

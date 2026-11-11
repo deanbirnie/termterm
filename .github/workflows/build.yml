@@ -1,8 +1,9 @@
 name: Build
 
-# Checks every pull request and every push to main. Pushes to main also
-# publish the sync server image as `edge`. Versioned releases are made by
-# release.yml.
+# Checks every pull request and every push to main. Each app is built only
+# when its own code, or shared code it depends on, has changed. Pushes to main
+# that touch the server also publish its image as `edge`. Versioned releases,
+# which always build everything, are made by release.yml.
 on:
   push:
     branches: [main]
@@ -17,8 +18,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides which apps this change can affect, so the slow jobs below run only
+  # when they need to. A change to shared code (packages/, lockfile, this
+  # workflow) counts for every app. Manual runs build everything.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      desktop: ${{ steps.areas.outputs.desktop }}
+      mobile: ${{ steps.areas.outputs.mobile }}
+      server: ${{ steps.areas.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: areas
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then BASE=""; fi
+          .github/scripts/changed-areas.sh "$BASE" | tee -a "$GITHUB_OUTPUT"
+
+  # Fast checks across the whole repository: always run.
   test:
-    name: Test
+    name: Typecheck and unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +54,23 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
       - run: npm run typecheck
       - run: npm test
-      - name: End-to-end test
-        run: xvfb-run -a npm run e2e
+
+  desktop-e2e:
+    name: Desktop end-to-end test
+    needs: changes
+    # The test drives the desktop app against the sync server, so either can break it.
+    if: needs.changes.outputs.desktop == 'true' || needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - run: xvfb-run -a npm run e2e
       # Only worth keeping when something went wrong.
       - name: Upload e2e screenshots
         if: failure()
@@ -45,6 +83,8 @@ jobs:
 
   server-image:
     name: Sync server image
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,6 +125,8 @@ jobs:
 
   windows:
     name: Windows installer
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

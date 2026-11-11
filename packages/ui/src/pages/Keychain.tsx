@@ -1,6 +1,6 @@
 import { Check, Copy, KeyRound, Plus, Upload, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import type { KeyView, VaultSnapshot } from '../../../shared/api'
+import type { KeyView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { Button, Empty, ErrorText, Field, useAction } from '../ui'
 

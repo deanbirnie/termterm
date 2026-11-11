@@ -3,7 +3,12 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 
-const core = resolve(__dirname, '../../packages/core/src/index.ts')
+// Workspace packages are consumed as TypeScript source and bundled in.
+const alias = {
+  '@termterm/core': resolve(__dirname, '../../packages/core/src/index.ts'),
+  '@termterm/app': resolve(__dirname, '../../packages/app/src/index.ts'),
+  '@termterm/ui': resolve(__dirname, '../../packages/ui/src/index.tsx'),
+}
 
 const CSP = [
   "default-src 'none'",
@@ -26,13 +31,14 @@ const csp = (): Plugin => ({
 
 export default defineConfig({
   main: {
-    resolve: { alias: { '@termterm/core': core } },
+    resolve: { alias },
   },
   preload: {
     // Sandboxed preload scripts cannot require node_modules: bundle everything.
     build: { externalizeDeps: false },
   },
   renderer: {
+    resolve: { alias },
     plugins: [react(), csp()],
   },
 })

@@ -1,5 +1,5 @@
 import { Fingerprint, Trash2 } from 'lucide-react'
-import type { VaultSnapshot } from '../../../shared/api'
+import type { VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { Empty } from '../ui'
 

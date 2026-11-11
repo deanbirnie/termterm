@@ -1,6 +1,6 @@
 import { Lock, Plus, Server, Terminal as TerminalIcon, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import type { AppPhase, ConnectTarget, SshPrompt, VaultSnapshot } from '../../shared/api'
+import type { AppPhase, ConnectTarget, SshPrompt, VaultSnapshot } from '@termterm/app'
 import { api } from './api'
 import { Onboarding, Unlock } from './Auth'
 import { PromptDialog } from './Prompts'

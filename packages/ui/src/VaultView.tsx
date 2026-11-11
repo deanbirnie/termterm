@@ -1,6 +1,6 @@
 import { Braces, Fingerprint, KeyRound, RefreshCw, Server, Settings } from 'lucide-react'
 import { useState } from 'react'
-import type { ConnectTarget, VaultSnapshot } from '../../shared/api'
+import type { ConnectTarget, VaultSnapshot } from '@termterm/app'
 import { HostsPage } from './pages/Hosts'
 import { KeychainPage } from './pages/Keychain'
 import { KnownHostsPage } from './pages/KnownHosts'

@@ -1,6 +1,6 @@
 import { CloudOff, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import type { DeviceView, SyncStatus } from '../../../shared/api'
+import type { DeviceView, SyncStatus } from '@termterm/app'
 import { api } from '../api'
 import { Button, ErrorText, Field, useAction } from '../ui'
 

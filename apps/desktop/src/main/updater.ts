@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import type { UpdateState } from '../shared/api'
+import type { UpdateState } from '@termterm/app'
 
 /**
  * In-app updates from GitHub releases. electron-updater reads the release's

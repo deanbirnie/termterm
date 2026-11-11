@@ -1,6 +1,6 @@
 import { KeyRound, Plus, Server, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '../../../shared/api'
+import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { Button, Empty, ErrorText, Field, useAction } from '../ui'
 

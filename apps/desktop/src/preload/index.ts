@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { TermtermApi } from '../shared/api'
+import type { TermtermApi } from '@termterm/app'
 
 const invoke =
   (channel: string) =>

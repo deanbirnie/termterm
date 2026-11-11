@@ -1,20 +1,12 @@
-import { createHash } from 'node:crypto'
 import { utils } from 'ssh2'
+import type { KeyTools } from '@termterm/app'
 import type { KeyData } from '@termterm/core'
-
-export const fingerprintOf = (publicKeyBlob: Buffer): string =>
-  `SHA256:${createHash('sha256').update(publicKeyBlob).digest('base64').replace(/=+$/, '')}`
 
 /** Reads the algorithm name out of an SSH public key blob (length-prefixed string). */
 export function keyTypeOfBlob(blob: Buffer): string {
   if (blob.length < 4) return 'unknown'
   const len = blob.readUInt32BE(0)
   return blob.subarray(4, 4 + len).toString('ascii') || 'unknown'
-}
-
-export function fingerprintOfPublicLine(line: string): string {
-  const b64 = line.trim().split(/\s+/)[1] ?? ''
-  return fingerprintOf(Buffer.from(b64, 'base64'))
 }
 
 export function generateKey(label: string, type: 'ed25519' | 'rsa'): KeyData {
@@ -60,3 +52,6 @@ export function importKey(label: string, privateKey: string, passphrase?: string
     ...(passphrase ? { passphrase } : {}),
   }
 }
+
+/** SSH key handling for the desktop app, backed by ssh2. */
+export const keyTools: KeyTools = { generate: generateKey, import: importKey }

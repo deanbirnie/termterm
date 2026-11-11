@@ -1,11 +1,14 @@
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, Menu, app, clipboard, ipcMain, powerMonitor, shell } from 'electron'
-import type { ConnectTarget, Settings } from '../shared/api'
+import type { ConnectTarget, Settings } from '@termterm/app'
 import { DeviceKeyStore } from './device-key'
+import { keyTools } from './keys'
 import { SettingsStore } from './settings'
 import { SshManager } from './ssh'
+import { FileVaultStorage } from './storage'
 import { Updater } from './updater'
-import { VaultService } from './vault-service'
+import { VaultService } from '@termterm/app'
 
 if (process.env.TERMTERM_DATA_DIR) app.setPath('userData', process.env.TERMTERM_DATA_DIR)
 
@@ -59,11 +62,15 @@ if (!app.requestSingleInstanceLock()) {
   const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
   const deviceKey = new DeviceKeyStore(join(app.getPath('userData'), 'device-key.bin'))
   const vault = new VaultService(
-    join(app.getPath('userData'), 'vault.json'),
+    {
+      storage: new FileVaultStorage(join(app.getPath('userData'), 'vault.json')),
+      deviceKey,
+      keys: keyTools,
+      deviceName: hostname,
+      rememberDevice: () => settings.get().rememberDevice,
+    },
     (snapshot) => emit('vault:snapshot', snapshot),
     (phase) => emit('phase', phase),
-    deviceKey,
-    () => settings.get().rememberDevice,
   )
   const ssh = new SshManager(vault, {
     data: (id, data) => emit('ssh:data', id, data),
@@ -132,9 +139,10 @@ if (!app.requestSingleInstanceLock()) {
   handle('update:state', () => updater.get())
   handle('update:check', () => updater.check())
   handle('update:download', () => updater.download())
-  handle('update:install', () => {
+  handle('update:install', async () => {
     ssh.closeAll()
     vault.lock({ forget: false })
+    await vault.flush()
     updater.install()
   })
   handle('clipboard:read', () => clipboard.readText())
@@ -161,7 +169,7 @@ if (!app.requestSingleInstanceLock()) {
     powerMonitor.on('lock-screen', autoLock)
     setInterval(() => {
       const minutes = settings.get().autoLockMinutes
-      if (minutes > 0 && vault.phase() === 'unlocked' && powerMonitor.getSystemIdleTime() >= minutes * 60) {
+      if (minutes > 0 && vault.unlocked && powerMonitor.getSystemIdleTime() >= minutes * 60) {
         vault.lock()
       }
     }, 15_000).unref()
@@ -181,6 +189,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     ssh.closeAll()
     vault.lock({ forget: false })
-    app.quit()
+    // Let the last save reach the disk before the process goes away.
+    void vault.flush().finally(() => app.quit())
   })
 }

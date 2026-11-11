@@ -1,6 +1,6 @@
 import { ArrowDownCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { AppInfo, UpdateState } from '../../shared/api'
+import type { AppInfo, UpdateState } from '@termterm/app'
 import { api } from './api'
 import { Button } from './ui'
 

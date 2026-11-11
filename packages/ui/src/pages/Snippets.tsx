@@ -1,6 +1,6 @@
 import { Braces, Plus, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import type { SnippetView, VaultSnapshot } from '../../../shared/api'
+import type { SnippetView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { Button, Empty, ErrorText, Field, useAction } from '../ui'
 

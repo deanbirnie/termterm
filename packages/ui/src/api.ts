@@ -1,4 +1,4 @@
-import type { TermtermApi } from '../../shared/api'
+import type { TermtermApi } from '@termterm/app'
 
 declare global {
   interface Window {

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import type { SshPrompt, SshPromptReply } from '../../shared/api'
+import type { SshPrompt, SshPromptReply } from '@termterm/app'
 import { Button, Field, Modal } from './ui'
 
 export function PromptDialog({

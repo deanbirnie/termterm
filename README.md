@@ -19,8 +19,10 @@ dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENAN
 | Path | What |
 |---|---|
 | `packages/core` | Vault crypto, item model and sync client (portable TypeScript) |
+| `packages/app` | App logic shared by every client: the vault service and the contract between the interface and the platform |
+| `packages/ui` | The React interface, shared by desktop and mobile |
+| `apps/desktop` | Electron desktop app |
 | `apps/server` | Sync server: Node 22, built-in SQLite, no runtime dependencies |
-| `apps/desktop` | Electron + React desktop app |
 
 ## Getting started
 

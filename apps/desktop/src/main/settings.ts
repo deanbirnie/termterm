@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Settings } from '../shared/api'
+import type { Settings } from '@termterm/app'
 
 const DEFAULTS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: true }
 
