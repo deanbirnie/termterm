@@ -1,0 +1,76 @@
+name: Cleanup
+
+# Keeps the storage this repository uses from growing without limit:
+# build artifacts, workflow run logs, caches, old releases and old server
+# image versions. Runs weekly, after every release, and on demand.
+#
+# How much to keep is set in the `env` block below.
+on:
+  schedule:
+    - cron: '17 3 * * 1' # Mondays 03:17 UTC
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would be deleted
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: cleanup
+  cancel-in-progress: false
+
+env:
+  KEEP_RELEASES: 4 # GitHub releases (installers); the one marked latest is always kept
+  KEEP_IMAGE_VERSIONS: 4 # tagged server images, besides `latest` and `edge`
+  KEEP_ARTIFACTS: 3 # of each kind of build artifact (e.g. the Windows installer from CI)
+  RUN_LOG_DAYS: 30 # workflow runs and their logs
+  CACHE_IDLE_DAYS: 7 # dependency caches not used for this long
+  DRY_RUN: ${{ inputs.dry_run || false }}
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  actions-storage:
+    name: Artifacts, logs and caches
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build artifacts
+        run: .github/scripts/cleanup.sh artifacts
+      - name: Workflow runs and logs
+        run: .github/scripts/cleanup.sh runs
+      - name: Caches
+        run: .github/scripts/cleanup.sh caches
+
+  releases:
+    name: Old releases
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: .github/scripts/cleanup.sh releases
+
+  images:
+    name: Old server images
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      # Understands multi-architecture images, so removing an old version
+      # never strips the per-platform layers out from under one that is kept.
+      - uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          package: termterm-server
+          exclude-tags: latest,edge
+          keep-n-tagged: ${{ env.KEEP_IMAGE_VERSIONS }}
+          delete-untagged: true
+          dry-run: ${{ env.DRY_RUN }}
