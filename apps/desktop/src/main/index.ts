@@ -129,6 +129,7 @@ if (!app.requestSingleInstanceLock()) {
   handle('snippet:save', (id: string | null, input) => vault.saveSnippet(id, input))
   handle('item:delete', (id: string) => vault.deleteItem(id))
   handle('sync:register', (input) => vault.syncRegister(input))
+  handle('sync:signIn', (input) => vault.syncSignIn(input))
   handle('sync:reauth', (password: string) => vault.syncReauth(password))
   handle('sync:now', () => vault.syncNow())
   handle('sync:disconnect', () => vault.syncDisconnect())

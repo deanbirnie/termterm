@@ -129,6 +129,7 @@ export function createApi(): TermtermApi {
     deleteItem: async (id) => vault.deleteItem(id),
 
     syncRegister: (input) => vault.syncRegister(input),
+    syncSignIn: (input) => vault.syncSignIn(input),
     syncReauth: (password) => vault.syncReauth(password),
     syncNow: () => vault.syncNow(),
     syncDisconnect: () => vault.syncDisconnect(),

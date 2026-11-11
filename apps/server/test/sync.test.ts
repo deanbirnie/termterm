@@ -268,6 +268,74 @@ describe('accounts', () => {
     expect(health.headers.get('access-control-allow-credentials')).toBeNull()
   })
 
+  it('reconnects a device to its account after sync was turned off', async () => {
+    const a = await firstDevice('dean', 'master')
+    const kept = a.put('host', host('kept'))
+    await syncVault(a)
+    const b = await newDevice('dean', 'master')
+    await syncVault(b)
+
+    // Device A turns sync off, keeps working offline, then signs back in.
+    a.clearSync()
+    a.put('host', host('renamed-offline'), kept.id)
+    const added = a.put('host', host('added-offline'))
+    b.put('snippet', { label: 'from-b', script: 'uptime' })
+    await syncVault(b)
+
+    const api = new SyncApi(url)
+    const kdf = await api.prelogin('dean')
+    const { authKey } = await deriveKeys('master', kdf)
+    const { token, wrappedVaultKey } = await api.login('dean', authKey)
+    await expect(a.joinAccount(kdf, wrappedVaultKey, 'wrong')).rejects.toBeInstanceOf(
+      WrongPasswordError,
+    )
+    const joined = await a.joinAccount(kdf, wrappedVaultKey, 'master')
+    expect(joined.merged).toBe(false)
+    a.setSync(url, 'dean', token)
+    await syncVault(a)
+    await syncVault(b)
+
+    // No duplicates, offline work kept, and what B added arrived.
+    for (const v of [a, b]) {
+      expect(v.list('host')).toHaveLength(2)
+      expect(v.get<HostData>(kept.id)?.data.label).toBe('renamed-offline')
+      expect(v.get(added.id)).toBeDefined()
+      expect(v.list('snippet')).toHaveLength(1)
+      expect(v.dirtyItems()).toHaveLength(0)
+    }
+  })
+
+  it('merges an unrelated local vault into an existing account', async () => {
+    const account = await firstDevice('dean', 'account-pw')
+    const theirs = account.put('host', host('from-account'))
+    await syncVault(account)
+
+    // A vault created separately, with a different password and key.
+    const local = await Vault.create('local-pw')
+    const mine = local.put('host', host('from-local', 'local-secret'))
+
+    const api = new SyncApi(url)
+    const kdf = await api.prelogin('dean')
+    const { authKey } = await deriveKeys('account-pw', kdf)
+    const { token, wrappedVaultKey } = await api.login('dean', authKey)
+    const joined = await local.joinAccount(kdf, wrappedVaultKey, 'account-pw')
+    expect(joined.merged).toBe(true)
+    local.setSync(url, 'dean', token)
+    await syncVault(local)
+    await syncVault(account)
+
+    for (const v of [local, account]) {
+      expect(v.list('host')).toHaveLength(2)
+      expect(v.get<HostData>(mine.id)?.data.password).toBe('local-secret')
+      expect(v.get(theirs.id)).toBeDefined()
+    }
+    // The device now unlocks with the account's password, not its old one.
+    await expect(Vault.unlock(local.toFile(), 'local-pw')).rejects.toBeInstanceOf(WrongPasswordError)
+    const reopened = await Vault.unlock(local.toFile(), 'account-pw')
+    expect(reopened.list('host')).toHaveLength(2)
+    expect(Vault.unlockWithKey(local.toFile(), account.exportKey()).list()).toHaveLength(2)
+  })
+
   it('can disable registration', async () => {
     const closed = createApp({ dbPath: ':memory:', allowRegistration: false })
     await new Promise<void>((r) => closed.server.listen(0, '127.0.0.1', r))

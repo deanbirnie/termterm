@@ -42,6 +42,7 @@ const api: TermtermApi = {
   saveSnippet: invoke('snippet:save'),
   deleteItem: invoke('item:delete'),
   syncRegister: invoke('sync:register'),
+  syncSignIn: invoke('sync:signIn'),
   syncReauth: invoke('sync:reauth'),
   syncNow: invoke('sync:now'),
   syncDisconnect: invoke('sync:disconnect'),

@@ -23,19 +23,34 @@ export function SyncPage({ sync }: { sync: SyncStatus }) {
 }
 
 function Setup() {
+  const [mode, setMode] = useState<'create' | 'signin'>('create')
   const [serverUrl, setServerUrl] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const { busy, error, run } = useAction()
+  const { busy, error, run, setError } = useAction()
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    void run(() => api.syncRegister({ serverUrl, username, password }))
+    const input = { serverUrl, username, password }
+    void run(() => (mode === 'create' ? api.syncRegister(input) : api.syncSignIn(input)))
+  }
+  const choose = (next: 'create' | 'signin') => {
+    setMode(next)
+    setError(null)
   }
   return (
     <form className="form-card" onSubmit={submit}>
+      <div className="segmented" role="tablist">
+        <button type="button" role="tab" aria-selected={mode === 'create'} onClick={() => choose('create')}>
+          Create account
+        </button>
+        <button type="button" role="tab" aria-selected={mode === 'signin'} onClick={() => choose('signin')}>
+          Sign in to existing account
+        </button>
+      </div>
       <p className="muted">
-        Create an account on your termterm sync server to keep this vault in step across your
-        devices. On your other devices choose “I already have one” when the app first starts.
+        {mode === 'create'
+          ? 'Create an account on your termterm sync server to keep this vault in step across your devices. On a brand-new device, choose “I already have one” when the app first starts.'
+          : 'Reconnect this vault to an account you already have, for example after turning sync off. Everything on this device is kept and merged with what is in the account.'}
       </p>
       <Field label="Sync server">
         <input placeholder="https://sync.example.com" value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} />
@@ -44,12 +59,19 @@ function Setup() {
       <Field label="Username">
         <input value={username} onChange={(e) => setUsername(e.target.value)} />
       </Field>
-      <Field label="Master password" hint="Confirms it is you. It is not sent to the server.">
+      <Field
+        label="Master password"
+        hint={
+          mode === 'create'
+            ? 'Confirms it is you. It is not sent to the server.'
+            : 'The account’s master password. If this vault was started separately with a different one, this device will unlock with the account’s password from now on.'
+        }
+      >
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
       <ErrorText error={error} />
       <Button variant="primary" type="submit" disabled={busy || !serverUrl || !username || !password}>
-        {busy ? 'Setting up…' : 'Create account and sync'}
+        {busy ? 'Working…' : mode === 'create' ? 'Create account and sync' : 'Sign in and sync'}
       </Button>
     </form>
   )
