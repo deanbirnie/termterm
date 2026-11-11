@@ -87,6 +87,15 @@ export function AboutCard() {
         <dd>
           {info.version}
           {!info.packaged && ' (development build)'}
+          {' · '}
+          <a
+            className="link"
+            href={`https://github.com/deanbirnie/termterm/releases/tag/v${info.version}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Release notes
+          </a>
         </dd>
         <dt>Updates</dt>
         <dd className={state.status === 'error' ? 'error' : undefined} role="status">
