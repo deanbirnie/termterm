@@ -32,6 +32,11 @@ export function openDb(path: string): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS items_by_seq ON items (user_id, seq);
   `)
+  // Added after the first release: an encrypted, client-chosen device label.
+  const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
+  if (!sessionColumns.some((c) => c.name === 'label')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN label TEXT')
+  }
   db.prepare('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)').run(
     'server_secret',
     randomBytes(32),

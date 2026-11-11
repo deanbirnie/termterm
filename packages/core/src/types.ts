@@ -35,6 +35,8 @@ export interface VaultFile {
   format: 1
   kdf: KdfParams
   wrappedVaultKey: string
+  /** A constant sealed with the vault key, so a stored key can be validated without the password. */
+  keyCheck?: string
   items: Record<string, StoredItem>
   sync: SyncState | null
 }

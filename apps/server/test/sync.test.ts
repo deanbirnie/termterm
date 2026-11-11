@@ -227,6 +227,33 @@ describe('accounts', () => {
     )
   })
 
+  it('lists devices with encrypted names and signs one out remotely', async () => {
+    const a = await firstDevice('dean', 'master')
+    const b = await newDevice('dean', 'master')
+    const other = await firstDevice('mallory', 'pw-m')
+    const apiA = new SyncApi(url, a.syncToken())
+    const apiB = new SyncApi(url, b.syncToken())
+    await apiA.labelSession(a.sealText('Desktop', 'device'))
+    await apiB.labelSession(b.sealText('Laptop', 'device'))
+
+    const seen = await apiA.sessions()
+    expect(seen).toHaveLength(2)
+    expect(seen.filter((s) => s.current)).toHaveLength(1)
+    expect(seen.map((s) => a.openText(s.label!, 'device')).sort()).toEqual(['Desktop', 'Laptop'])
+    expect(JSON.stringify(app.db.prepare('SELECT label FROM sessions').all())).not.toContain('Laptop')
+
+    // Another account can neither see nor revoke these sessions.
+    const laptop = seen.find((s) => !s.current)!
+    const apiOther = new SyncApi(url, other.syncToken())
+    expect(await apiOther.sessions()).toHaveLength(1)
+    await expect(apiOther.revokeSession(laptop.id)).rejects.toMatchObject({ status: 404 })
+
+    await apiA.revokeSession(laptop.id)
+    await expect(syncVault(b)).rejects.toMatchObject({ status: 401 })
+    expect(await apiA.sessions()).toHaveLength(1)
+    await syncVault(a)
+  })
+
   it('can disable registration', async () => {
     const closed = createApp({ dbPath: ':memory:', allowRegistration: false })
     await new Promise<void>((r) => closed.server.listen(0, '127.0.0.1', r))

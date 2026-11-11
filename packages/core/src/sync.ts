@@ -19,6 +19,15 @@ export type PushResult =
   | { id: string; status: 'ok'; seq: number }
   | { id: string; status: 'conflict'; item: RemoteItem }
 
+export interface RemoteSession {
+  id: string
+  /** device name sealed with the vault key, or null if the device never set one */
+  label: string | null
+  createdAt: number
+  lastUsedAt: number
+  current: boolean
+}
+
 export class SyncError extends Error {
   constructor(
     message: string,
@@ -129,6 +138,19 @@ export class SyncApi {
       kdf,
       wrappedVaultKey,
     })
+  }
+
+  async sessions(): Promise<RemoteSession[]> {
+    return (await this.call<{ sessions: RemoteSession[] }>('GET', '/sessions')).sessions
+  }
+
+  /** Names the current session. The label is ciphertext to the server. */
+  labelSession(label: string): Promise<unknown> {
+    return this.call('POST', '/sessions/label', { label })
+  }
+
+  revokeSession(id: string): Promise<unknown> {
+    return this.call('POST', '/sessions/revoke', { id })
   }
 
   logout(): Promise<unknown> {

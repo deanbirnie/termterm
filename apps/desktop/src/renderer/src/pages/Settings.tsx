@@ -24,11 +24,20 @@ export function SettingsPage({ synced }: { synced: boolean }) {
 
 function AutoLock() {
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [canRemember, setCanRemember] = useState(false)
   const { error, run } = useAction()
   useEffect(() => {
     void api.settings().then(setSettings)
+    void api.deviceUnlockAvailable().then(setCanRemember)
   }, [])
   if (!settings) return null
+  // Show the change at once; fall back to what was saved if it is refused.
+  const update = (next: Settings) => {
+    setSettings(next)
+    void run(async () => setSettings(await api.saveSettings(next))).then((ok) => {
+      if (!ok) setSettings(settings)
+    })
+  }
   return (
     <div className="form-card">
       <Field
@@ -41,11 +50,7 @@ function AutoLock() {
       >
         <select
           value={settings.autoLockMinutes}
-          onChange={(e) =>
-            void run(async () =>
-              setSettings(await api.saveSettings({ ...settings, autoLockMinutes: Number(e.target.value) })),
-            )
-          }
+          onChange={(e) => update({ ...settings, autoLockMinutes: Number(e.target.value) })}
         >
           {AUTO_LOCK.map((o) => (
             <option key={o.minutes} value={o.minutes}>
@@ -54,6 +59,21 @@ function AutoLock() {
           ))}
         </select>
       </Field>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.rememberDevice}
+          disabled={!canRemember && !settings.rememberDevice}
+          aria-describedby="remember-hint"
+          onChange={(e) => update({ ...settings, rememberDevice: e.target.checked })}
+        />
+        <span>Open unlocked on this device</span>
+      </label>
+      <p className="field-hint" id="remember-hint">
+        {canRemember
+          ? 'Keeps the vault key in this computer\u2019s credential store, so the app starts without asking for the master password. Locking the vault, by hand or automatically, removes it until you next enter the password.'
+          : 'Not available: this computer has no secure credential store.'}
+      </p>
       <ErrorText error={error} />
     </div>
   )

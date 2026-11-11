@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { dirname } from 'node:path'
 import {
   SyncApi,
@@ -18,11 +19,13 @@ import {
 import type {
   AccountInput,
   AppPhase,
+  DeviceView,
   HostInput,
   KeyImportInput,
   SyncStatus,
   VaultSnapshot,
 } from '../shared/api'
+import type { DeviceKeyStore } from './device-key'
 import { fingerprintOfPublicLine, generateKey, importKey } from './keys'
 
 const SYNC_DEBOUNCE_MS = 1500
@@ -64,6 +67,8 @@ export class VaultService {
     private readonly path: string,
     private readonly onSnapshot: (snapshot: VaultSnapshot) => void,
     private readonly onPhase: (phase: AppPhase) => void,
+    private readonly deviceKey: DeviceKeyStore,
+    private readonly rememberDevice: () => boolean,
   ) {}
 
   phase(): AppPhase {
@@ -90,6 +95,7 @@ export class VaultService {
     const vault = await Vault.fromAccount(kdf, wrappedVaultKey, input.password)
     vault.setSync(serverUrl, username, token)
     this.adopt(vault)
+    void this.labelDevice()
     await this.syncNow()
   }
 
@@ -99,7 +105,46 @@ export class VaultService {
     this.adopt(await Vault.unlock(file, password))
   }
 
-  lock(): void {
+  /**
+   * Opens the vault at launch with the key kept in the OS credential store,
+   * if the user turned that on. Falls back to the password screen on any doubt.
+   */
+  async tryDeviceUnlock(): Promise<void> {
+    if (this.vault || !existsSync(this.path) || !this.rememberDevice()) return
+    const key = await this.deviceKey.load()
+    if (!key || this.vault) return
+    try {
+      const file = JSON.parse(readFileSync(this.path, 'utf8')) as VaultFile
+      this.adopt(Vault.unlockWithKey(file, key))
+    } catch {
+      this.deviceKey.clear()
+    } finally {
+      key.fill(0)
+    }
+  }
+
+  /** Brings the stored device key in line with the setting. */
+  async applyRememberDevice(): Promise<void> {
+    if (!this.rememberDevice()) return this.deviceKey.clear()
+    const vault = this.vault
+    if (!vault) return
+    const key = vault.exportKey()
+    try {
+      await this.deviceKey.save(key)
+      // Locked while the key was being stored: the lock wins.
+      if (this.vault !== vault) this.deviceKey.clear()
+    } finally {
+      key.fill(0)
+    }
+  }
+
+  /**
+   * Locks the vault. A lock the user (or auto-lock) asked for also forgets
+   * the stored device key, so restarting the app cannot undo it; quitting
+   * (`forget: false`) keeps it for the next launch.
+   */
+  lock({ forget = true } = {}): void {
+    if (forget) this.deviceKey.clear()
     if (!this.vault) return
     this.save()
     if (this.syncTimer) clearTimeout(this.syncTimer)
@@ -133,6 +178,8 @@ export class VaultService {
     this.vault = vault
     vault.onChange(() => this.changed())
     this.save()
+    // If the credential store has gone away, unlocking still works with the password.
+    void this.applyRememberDevice().catch(() => undefined)
     this.interval = setInterval(() => this.scheduleSync(0), SYNC_INTERVAL_MS)
     this.onPhase('unlocked')
     this.scheduleSync(0)
@@ -324,6 +371,7 @@ export class VaultService {
     const authKey = await v.authKeyFor(input.password)
     const token = await new SyncApi(serverUrl).register(username, v.kdf, authKey, v.wrappedVaultKey)
     v.setSync(serverUrl, username, token)
+    void this.labelDevice()
     await this.syncNow()
   }
 
@@ -348,7 +396,38 @@ export class VaultService {
       v.setSyncToken(token)
     }
     this.syncState = { state: 'idle', needsSignIn: false }
+    void this.labelDevice()
     await this.syncNow()
+  }
+
+  /** Tells the server this device's name, encrypted so only your devices can read it. */
+  private async labelDevice(): Promise<void> {
+    const v = this.vault
+    if (!v?.sync) return
+    await new SyncApi(v.sync.serverUrl, v.syncToken())
+      .labelSession(v.sealText(hostname().slice(0, 64) || 'Unnamed device', 'device'))
+      .catch(() => undefined) // cosmetic; the device list shows "Unnamed device"
+  }
+
+  async syncDevices(): Promise<DeviceView[]> {
+    const v = this.v
+    if (!v.sync) return []
+    const sessions = await new SyncApi(v.sync.serverUrl, v.syncToken()).sessions()
+    return sessions.map((s) => {
+      let name = 'Unnamed device'
+      try {
+        if (s.label) name = v.openText(s.label, 'device')
+      } catch {
+        // label from before a re-key or tampered with: keep the placeholder
+      }
+      return { id: s.id, name, createdAt: s.createdAt, lastUsedAt: s.lastUsedAt, current: s.current }
+    })
+  }
+
+  async syncRevokeDevice(id: string): Promise<void> {
+    const v = this.v
+    if (!v.sync) throw new Error('Sync is not set up')
+    await new SyncApi(v.sync.serverUrl, v.syncToken()).revokeSession(String(id))
   }
 
   async syncDisconnect(): Promise<void> {

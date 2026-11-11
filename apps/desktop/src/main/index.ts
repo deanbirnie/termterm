@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { BrowserWindow, Menu, app, clipboard, ipcMain, powerMonitor, shell } from 'electron'
-import type { ConnectTarget } from '../shared/api'
+import type { ConnectTarget, Settings } from '../shared/api'
+import { DeviceKeyStore } from './device-key'
 import { SettingsStore } from './settings'
 import { SshManager } from './ssh'
 import { VaultService } from './vault-service'
@@ -54,18 +55,20 @@ if (!app.requestSingleInstanceLock()) {
     win?.focus()
   })
 
+  const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
+  const deviceKey = new DeviceKeyStore(join(app.getPath('userData'), 'device-key.bin'))
   const vault = new VaultService(
     join(app.getPath('userData'), 'vault.json'),
     (snapshot) => emit('vault:snapshot', snapshot),
     (phase) => emit('phase', phase),
+    deviceKey,
+    () => settings.get().rememberDevice,
   )
   const ssh = new SshManager(vault, {
     data: (id, data) => emit('ssh:data', id, data),
     status: (id, status) => emit('ssh:status', id, status),
     prompt: (prompt) => emit('ssh:prompt', prompt),
   })
-
-  const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
 
   /** Only our own top-level page may talk to the main process. */
   const trusted = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) =>
@@ -97,7 +100,17 @@ if (!app.requestSingleInstanceLock()) {
     vault.changePassword(current, next),
   )
   handle('settings:get', () => settings.get())
-  handle('settings:save', (input) => settings.save(input))
+  handle('settings:save', async (input: Settings) => {
+    if (input?.rememberDevice && !(await deviceKey.available())) {
+      throw new Error('No secure credential store is available on this device')
+    }
+    const saved = settings.save(input)
+    await vault.applyRememberDevice()
+    return saved
+  })
+  handle('settings:deviceUnlockAvailable', () => deviceKey.available())
+  handle('sync:devices', () => vault.syncDevices())
+  handle('sync:revokeDevice', (id: string) => vault.syncRevokeDevice(id))
   handle('vault:snapshot', () => vault.snapshot())
   handle('host:save', (id: string | null, input) => vault.saveHost(id, input))
   handle('key:generate', (label: string, type: 'ed25519' | 'rsa') => vault.generateKey(label, type))
@@ -121,9 +134,10 @@ if (!app.requestSingleInstanceLock()) {
   listen('ssh:promptReply', (promptId: string, reply) => ssh.promptReply(promptId, reply))
   listen('clipboard:write', (text: string) => clipboard.writeText(String(text)))
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // macOS needs the default menu for standard edit shortcuts.
     if (!devUrl && process.platform !== 'darwin') Menu.setApplicationMenu(null)
+    await vault.tryDeviceUnlock()
     createWindow()
 
     // Auto-lock: after a period without keyboard or mouse input anywhere on the
@@ -147,7 +161,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     ssh.closeAll()
-    vault.lock()
+    vault.lock({ forget: false })
     app.quit()
   })
 }

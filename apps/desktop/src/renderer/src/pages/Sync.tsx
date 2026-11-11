@@ -1,6 +1,6 @@
 import { CloudOff, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
-import type { SyncStatus } from '../../../shared/api'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import type { DeviceView, SyncStatus } from '../../../shared/api'
 import { api } from '../api'
 import { Button, ErrorText, Field, useAction } from '../ui'
 
@@ -9,6 +9,7 @@ export function SyncPage({ sync }: { sync: SyncStatus }) {
     <div className="split-main narrow-page">
       <h2 className="section-title">Sync</h2>
       {sync.configured ? <Connected sync={sync} /> : <Setup />}
+      {sync.configured && !sync.needsSignIn && <Devices lastSyncAt={sync.lastSyncAt} />}
       <p className="note">
         <ShieldCheck size={16} />
         <span>
@@ -127,5 +128,55 @@ function Connected({ sync }: { sync: SyncStatus }) {
         <p className="muted">Your vault stays on this device and on the server. Other devices keep syncing.</p>
       )}
     </div>
+  )
+}
+
+function Devices({ lastSyncAt }: { lastSyncAt?: number }) {
+  const [devices, setDevices] = useState<DeviceView[] | null>(null)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const { busy, error, run } = useAction()
+
+  const load = useCallback(() => run(async () => setDevices(await api.syncDevices())), [])
+  // Refresh whenever a sync completes: that is when the list can have changed.
+  useEffect(() => {
+    void load()
+  }, [load, lastSyncAt])
+
+  if (!devices) return <ErrorText error={error} />
+  return (
+    <>
+      <h2 className="section-title spaced">Devices</h2>
+      <ul className="devices">
+        {devices.map((d) => (
+          <li key={d.id}>
+            <span className="device-text">
+              <strong>{d.name}</strong>
+              <small>
+                {d.current ? 'This device' : `Last active ${new Date(d.lastUsedAt).toLocaleString()}`}
+              </small>
+            </span>
+            {!d.current &&
+              (confirming === d.id ? (
+                <Button
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() => void run(() => api.syncRevokeDevice(d.id)).then(() => { setConfirming(null); void load() })}
+                >
+                  Confirm sign out
+                </Button>
+              ) : (
+                <Button variant="ghost" aria-label={`Sign out ${d.name}`} onClick={() => setConfirming(d.id)}>
+                  Sign out
+                </Button>
+              ))}
+          </li>
+        ))}
+      </ul>
+      <p className="field-hint">
+        Signing a device out stops it syncing. It keeps the copy of the vault it already has, so
+        also change your master password if the device is lost.
+      </p>
+      <ErrorText error={error} />
+    </>
   )
 }

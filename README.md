@@ -129,6 +129,11 @@ Then in the app: **Sync → Create account and sync** on the first device, and
 - The vault locks itself after 15 minutes without input (configurable) and
   when the computer sleeps or its screen is locked. Open SSH sessions keep
   running behind the lock screen.
+- Optionally, the vault key can be kept in the operating system's credential
+  store (DPAPI, Keychain, or the desktop keyring) so the app opens unlocked.
+  Locking the vault removes that stored key until the password is next entered.
+- The Sync page lists the devices signed in to your account and can sign any
+  of them out. Device names are encrypted too.
 - Changing the master password re-wraps the vault key and signs your other
   devices out of sync until they enter the new password.
 

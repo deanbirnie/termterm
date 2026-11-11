@@ -81,6 +81,10 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     session: db.prepare('SELECT user_id, last_used_at FROM sessions WHERE token_hash = ?'),
     touchSession: db.prepare('UPDATE sessions SET last_used_at = ? WHERE token_hash = ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
+    listSessions: db.prepare(
+      'SELECT token_hash, label, created_at, last_used_at FROM sessions WHERE user_id = ? ORDER BY last_used_at DESC',
+    ),
+    labelSession: db.prepare('UPDATE sessions SET label = ? WHERE token_hash = ?'),
     deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?'),
     updateCredentials: db.prepare(
       'UPDATE users SET kdf = ?, auth_salt = ?, auth_hash = ?, wrapped_vault_key = ? WHERE id = ?',
@@ -285,6 +289,48 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
       const newHash = await scryptAsync(newAuthKey, salt)
       q.updateCredentials.run(kdf, salt, newHash, wrappedVaultKey, user.id)
       q.deleteOtherSessions.run(user.id, tokenHash)
+      return { ok: true }
+    },
+
+    // Devices signed in to this account. A session's public id is its token
+    // hash, which identifies it without being usable as a credential.
+    'GET /v1/sessions': (req) => {
+      const { user, tokenHash } = authenticate(req)
+      const rows = q.listSessions.all(user.id) as Array<{
+        token_hash: Uint8Array
+        label: string | null
+        created_at: number
+        last_used_at: number
+      }>
+      return {
+        sessions: rows.map((r) => {
+          const hash = Buffer.from(r.token_hash)
+          return {
+            id: hash.toString('hex'),
+            label: r.label,
+            createdAt: r.created_at,
+            lastUsedAt: r.last_used_at,
+            current: hash.equals(tokenHash),
+          }
+        }),
+      }
+    },
+
+    'POST /v1/sessions/label': async (req) => {
+      const { tokenHash } = authenticate(req)
+      const label = str((await readJson(req)).label, 'label', 1024, B64_RE)
+      q.labelSession.run(label, tokenHash)
+      return { ok: true }
+    },
+
+    'POST /v1/sessions/revoke': async (req) => {
+      const { user } = authenticate(req)
+      const id = str((await readJson(req)).id, 'id', 64, /^[0-9a-f]{64}$/)
+      const target = Buffer.from(id, 'hex')
+      const session = q.session.get(target) as { user_id: number } | undefined
+      // Only your own sessions; someone else's id looks the same as a missing one.
+      if (!session || session.user_id !== user.id) throw new HttpError(404, 'Device not found')
+      q.deleteSession.run(target)
       return { ok: true }
     },
 
