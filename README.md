@@ -141,6 +141,23 @@ The first time the image is published, GitHub creates the package as private.
 To pull it without logging in, open the package on your GitHub profile →
 **Package settings → Change visibility → Public**.
 
+## Storage cleanup
+
+`.github/workflows/cleanup.yml` runs weekly and after every release, and
+removes what is no longer needed:
+
+| What | Kept |
+|---|---|
+| GitHub releases (installers) | the newest 4, and always the one marked latest; git tags are kept |
+| Server image versions | `latest`, `edge` and the newest 4 tagged versions; untagged leftovers are removed |
+| CI build artifacts | the newest 3 of each kind, and at most 7 days; release staging copies for 1 day |
+| Workflow runs and logs | 30 days |
+| Dependency caches | those used in the last 7 days; none for closed pull requests |
+
+The numbers are in the `env` block at the top of that file. To preview a run
+without deleting anything, start it from **Actions → Cleanup → Run workflow**
+with **dry run** ticked.
+
 ## Security model
 
 - The master password never leaves the device and is never stored.

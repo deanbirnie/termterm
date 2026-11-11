@@ -26,7 +26,7 @@ changing, plus a new row in the [run log](#run-log) at the bottom of this file.
 | npm packages | `package.json`, `packages/core/package.json`, `apps/server/package.json`, `apps/desktop/package.json`, one root `package-lock.json` | npm workspaces. The server has no runtime dependencies on purpose. |
 | Electron | `apps/desktop/package.json` (`electron`, pinned exactly) | Security-critical: it bundles Chromium and Node. electron-builder needs an exact version. |
 | Node.js | `engines` in `package.json`, `node-version` in `.github/workflows/*.yml`, `FROM node:…` in `apps/server/Dockerfile` | All three must agree on the major version. The server relies on type stripping and `node:sqlite`. |
-| GitHub Actions | `uses:` lines in `.github/workflows/*.yml` | Pinned by major version tag. |
+| GitHub Actions | `uses:` lines in `.github/workflows/*.yml` | Pinned by major version tag. Includes one third-party action with delete rights over the image registry (`dataaxiom/ghcr-cleanup-action` in `cleanup.yml`): review its changes before moving to a new major. |
 | Docker base image | `apps/server/Dockerfile` | Rebuilt on every release and every push to `main`. |
 | Cryptography | `packages/core/src/crypto.ts` | Argon2id parameters, HKDF, XChaCha20-Poly1305. See "Cryptography review". |
 

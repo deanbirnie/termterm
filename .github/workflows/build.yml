@@ -33,13 +33,15 @@ jobs:
       - run: npm test
       - name: End-to-end test
         run: xvfb-run -a npm run e2e
+      # Only worth keeping when something went wrong.
       - name: Upload e2e screenshots
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-screenshots
           path: apps/desktop/test-results
           if-no-files-found: ignore
+          retention-days: 7
 
   server-image:
     name: Sync server image
@@ -100,3 +102,4 @@ jobs:
           name: termterm-windows
           path: apps/desktop/release/*.exe
           if-no-files-found: error
+          retention-days: 7

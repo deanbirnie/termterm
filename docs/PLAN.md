@@ -110,6 +110,7 @@ Known gaps inside phase 1 scope:
 - [x] CI (`build.yml`): typecheck, tests, e2e, server image check, Windows installer artifact; pushes to `main` publish the server image as `edge`
 - [x] Releases (`release.yml`): one version from a tag or a manual run stamps the app, publishes Windows + Linux installers on a GitHub release, and pushes the multi-arch server image to ghcr.io (`X.Y.Z`, `X.Y`, `latest`)
 - [x] In-app updates with electron-updater from GitHub releases (Settings → About, plus an Update button in the top bar); version shown in the sidebar and About
+- [x] Storage cleanup (`cleanup.yml` + `.github/scripts/cleanup.sh`): prunes artifacts, run logs, caches, old releases and old image versions. The script's selection logic was tested against sample data; the workflow itself and the image cleanup action have not yet run for real
 - [ ] **Run the first real release** and confirm on Windows that an installed older version updates itself. Until then the release workflow and the Windows update path are unproven (the updater is tested against a fake feed on Linux only)
 - [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
 - [ ] Mobile app (React Native or Capacitor) reusing `packages/core`
