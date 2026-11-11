@@ -232,3 +232,38 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   .sidebar-version { display: none; }
   .panel { width: 300px; }
 }
+
+/* ---- phones ---- */
+@media (max-width: 640px) {
+  body { font-size: 15px; }
+  input, select, textarea { font-size: 16px; padding: 10px 12px; } /* 16px stops mobile browsers zooming on focus */
+  .btn { padding: 10px 16px; }
+  .icon-btn { width: 40px; height: 40px; }
+
+  .app { padding-top: env(safe-area-inset-top); }
+  .tabbar { padding: 6px 8px; }
+
+  /* Navigation moves to a bar along the bottom. */
+  .vault { flex-direction: column-reverse; }
+  .sidebar {
+    width: auto; flex-direction: row; gap: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    border-right: 0; border-top: 1px solid var(--border);
+  }
+  .nav-item { flex: 1; flex-direction: column; gap: 3px; padding: 7px 2px; font-size: 10.5px; min-width: 0; position: relative; }
+  .nav-item span { display: block; flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item .dot { position: absolute; top: 5px; right: calc(50% - 16px); }
+  .sidebar-version { display: none; }
+
+  .page { min-height: 0; }
+  .split-main { padding: 12px 12px 20px; }
+  .narrow-page > * { max-width: none; }
+  .cards { grid-template-columns: 1fr; }
+  .toolbar { flex-wrap: wrap; }
+  .table { display: block; overflow-x: auto; }
+
+  /* Details open over the whole screen instead of beside the list. */
+  .panel { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; padding-top: env(safe-area-inset-top); }
+  .panel-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .modal { padding: 16px; }
+  .auth { align-items: start; padding: max(24px, env(safe-area-inset-top)) 20px 24px; }
+}

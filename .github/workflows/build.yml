@@ -145,3 +145,45 @@ jobs:
           path: apps/desktop/release/*.exe
           if-no-files-found: error
           retention-days: 7
+
+  android:
+    name: Android app
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - name: Install a browser for the mobile web test
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/mobile
+      - name: Mobile web end-to-end test
+        run: npm run e2e -w @termterm/mobile
+      - name: Build debug APK
+        run: npm run apk -w @termterm/mobile
+      # A debug build, signed with a throwaway key: for trying out, not for
+      # keeping. It cannot be installed over a build from another run.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termterm-android-debug
+          path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload e2e screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-e2e-screenshots
+          path: apps/mobile/test-results
+          if-no-files-found: ignore
+          retention-days: 7

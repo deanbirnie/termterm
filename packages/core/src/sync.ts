@@ -59,7 +59,8 @@ export class SyncApi {
   constructor(
     readonly serverUrl: string,
     private token?: string,
-    private fetchImpl: typeof fetch = fetch,
+    // Wrapped, not passed bare: browsers reject fetch called as a method of another object.
+    private fetchImpl: typeof fetch = (input, init) => fetch(input, init),
   ) {}
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -178,7 +179,7 @@ const PUSH_BATCH = 200
  * changes. Push conflicts (another device got there first) are merged and
  * retried; the loop is bounded so a misbehaving server cannot spin us forever.
  */
-export async function syncVault(vault: Vault, fetchImpl: typeof fetch = fetch): Promise<SyncSummary> {
+export async function syncVault(vault: Vault, fetchImpl?: typeof fetch): Promise<SyncSummary> {
   const state = vault.sync
   if (!state) throw new Error('Sync is not configured')
   const api = new SyncApi(state.serverUrl, vault.syncToken(), fetchImpl)

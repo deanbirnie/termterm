@@ -73,6 +73,13 @@ export interface AppInfo {
   version: string
   /** false when running from source */
   packaged: boolean
+  /** What this build can do; the interface hides what is not available. */
+  capabilities: {
+    /** Can open SSH sessions. */
+    ssh: boolean
+    /** Can generate and import SSH keys. */
+    keys: boolean
+  }
 }
 
 export type UpdateState =

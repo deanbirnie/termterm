@@ -8,3 +8,4 @@ release/
 .env
 test-results/
 apps/desktop/test-results/
+apps/mobile/test-results/

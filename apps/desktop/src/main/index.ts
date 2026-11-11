@@ -135,7 +135,11 @@ if (!app.requestSingleInstanceLock()) {
   handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) =>
     ssh.connect(String(id), target, Number(cols) || 80, Number(rows) || 24),
   )
-  handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }))
+  handle('app:info', () => ({
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    capabilities: { ssh: true, keys: true },
+  }))
   handle('update:state', () => updater.get())
   handle('update:check', () => updater.check())
   handle('update:download', () => updater.download())

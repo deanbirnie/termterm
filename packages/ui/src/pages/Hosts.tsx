@@ -2,6 +2,7 @@ import { KeyRound, Plus, Server, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
+import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, useAction } from '../ui'
 
 /** Parses `ssh user@host -p 2222`, `user@host:2222` or a bare hostname. */
@@ -32,7 +33,9 @@ export function HostsPage({
 }) {
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
-  const quick = parseQuickConnect(query)
+  // Assume full capability until told otherwise, so nothing flickers on desktop.
+  const canConnect = useAppInfo()?.capabilities.ssh ?? true
+  const quick = canConnect ? parseQuickConnect(query) : null
   const explicit = /^ssh\s|@/.test(query.trim())
 
   const hosts = useMemo(() => {
@@ -58,6 +61,7 @@ export function HostsPage({
           className="searchbar"
           onSubmit={(e) => {
             e.preventDefault()
+            if (!canConnect) return
             if (explicit && quick) quickConnect()
             else if (hosts.length === 1) open(hosts[0]!)
             else if (quick && hosts.length === 0) quickConnect()
@@ -65,13 +69,15 @@ export function HostsPage({
         >
           <input
             aria-label="Find a host or connect"
-            placeholder="Find a host or ssh user@hostname…"
+            placeholder={canConnect ? 'Find a host or ssh user@hostname…' : 'Find a host…'}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <Button variant="primary" type="submit" disabled={!(quick && (explicit || hosts.length === 0)) && hosts.length !== 1}>
-            Connect
-          </Button>
+          {canConnect && (
+            <Button variant="primary" type="submit" disabled={!(quick && (explicit || hosts.length === 0)) && hosts.length !== 1}>
+              Connect
+            </Button>
+          )}
         </form>
 
         <div className="toolbar">
@@ -82,8 +88,13 @@ export function HostsPage({
 
         {snapshot.hosts.length === 0 ? (
           <Empty icon={<Server size={28} />} title="No hosts yet">
-            Add a host to save its address and credentials in your vault, or type
-            <code> ssh user@hostname </code> above to connect right away.
+            Add a host to save its address and credentials in your vault
+            {canConnect && (
+              <>
+                , or type <code>ssh user@hostname</code> above to connect right away
+              </>
+            )}
+            .
           </Empty>
         ) : hosts.length === 0 ? (
           <p className="muted pad">No hosts match “{query}”.</p>
@@ -96,8 +107,8 @@ export function HostsPage({
                   <button
                     className={`card ${editing?.id === h.id ? 'selected' : ''}`}
                     onClick={() => setEditing({ id: h.id })}
-                    onDoubleClick={() => open(h)}
-                    title="Double-click to connect"
+                    onDoubleClick={canConnect ? () => open(h) : undefined}
+                    title={canConnect ? 'Double-click to connect' : undefined}
                   >
                     <span className="card-icon">
                       <Server size={18} />
@@ -124,7 +135,7 @@ export function HostsPage({
           snapshot={snapshot}
           onClose={() => setEditing(null)}
           onSaved={(id) => setEditing({ id })}
-          onConnect={open}
+          onConnect={canConnect ? open : undefined}
         />
       )}
     </div>
@@ -142,7 +153,8 @@ function HostPanel({
   snapshot: VaultSnapshot
   onClose: () => void
   onSaved: (id: string) => void
-  onConnect: (h: HostView) => void
+  /** Absent when this build cannot open SSH sessions. */
+  onConnect?: (h: HostView) => void
 }) {
   const [label, setLabel] = useState(host?.label ?? '')
   const [address, setAddress] = useState(host?.address ?? '')
@@ -283,20 +295,29 @@ function HostPanel({
             ))}
         </div>
       </form>
-      <footer className="panel-foot">
-        <Button
-          variant="primary"
-          className="wide"
-          disabled={busy || !address.trim()}
-          onClick={async () => {
-            if (!dirty && host) return onConnect(host)
-            const id = await save()
-            if (id) onConnect({ ...(host ?? { tags: [], hasPassword: false }), id, label: label.trim() || address.trim(), address, port: Number(port), username })
-          }}
-        >
-          {dirty && host ? 'Save and connect' : 'Connect'}
-        </Button>
-      </footer>
+      {onConnect ? (
+        <footer className="panel-foot">
+          <Button
+            variant="primary"
+            className="wide"
+            disabled={busy || !address.trim()}
+            onClick={async () => {
+              if (!dirty && host) return onConnect(host)
+              const id = await save()
+              if (id) onConnect({ ...(host ?? { tags: [], hasPassword: false }), id, label: label.trim() || address.trim(), address, port: Number(port), username })
+            }}
+          >
+            {dirty && host ? 'Save and connect' : 'Connect'}
+          </Button>
+        </footer>
+      ) : (
+        <footer className="panel-foot">
+          <p className="field-hint">
+            Connecting is not available in this app yet. Hosts you save here sync to your other
+            devices.
+          </p>
+        </footer>
+      )}
     </aside>
   )
 }

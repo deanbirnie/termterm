@@ -254,6 +254,20 @@ describe('accounts', () => {
     await syncVault(a)
   })
 
+  it('answers cross-origin preflight requests and sets CORS headers', async () => {
+    const preflight = await fetch(`${url}/v1/sync`, {
+      method: 'OPTIONS',
+      headers: { origin: 'https://localhost', 'access-control-request-method': 'POST' },
+    })
+    expect(preflight.status).toBe(204)
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('*')
+    expect(preflight.headers.get('access-control-allow-headers')).toContain('authorization')
+    const health = await fetch(`${url}/v1/health`)
+    expect(health.headers.get('access-control-allow-origin')).toBe('*')
+    // No credentials mode is offered, so cookies can never authenticate a request.
+    expect(health.headers.get('access-control-allow-credentials')).toBeNull()
+  })
+
   it('can disable registration', async () => {
     const closed = createApp({ dbPath: ':memory:', allowRegistration: false })
     await new Promise<void>((r) => closed.server.listen(0, '127.0.0.1', r))

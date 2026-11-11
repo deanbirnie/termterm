@@ -14,7 +14,9 @@
     "test": "vitest run",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "e2e": "npm run e2e -w @termterm/desktop",
-    "dist": "npm run dist -w @termterm/desktop"
+    "dist": "npm run dist -w @termterm/desktop",
+    "e2e:mobile": "npm run e2e -w @termterm/mobile",
+    "dev:mobile": "npm run dev -w @termterm/mobile"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

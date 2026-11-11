@@ -2,29 +2,34 @@ import { Check, Copy, KeyRound, Plus, Upload, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import type { KeyView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
+import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, useAction } from '../ui'
 
 type Mode = { kind: 'generate' } | { kind: 'import' } | { kind: 'view'; id: string }
 
 export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
   const [mode, setMode] = useState<Mode | null>(null)
+  const canManage = useAppInfo()?.capabilities.keys ?? true
   const viewed = mode?.kind === 'view' ? snapshot.keys.find((k) => k.id === mode.id) : undefined
 
   return (
     <div className="split">
       <div className="split-main">
-        <div className="toolbar">
-          <Button onClick={() => setMode({ kind: 'generate' })}>
-            <Plus size={15} /> Generate key
-          </Button>
-          <Button onClick={() => setMode({ kind: 'import' })}>
-            <Upload size={15} /> Import key
-          </Button>
-        </div>
+        {canManage && (
+          <div className="toolbar">
+            <Button onClick={() => setMode({ kind: 'generate' })}>
+              <Plus size={15} /> Generate key
+            </Button>
+            <Button onClick={() => setMode({ kind: 'import' })}>
+              <Upload size={15} /> Import key
+            </Button>
+          </div>
+        )}
         {snapshot.keys.length === 0 ? (
           <Empty icon={<KeyRound size={28} />} title="No keys yet">
-            Generate a new SSH key or import an existing private key. Private keys are stored
-            encrypted and are never shown again after saving.
+            {canManage
+              ? 'Generate a new SSH key or import an existing private key. Private keys are stored encrypted and are never shown again after saving.'
+              : 'Keys you add in the desktop app appear here once this device has synced.'}
           </Empty>
         ) : (
           <>

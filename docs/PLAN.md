@@ -18,6 +18,7 @@ procedure in [MAINTENANCE.md](MAINTENANCE.md).
 | App logic shared by every client | `packages/app` | The UI-to-platform contract (`contract.ts`) and `VaultService`: unlock, edit, save, sync. Platform specifics (storage, OS credential store, SSH key handling) are injected as a `Platform`. |
 | Shared interface | `packages/ui` | React screens and terminal, used by desktop and mobile. Talks only to `window.termterm` (the contract). |
 | Sync server | `apps/server` | Node 22 `node:http` + `node:sqlite`, zero runtime dependencies, Docker image. |
+| Android app | `apps/mobile` | Capacitor shell around `packages/ui`. `src/api.ts` implements the contract in the WebView on top of `VaultService`; storage is Capacitor Filesystem in the app's private directory. The native project is in `apps/mobile/android` (committed). Unlike desktop, the unlocked vault lives in the same process as the interface, so the app must never load remote content. |
 | Desktop app | `apps/desktop` | Electron shell: implements the contract over IPC, with `ssh2` for SSH and Electron `safeStorage` for the device key. |
 
 Decisions worth knowing before changing things:
@@ -117,7 +118,12 @@ Known gaps inside phase 1 scope:
 - [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
 - [ ] Android app (`apps/mobile`, Capacitor) reusing `packages/core`, `packages/app` and `packages/ui`:
   - [x] Step 1: shared UI and vault logic moved out of the desktop app into `packages/ui` and `packages/app`
-  - [ ] Step 2: Android app with vault and sync (no SSH yet)
+  - [x] Step 2: Android app with vault and sync (no SSH yet). The web layer is
+        covered by `npm run e2e:mobile` in a phone-sized browser (vault, storage,
+        cross-origin sync between two profiles). **The APK is built in CI but has
+        not been run on a device or emulator yet.** The sync server now sends CORS
+        headers for it. Still to do here: app icon and splash screen (currently
+        Capacitor's defaults), and an emulator test in CI.
   - [ ] Step 3: native SSH plugin (Kotlin) and the terminal
   - [ ] Step 4: biometric unlock, extra keyboard row, background sessions
   - [ ] Step 5: signed APK in the Release workflow
