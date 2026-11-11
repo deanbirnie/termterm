@@ -164,11 +164,15 @@ jobs:
       - run: npm ci
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-      - name: Install a browser for the mobile web test
-        run: npx playwright install --with-deps chromium
-        working-directory: apps/mobile
+      # GitHub's runners ship Chrome, so nothing needs downloading. (Playwright's
+      # own installer pulls system packages and fails when the runner's network
+      # is flaky.)
       - name: Mobile web end-to-end test
-        run: npm run e2e -w @termterm/mobile
+        run: |
+          export CHROME_PATH="$(command -v google-chrome || command -v chromium-browser || command -v chromium)"
+          echo "Using browser: $CHROME_PATH"
+          test -n "$CHROME_PATH"
+          npm run e2e -w @termterm/mobile
       - name: Build debug APK
         run: npm run apk -w @termterm/mobile
       # A debug build, signed with a throwaway key: for trying out, not for
