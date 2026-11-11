@@ -1,0 +1,7 @@
+{
+  // The server runs straight from source using Node's type stripping, which
+  // only handles syntax that can be erased. This config enforces that.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "erasableSyntaxOnly": true },
+  "include": ["src"]
+}

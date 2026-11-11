@@ -1,9 +1,16 @@
-# Run behind a TLS-terminating reverse proxy (Traefik, Caddy, nginx, Dokploy...).
+# termterm sync server.
+#
+#   docker compose up -d --build
+#
+# It listens on 127.0.0.1:8787. Put a TLS-terminating reverse proxy in front
+# of it (Traefik, Caddy, nginx; Dokploy does this for you) and use that
+# https:// address as the sync server in the app.
 services:
   termterm-server:
     build:
-      context: ../..
+      context: .
       dockerfile: apps/server/Dockerfile
+    image: termterm-server
     restart: unless-stopped
     ports:
       - "127.0.0.1:8787:8787"
