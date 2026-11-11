@@ -51,25 +51,51 @@ npm run e2e
 throwaway SSH server and sync server. On Linux without a display, run it as
 `xvfb-run -a npm run e2e`.
 
-To produce an installer for the current platform:
+## Installing on Windows
+
+Every push builds a Windows installer in GitHub Actions:
+
+1. Open the repository's **Actions** tab and pick the latest **Build** run.
+2. Download the **termterm-windows** artifact and unzip it.
+3. Run `termterm-<version>-setup.exe` to install, or
+   `termterm-<version>-portable.exe` to run without installing.
+
+Pushing a tag such as `v0.1.0` also attaches both files to a GitHub release.
+
+The installer is not code-signed yet, so Windows SmartScreen shows a warning
+the first time: choose **More info → Run anyway**.
+
+To build it yourself on a Windows machine (Node 22.18+):
 
 ```bash
-npm run dist -w @termterm/desktop
+npm install
 ```
+
+```bash
+npm run dist
+```
+
+The files land in `apps/desktop/release/`. The same command produces a DMG on
+macOS and an AppImage on Linux.
 
 ## Running the sync server
 
-For local testing:
+With Docker, from the repository root:
+
+```bash
+docker compose up -d --build
+```
+
+This starts the server on `127.0.0.1:8787` with its database in a named
+volume. Put a reverse proxy that terminates TLS in front of it (Traefik,
+Caddy, nginx) and use that `https://` address in the app. On Dokploy, create a
+Compose service pointing at this repository and `docker-compose.yml`, then add
+a domain for port 8787.
+
+Without Docker, for local testing:
 
 ```bash
 npm run server
-```
-
-It listens on `http://localhost:8787`. For real use, run it in Docker behind a
-reverse proxy that terminates TLS (Traefik, Caddy, nginx, Dokploy):
-
-```bash
-docker compose -f apps/server/docker-compose.yml up -d --build
 ```
 
 | Variable | Default | Purpose |

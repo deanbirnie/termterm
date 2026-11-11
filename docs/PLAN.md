@@ -52,8 +52,11 @@ Decisions worth knowing before changing things:
 Verified so far: `npm test` (16 tests) and `npm run e2e` (two app instances:
 create vault, generate key, save host, register sync, password and public-key
 logins, second-device sign-in, edit propagation, lock/unlock, changed host key
-refused). **Not yet verified:** packaged installers (`npm run dist`), and the
-app on Windows and macOS; development and tests so far ran on Linux only.
+refused). The sync server Docker image builds and passes its health check, and a
+packaged Linux build of the app starts and works. **Not yet verified by hand:**
+the app on Windows and macOS. The Windows installer is built by
+`.github/workflows/build.yml` on a Windows runner (it cannot be built on Linux
+without Wine); check that run's result before relying on it.
 
 Known gaps inside phase 1 scope:
 
@@ -91,8 +94,9 @@ Known gaps inside phase 1 scope:
 
 ## Phase 4 — Distribution and more devices
 
-- [ ] Signed installers via electron-builder (Windows first: the primary target), auto-update
-- [ ] CI: typecheck, tests, e2e, release builds
+- [x] CI: typecheck, tests, e2e, server image, unsigned Windows installer (artifact + release on `v*` tags)
+- [ ] Code signing for the Windows installer, auto-update, macOS and Linux release builds
+- [ ] Publish the server image to a registry (ghcr.io)
 - [ ] Mobile app (React Native or Capacitor) reusing `packages/core`
 - [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
 
