@@ -138,7 +138,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .page { flex: 1; min-width: 0; display: flex; }
 .split { flex: 1; min-width: 0; display: flex; }
 .split-main { flex: 1; min-width: 0; padding: 14px 18px 24px; overflow-y: auto; }
-.narrow-page { max-width: 620px; }
+.narrow-page > * { max-width: 580px; }
 
 .searchbar { display: flex; gap: 8px; margin-bottom: 12px; }
 .searchbar input { padding: 10px 12px; background: var(--bg-raised); }
@@ -189,6 +189,19 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .table td { padding: 8px 10px; border-bottom: 1px solid var(--border); user-select: text; word-break: break-all; }
 .table td:last-child { width: 40px; }
 
+.check { display: flex; align-items: center; gap: 9px; margin: 8px 0 5px; font-weight: 550; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.devices { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; }
+.devices li { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.devices li + li { border-top: 1px solid var(--border); }
+.device-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.device-text small { color: var(--text-muted); font-size: 12px; }
+
+.sidebar-version { margin-top: auto; padding: 8px 10px 2px; font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
+.update-pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; font-size: 12.5px; font-weight: 600; white-space: nowrap; color: var(--text-muted); flex: none; }
+.update-pill.action { background: var(--accent); color: var(--accent-ink); }
+.update-pill.action:hover { background: var(--accent-strong); }
+
 /* ---- modal ---- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(5, 8, 12, 0.66); display: grid; place-items: center; padding: 20px; z-index: 50; }
 .modal { width: min(460px, 100%); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
@@ -216,5 +229,6 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   .nav-item span { display: none; }
   .nav-item { justify-content: center; position: relative; }
   .nav-item .dot { position: absolute; top: 6px; right: 6px; }
+  .sidebar-version { display: none; }
   .panel { width: 300px; }
 }

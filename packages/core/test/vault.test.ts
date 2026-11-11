@@ -78,6 +78,24 @@ describe('vault', () => {
     expect(Object.keys(vault.toFile().items)).toHaveLength(0)
   })
 
+  it('unlocks with an exported key and rejects the wrong one', async () => {
+    const vault = await Vault.create('pw')
+    const item = vault.put('host', host('a'))
+    const key = vault.exportKey()
+    const reopened = Vault.unlockWithKey(vault.toFile(), key)
+    expect(reopened.get(item.id)).toBeDefined()
+
+    // Also holds for an empty vault, where there are no items to fail on.
+    const empty = await Vault.create('pw')
+    expect(() => Vault.unlockWithKey(empty.toFile(), key)).toThrow(DecryptError)
+    expect(() => Vault.unlockWithKey(vault.toFile(), new Uint8Array(32))).toThrow(DecryptError)
+
+    // Survives a master password change: the vault key itself does not change.
+    const rekey = await vault.prepareRekey('pw', 'new-pw')
+    vault.commitRekey(rekey.kdf, rekey.wrappedVaultKey)
+    expect(Vault.unlockWithKey(vault.toFile(), key).get(item.id)).toBeDefined()
+  })
+
   it('detects a blob moved to another item id', async () => {
     const vault = await Vault.create('pw')
     const a = vault.put('host', host('a'))

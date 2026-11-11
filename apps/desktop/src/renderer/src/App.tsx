@@ -5,6 +5,7 @@ import { api } from './api'
 import { Onboarding, Unlock } from './Auth'
 import { PromptDialog } from './Prompts'
 import { TerminalTab } from './TerminalTab'
+import { UpdatePill } from './Update'
 import { VaultView } from './VaultView'
 
 export interface SessionTab {
@@ -112,6 +113,7 @@ function Workspace({ locked }: { locked: boolean }) {
             </button>
           )}
         </div>
+        <UpdatePill />
         <button className="icon-btn" title="Lock vault" aria-label="Lock vault" onClick={() => void api.lock()}>
           <Lock size={16} />
         </button>

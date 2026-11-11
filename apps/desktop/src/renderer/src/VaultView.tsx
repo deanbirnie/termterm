@@ -7,6 +7,7 @@ import { KnownHostsPage } from './pages/KnownHosts'
 import { SettingsPage } from './pages/Settings'
 import { SnippetsPage } from './pages/Snippets'
 import { SyncPage } from './pages/Sync'
+import { useAppInfo } from './Update'
 
 const PAGES = [
   { id: 'hosts', label: 'Hosts', icon: Server },
@@ -30,6 +31,7 @@ export function VaultView({
 }) {
   const [page, setPage] = useState<PageId>('hosts')
   const { sync } = snapshot
+  const info = useAppInfo()
   const syncDot = !sync.configured ? 'off' : sync.state === 'error' ? 'error' : sync.state === 'syncing' ? 'busy' : 'ok'
 
   return (
@@ -48,6 +50,7 @@ export function VaultView({
             {id === 'sync' && <i className={`dot dot-${syncDot}`} aria-hidden="true" />}
           </button>
         ))}
+        {info && <span className="sidebar-version">v{info.version}</span>}
       </nav>
       <section className="page">
         {page === 'hosts' && <HostsPage snapshot={snapshot} onConnect={onConnect} />}

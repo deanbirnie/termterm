@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Settings } from '../../../shared/api'
 import { api } from '../api'
+import { AboutCard } from '../Update'
 import { Button, ErrorText, Field, useAction } from '../ui'
 
 const AUTO_LOCK = [
@@ -18,17 +19,51 @@ export function SettingsPage({ synced }: { synced: boolean }) {
       <AutoLock />
       <h2 className="section-title spaced">Master password</h2>
       <ChangePassword synced={synced} />
+      <h2 className="section-title spaced">About</h2>
+      <AboutCard />
+      <UpdatePreference />
     </div>
+  )
+}
+
+function UpdatePreference() {
+  const [settings, setSettings] = useState<Settings | null>(null)
+  useEffect(() => {
+    void api.settings().then(setSettings)
+  }, [])
+  if (!settings) return null
+  return (
+    <label className="check">
+      <input
+        type="checkbox"
+        checked={settings.autoCheckUpdates}
+        onChange={(e) => {
+          const patch = { autoCheckUpdates: e.target.checked }
+          setSettings({ ...settings, ...patch })
+          void api.saveSettings(patch).then(setSettings, () => setSettings(settings))
+        }}
+      />
+      <span>Check for updates when the app starts</span>
+    </label>
   )
 }
 
 function AutoLock() {
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [canRemember, setCanRemember] = useState(false)
   const { error, run } = useAction()
   useEffect(() => {
     void api.settings().then(setSettings)
+    void api.deviceUnlockAvailable().then(setCanRemember)
   }, [])
   if (!settings) return null
+  // Show the change at once; fall back to what was saved if it is refused.
+  const update = (patch: Partial<Settings>) => {
+    setSettings({ ...settings, ...patch })
+    void run(async () => setSettings(await api.saveSettings(patch))).then((ok) => {
+      if (!ok) setSettings(settings)
+    })
+  }
   return (
     <div className="form-card">
       <Field
@@ -41,11 +76,7 @@ function AutoLock() {
       >
         <select
           value={settings.autoLockMinutes}
-          onChange={(e) =>
-            void run(async () =>
-              setSettings(await api.saveSettings({ ...settings, autoLockMinutes: Number(e.target.value) })),
-            )
-          }
+          onChange={(e) => update({ autoLockMinutes: Number(e.target.value) })}
         >
           {AUTO_LOCK.map((o) => (
             <option key={o.minutes} value={o.minutes}>
@@ -54,6 +85,21 @@ function AutoLock() {
           ))}
         </select>
       </Field>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.rememberDevice}
+          disabled={!canRemember && !settings.rememberDevice}
+          aria-describedby="remember-hint"
+          onChange={(e) => update({ rememberDevice: e.target.checked })}
+        />
+        <span>Open unlocked on this device</span>
+      </label>
+      <p className="field-hint" id="remember-hint">
+        {canRemember
+          ? 'Keeps the vault key in this computer\u2019s credential store, so the app starts without asking for the master password. Locking the vault, by hand or automatically, removes it until you next enter the password.'
+          : 'Not available: this computer has no secure credential store.'}
+      </p>
       <ErrorText error={error} />
     </div>
   )

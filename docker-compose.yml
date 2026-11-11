@@ -1,16 +1,20 @@
-# termterm sync server.
+# termterm sync server, from the image published by this repository's releases.
 #
-#   docker compose up -d --build
+#   docker compose up -d
 #
 # It listens on 127.0.0.1:8787. Put a TLS-terminating reverse proxy in front
 # of it (Traefik, Caddy, nginx; Dokploy does this for you) and use that
 # https:// address as the sync server in the app.
+#
+# To update:  docker compose pull && docker compose up -d
+# To pin a version, replace "latest" with e.g. "0.2.0" (or "0.2" for patch updates).
+# To build from this checkout instead:  docker compose up -d --build
 services:
   termterm-server:
+    image: ghcr.io/deanbirnie/termterm-server:latest
     build:
       context: .
       dockerfile: apps/server/Dockerfile
-    image: termterm-server
     restart: unless-stopped
     ports:
       - "127.0.0.1:8787:8787"

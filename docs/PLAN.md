@@ -7,6 +7,9 @@ and the decisions already made so work can resume in a fresh session.
 
 **Update the status boxes in this file whenever a phase item lands.**
 
+Routine upkeep (dependency, security and deprecation checks) has its own
+procedure in [MAINTENANCE.md](MAINTENANCE.md).
+
 ## Architecture (decided)
 
 | Piece | Location | Stack |
@@ -49,10 +52,11 @@ Decisions worth knowing before changing things:
 - [x] Desktop: SSH terminal sessions in tabs (password, key, keyboard-interactive auth)
 - [x] End-to-end smoke test driving the real app against a test SSH server
 
-Verified so far: `npm test` (18 tests) and `npm run e2e` (two app instances:
+Verified so far: `npm test` (20 tests) and `npm run e2e` (two app instances:
 create vault, generate key, save host, register sync, password and public-key
 logins, second-device sign-in, edit propagation, master password change across both
-devices, lock/unlock with sessions surviving, changed host key refused). The sync server Docker image builds and passes its health check, and a
+devices, remote sign-out, lock/unlock with sessions surviving, launching
+unlocked from the credential store, changed host key refused). The sync server Docker image builds and passes its health check, and a
 packaged Linux build of the app starts and works. **Not yet verified by hand:**
 the app on Windows and macOS. The Windows installer is built by
 `.github/workflows/build.yml` on a Windows runner (it cannot be built on Linux
@@ -72,11 +76,16 @@ Known gaps inside phase 1 scope:
 ## Phase 2 — Vault hardening and account management
 
 - [x] Change master password: re-wraps the vault key and rotates `authKey` via `POST /v1/password`, which signs out other devices; they adopt the new keys on "Sign in again" (`Vault.adoptAccountKeys`)
-- [ ] "Remember on this device": store the vault key with Electron `safeStorage`
-      (OS keychain / DPAPI), optional biometric gate (Windows Hello / Touch ID)
+- [x] "Open unlocked on this device": the vault key is kept in the OS credential
+      store via Electron `safeStorage` (async API) and used at launch. A manual or
+      automatic lock deletes it, so a restart cannot undo a lock. Refused on Linux
+      without a real keyring. Tested in e2e with a stand-in store
+      (`TERMTERM_INSECURE_KEYSTORE=1`, tests only); **not yet run against real
+      DPAPI / Keychain / libsecret.**
+- [ ] Optional biometric gate (Windows Hello / Touch ID) in front of the stored key
 - [x] Auto-lock after system idle time and on sleep / screen lock (device-local `settings.json`, default 15 minutes). The idle timer itself has no automated test.
 - [x] Locking keeps established SSH sessions running (hidden until unlock)
-- [ ] Device/session list and remote sign-out (server already stores sessions)
+- [x] Device list and remote sign-out (`/v1/sessions*`); device names are sealed with the vault key so the server cannot read them
 - [ ] Rollback protection: sign a per-device view of the highest seen `seq`
       so a malicious server cannot silently serve stale data
 - [ ] Encrypted export / import (and import from `~/.ssh/config`, `known_hosts`)
@@ -98,9 +107,11 @@ Known gaps inside phase 1 scope:
 
 ## Phase 4 — Distribution and more devices
 
-- [x] CI: typecheck, tests, e2e, server image, unsigned Windows installer (artifact + release on `v*` tags)
-- [ ] Code signing for the Windows installer, auto-update, macOS and Linux release builds
-- [ ] Publish the server image to a registry (ghcr.io)
+- [x] CI (`build.yml`): typecheck, tests, e2e, server image check, Windows installer artifact; pushes to `main` publish the server image as `edge`
+- [x] Releases (`release.yml`): one version from a tag or a manual run stamps the app, publishes Windows + Linux installers on a GitHub release, and pushes the multi-arch server image to ghcr.io (`X.Y.Z`, `X.Y`, `latest`)
+- [x] In-app updates with electron-updater from GitHub releases (Settings → About, plus an Update button in the top bar); version shown in the sidebar and About
+- [ ] **Run the first real release** and confirm on Windows that an installed older version updates itself. Until then the release workflow and the Windows update path are unproven (the updater is tested against a fake feed on Linux only)
+- [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
 - [ ] Mobile app (React Native or Capacitor) reusing `packages/core`
 - [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
 

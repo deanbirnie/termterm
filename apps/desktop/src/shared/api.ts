@@ -63,6 +63,34 @@ export interface VaultSnapshot {
 export interface Settings {
   /** Lock after this many minutes without input, and on sleep or screen lock. 0 = never. */
   autoLockMinutes: number
+  /** Keep the vault key in the OS credential store so the app opens unlocked. */
+  rememberDevice: boolean
+  /** Look for a new release shortly after launch. Nothing is downloaded without asking. */
+  autoCheckUpdates: boolean
+}
+
+export interface AppInfo {
+  version: string
+  /** false when running from source */
+  packaged: boolean
+}
+
+export type UpdateState =
+  | { status: 'unsupported'; reason: string }
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'current'; checkedAt: number }
+  | { status: 'available'; version: string }
+  | { status: 'downloading'; version: string; percent: number }
+  | { status: 'ready'; version: string }
+  | { status: 'error'; message: string }
+
+export interface DeviceView {
+  id: string
+  name: string
+  createdAt: number
+  lastUsedAt: number
+  current: boolean
 }
 
 export type AppPhase = 'new' | 'locked' | 'unlocked'
@@ -128,7 +156,10 @@ export interface TermtermApi {
   changePassword(current: string, next: string): Promise<void>
 
   settings(): Promise<Settings>
-  saveSettings(settings: Settings): Promise<Settings>
+  /** Changes only the fields given and returns the full, saved settings. */
+  saveSettings(patch: Partial<Settings>): Promise<Settings>
+  /** Whether this device has a credential store safe enough for `rememberDevice`. */
+  deviceUnlockAvailable(): Promise<boolean>
 
   snapshot(): Promise<VaultSnapshot>
   onSnapshot(cb: (snapshot: VaultSnapshot) => void): () => void
@@ -144,6 +175,9 @@ export interface TermtermApi {
   syncReauth(password: string): Promise<void>
   syncNow(): Promise<void>
   syncDisconnect(): Promise<void>
+  syncDevices(): Promise<DeviceView[]>
+  /** Signs another device out of sync. Its local vault copy is not erased. */
+  syncRevokeDevice(id: string): Promise<void>
 
   sshConnect(sessionId: string, target: ConnectTarget, cols: number, rows: number): Promise<void>
   sshWrite(sessionId: string, data: string): void
@@ -153,6 +187,14 @@ export interface TermtermApi {
   onSshData(cb: (sessionId: string, data: Uint8Array) => void): () => void
   onSshStatus(cb: (sessionId: string, status: SessionStatus) => void): () => void
   onSshPrompt(cb: (prompt: SshPrompt) => void): () => void
+
+  appInfo(): Promise<AppInfo>
+  updateState(): Promise<UpdateState>
+  onUpdateState(cb: (state: UpdateState) => void): () => void
+  updateCheck(): Promise<UpdateState>
+  updateDownload(): Promise<void>
+  /** Closes all sessions, quits and installs the downloaded update. */
+  updateInstall(): Promise<void>
 
   clipboardWrite(text: string): void
   clipboardRead(): Promise<string>

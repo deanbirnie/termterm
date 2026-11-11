@@ -19,6 +19,9 @@ export class WrongPasswordError extends Error {
   }
 }
 
+const KEY_CHECK = 'termterm'
+const KEY_CHECK_AAD = 'termterm:keycheck'
+
 interface Payload {
   type: string
   updatedAt: number
@@ -38,6 +41,7 @@ export class Vault {
     private file: VaultFile,
     private vaultKey: Uint8Array,
   ) {
+    file.keyCheck ??= seal(vaultKey, utf8(KEY_CHECK), KEY_CHECK_AAD)
     for (const [id, stored] of Object.entries(file.items)) {
       if (stored.deleted) continue
       const p = this.openPayload(id, stored.blob)
@@ -70,6 +74,32 @@ export class Vault {
       throw e
     }
     return new Vault(structuredClone(file), vaultKey)
+  }
+
+  /**
+   * Unlocks with the vault key itself rather than the master password, for a
+   * key the device has kept in its OS keychain. Throws if the key is not the
+   * one this vault was sealed with.
+   */
+  static unlockWithKey(file: VaultFile, vaultKey: Uint8Array): Vault {
+    if (file.format !== 1) throw new Error(`Unsupported vault format: ${String(file.format)}`)
+    if (!file.keyCheck) throw new DecryptError('Vault has no key check; unlock with the password')
+    if (fromUtf8(open(vaultKey, file.keyCheck, KEY_CHECK_AAD)) !== KEY_CHECK) throw new DecryptError()
+    return new Vault(structuredClone(file), vaultKey.slice())
+  }
+
+  /** A copy of the vault key, for storing in the OS keychain. Handle with care. */
+  exportKey(): Uint8Array {
+    return this.vaultKey.slice()
+  }
+
+  /** Encrypts a small piece of device metadata (e.g. a device name) for the sync server. */
+  sealText(text: string, context: string): string {
+    return seal(this.vaultKey, utf8(text), `termterm:${context}`)
+  }
+
+  openText(box: string, context: string): string {
+    return fromUtf8(open(this.vaultKey, box, `termterm:${context}`))
   }
 
   /** Builds an empty local vault for an existing sync account (new device sign-in). */
