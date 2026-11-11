@@ -5,8 +5,11 @@ const config: CapacitorConfig = {
   appName: 'termterm',
   webDir: 'dist',
   android: {
-    // The vault must never be readable from a device backup.
-    allowMixedContent: false,
+    // Lets the app call a sync server over plain http, which people run on
+    // home networks. The page itself is always loaded from inside the app and
+    // its content policy allows no remote scripts, so this only affects the
+    // sync requests. The interface warns when a server address is not https.
+    allowMixedContent: true,
   },
 }
 

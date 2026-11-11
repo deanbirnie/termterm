@@ -109,3 +109,19 @@ export function useAction() {
   }
   return { busy, error, run, setError }
 }
+
+/** Shown under a sync server field when the address would send the sign-in unencrypted. */
+export function InsecureUrlHint({ url }: { url: string }) {
+  const value = url.trim().toLowerCase()
+  if (!value.startsWith('http://')) return null
+  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])([:/]|$)/.test(value)) return null
+  return (
+    <p className="warning" role="note">
+      <span>
+        This address uses plain HTTP. Your vault contents stay encrypted, but anyone on the same
+        network could intercept your sign-in. Use an https:// address if the server is reachable
+        from outside your home network.
+      </span>
+    </p>
+  )
+}
