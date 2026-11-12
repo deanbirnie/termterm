@@ -10,6 +10,7 @@ import { SettingsStore } from './settings'
 import { SshManager } from './ssh'
 import { FileVaultStorage } from './storage'
 import { Updater } from './updater'
+import { fakeHelloSigner } from './fake-hello'
 import { windowsHelloSigner } from './windows-hello'
 import { VaultService } from '@termterm/app'
 
@@ -68,12 +69,17 @@ if (!app.requestSingleInstanceLock()) {
   // PIN) and asked for on the lock screen. Otherwise it is the operating
   // system's credential store, used silently at launch ("open unlocked").
   const silentKey = new DeviceKeyStore(join(app.getPath('userData'), 'device-key.bin'))
-  const helloKey = new HelloKeyStore(join(app.getPath('userData'), 'hello-key.json'), windowsHelloSigner)
+  // Automated tests stand in for Windows Hello. Never honoured by a packaged app.
+  const fakeHello = !app.isPackaged && process.env.TERMTERM_FAKE_HELLO === '1'
+  const helloKey = new HelloKeyStore(
+    join(app.getPath('userData'), 'hello-key.json'),
+    fakeHello ? fakeHelloSigner(app.getPath('userData')) : windowsHelloSigner,
+  )
   let useHello = false
   /** Settles once it is known whether Windows Hello is set up. */
   const helloReady: Promise<void> = app
     .whenReady()
-    .then(() => (process.platform === 'win32' ? helloKey.available() : false))
+    .then(() => (process.platform === 'win32' || fakeHello ? helloKey.available() : false))
     .then((available) => {
       useHello = available
       // A silently usable copy would get round Windows Hello, so none may remain.

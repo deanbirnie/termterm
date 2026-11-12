@@ -77,6 +77,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
 .btn.wide { width: 100%; padding: 10px 14px; }
 .btn.wide.spaced { margin-top: 8px; }
+.unlock-choices { margin-top: 8px; }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: 6px; color: var(--text-muted); flex: none;

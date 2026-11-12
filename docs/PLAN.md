@@ -131,6 +131,10 @@ Known gaps inside phase 1 scope:
       native module is needed. When Hello is set up it replaces "open unlocked"
       and any silently usable copy of the key is deleted. Unit-tested with a fake
       signer; CI runs the script on Windows for the steps that need no person.
+      The lock screen offers a choice of Windows Hello or the master password and
+      starts neither until one is picked (the phone still opens its fingerprint
+      prompt at once). The desktop e2e covers this flow with a stand-in signer
+      (`fake-hello.ts`, `TERMTERM_FAKE_HELLO=1`, ignored by packaged apps).
       **The prompt itself has not been run**: no Windows machine with Hello was
       available. Open questions: whether the prompt comes to the front reliably
       (the script raises it by window class), and whether setup asks twice.

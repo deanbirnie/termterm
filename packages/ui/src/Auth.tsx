@@ -1,4 +1,4 @@
-import { Fingerprint } from 'lucide-react'
+import { Fingerprint, KeyRound } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, errorMessage } from './api'
 import { useAppInfo } from './Update'
@@ -21,9 +21,13 @@ function Shell({ title, subtitle, children }: { title: string; subtitle: string;
 
 export function Unlock({ sessions = 0 }: { sessions?: number }) {
   const [password, setPassword] = useState('')
-  const [biometric, setBiometric] = useState(false)
-  const biometricName = useAppInfo()?.capabilities.biometricName ?? 'fingerprint or face'
-  const { busy, error, run } = useAction()
+  /** Whether a fingerprint / face / Windows Hello unlock is set up; null while asking. */
+  const [biometric, setBiometric] = useState<boolean | null>(null)
+  /** With both options on offer, which one the user picked. Nothing happens until they pick. */
+  const [mode, setMode] = useState<'choose' | 'password'>('choose')
+  const info = useAppInfo()
+  const biometricName = info?.capabilities.biometricName ?? 'fingerprint or face'
+  const { busy, error, run, setError } = useAction()
 
   const unlockWithBiometrics = () =>
     void run(async () => {
@@ -31,54 +35,86 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
         await api.biometricUnlock()
       } catch (e) {
         // Dismissing the system prompt is a choice, not an error to report.
-        if (errorMessage(e) !== 'Cancelled') throw e
+        if (errorMessage(e) === 'Cancelled') return
+        // For example "needs setting up again": the password is the way in now.
+        setBiometric(await api.biometricUnlockAvailable().catch(() => false))
+        setMode('password')
+        throw e
       }
     })
 
-  // Offer the fingerprint prompt straight away when it is set up.
   useEffect(() => {
     let current = true
-    void api.biometricUnlockAvailable().then((available) => {
-      if (!current || !available) return
-      setBiometric(true)
-      unlockWithBiometrics()
-    })
+    void api
+      .biometricUnlockAvailable()
+      .catch(() => false)
+      .then((available) => {
+        if (!current) return
+        setBiometric(available)
+        // On a phone the fingerprint prompt is expected straight away. On a
+        // computer nothing pops up until the user chooses.
+        if (available && info?.platform === 'mobile') unlockWithBiometrics()
+      })
     return () => {
       current = false
     }
-  }, [])
+  }, [info?.platform])
+
   const submit = (e: FormEvent) => {
     e.preventDefault()
     void run(() => api.unlock(password))
   }
+  const choose = (next: 'choose' | 'password') => {
+    setError(null)
+    setMode(next)
+  }
+
+  const running =
+    sessions > 0 ? ` ${sessions} open session${sessions > 1 ? 's are' : ' is'} still running.` : ''
+  const choosing = biometric === true && mode === 'choose'
+
   return (
     <Shell
       title="Vault locked"
       subtitle={
-        sessions > 0
-          ? `Enter your master password to unlock. ${sessions} open session${sessions > 1 ? 's are' : ' is'} still running.`
-          : 'Enter your master password to unlock your hosts and keys.'
+        choosing
+          ? `Choose how to unlock.${running}`
+          : sessions > 0
+            ? `Enter your master password to unlock.${running}`
+            : 'Enter your master password to unlock your hosts and keys.'
       }
     >
-      <form onSubmit={submit}>
-        <Field label="Master password">
-          <input
-            type="password"
-            autoFocus
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </Field>
-        <ErrorText error={error} />
-        <Button variant="primary" type="submit" disabled={busy || !password} className="wide">
-          {busy ? 'Unlocking…' : 'Unlock'}
-        </Button>
-        {biometric && (
-          <Button className="wide spaced" disabled={busy} onClick={unlockWithBiometrics}>
-            <Fingerprint size={16} /> Unlock with {biometricName}
+      {biometric === null ? null : choosing ? (
+        <div className="unlock-choices">
+          <Button variant="primary" className="wide" disabled={busy} autoFocus onClick={unlockWithBiometrics}>
+            <Fingerprint size={16} /> {busy ? 'Waiting for ' + biometricName + '…' : `Unlock with ${biometricName}`}
           </Button>
-        )}
-      </form>
+          <Button className="wide spaced" disabled={busy} onClick={() => choose('password')}>
+            <KeyRound size={16} /> Use master password
+          </Button>
+          <ErrorText error={error} />
+        </div>
+      ) : (
+        <form onSubmit={submit}>
+          <Field label="Master password">
+            <input
+              type="password"
+              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          <ErrorText error={error} />
+          <Button variant="primary" type="submit" disabled={busy || !password} className="wide">
+            {busy ? 'Unlocking…' : 'Unlock'}
+          </Button>
+          {biometric && (
+            <Button className="wide spaced" disabled={busy} onClick={unlockWithBiometrics}>
+              <Fingerprint size={16} /> Use {biometricName} instead
+            </Button>
+          )}
+        </form>
+      )}
     </Shell>
   )
 }
