@@ -81,8 +81,16 @@ The files land in `apps/desktop/release/`.
 `apps/mobile` is the Android app: the same interface in a native shell, with
 SSH provided by a native plugin. It does vault, sync and terminal sessions
 (password, key and keyboard-interactive logins, host key verification), with an
-extra key row for Esc, Tab, Ctrl and the arrows. Unlocking with a fingerprint
-and keeping sessions alive in the background are not there yet.
+extra key row for Esc, Tab, Ctrl and the arrows.
+
+- **Fingerprint or face unlock:** turn it on under Settings. The vault key is
+  then kept in the phone's secure hardware and released only by a biometric
+  check. The master password always still works, and is asked for again if a
+  new fingerprint is added to the phone.
+- **Sessions keep running in the background:** while a session is open the
+  app shows a notification ("1 SSH session open"), which is what lets Android
+  keep the connection alive when you switch apps or turn the screen off. The
+  first time, Android asks whether termterm may show notifications.
 
 **Installing:** download `termterm-<version>.apk` from the
 [Releases](https://github.com/deanbirnie/termterm/releases/latest) page and

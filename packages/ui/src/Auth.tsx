@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from 'react'
-import { api } from './api'
+import { Fingerprint } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { api, errorMessage } from './api'
 import { Button, ErrorText, Field, InsecureUrlHint, useAction } from './ui'
 
 function Shell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
@@ -19,7 +20,31 @@ function Shell({ title, subtitle, children }: { title: string; subtitle: string;
 
 export function Unlock({ sessions = 0 }: { sessions?: number }) {
   const [password, setPassword] = useState('')
+  const [biometric, setBiometric] = useState(false)
   const { busy, error, run } = useAction()
+
+  const unlockWithBiometrics = () =>
+    void run(async () => {
+      try {
+        await api.biometricUnlock()
+      } catch (e) {
+        // Dismissing the system prompt is a choice, not an error to report.
+        if (errorMessage(e) !== 'Cancelled') throw e
+      }
+    })
+
+  // Offer the fingerprint prompt straight away when it is set up.
+  useEffect(() => {
+    let current = true
+    void api.biometricUnlockAvailable().then((available) => {
+      if (!current || !available) return
+      setBiometric(true)
+      unlockWithBiometrics()
+    })
+    return () => {
+      current = false
+    }
+  }, [])
   const submit = (e: FormEvent) => {
     e.preventDefault()
     void run(() => api.unlock(password))
@@ -46,6 +71,11 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
         <Button variant="primary" type="submit" disabled={busy || !password} className="wide">
           {busy ? 'Unlocking…' : 'Unlock'}
         </Button>
+        {biometric && (
+          <Button className="wide spaced" disabled={busy} onClick={unlockWithBiometrics}>
+            <Fingerprint size={16} /> Unlock with fingerprint or face
+          </Button>
+        )}
       </form>
     </Shell>
   )

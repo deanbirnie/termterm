@@ -19,6 +19,15 @@ export interface DeviceKeyStore {
   save(key: Uint8Array): Promise<void>
   load(): Promise<Uint8Array | null>
   clear(): void | Promise<void>
+  /** Whether a key is currently stored. */
+  has?(): boolean | Promise<boolean>
+  /**
+   * True when releasing the key needs the user to be present (a fingerprint
+   * or face check), as on a phone. Such a key is never used silently at
+   * launch, is kept when the vault locks (the check is the protection), and
+   * is only written when missing, since writing it prompts too.
+   */
+  readonly userPresence?: boolean
 }
 
 /** SSH key handling, which depends on the platform's SSH library. */

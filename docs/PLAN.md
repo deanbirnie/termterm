@@ -62,7 +62,7 @@ Decisions worth knowing before changing things:
 
 Automated, on every relevant change (see `.github/workflows/build.yml`):
 
-- `npm test`: 23 unit and integration tests for the vault, sync and server.
+- `npm test`: 29 unit and integration tests for the vault, sync, server and the shared app logic.
 - `npm run e2e`: two desktop app instances against a throwaway SSH server and
   sync server (vault, keys, hosts, sync, password and key logins, password
   change, remote sign-out, turning sync off and signing back in, lock with
@@ -87,6 +87,7 @@ Not yet confirmed anywhere:
 
 - Android SSH sessions, the extra key row and on-screen keyboard behaviour on
   a real device (added after the last device test).
+- Android fingerprint unlock, background sessions and the new icon on a device.
 - A signed release APK (needs the signing key secrets, then a release).
 - The Windows in-app update from one release to the next.
 - "Open unlocked on this device" against a real OS credential store.
@@ -109,10 +110,8 @@ Known gaps inside phase 1 scope:
 1. Try Android SSH on a device and fix what that turns up.
 2. Add the Android signing key secrets and cut a release, to get the first
    signed APK; confirm the Windows update button at the same time.
-3. Android step 4: keep sessions alive in the background, fingerprint unlock,
-   a proper icon.
-4. Account deletion from the app.
-5. Desktop terminal features, starting with split panes (phase 3).
+3. Account deletion from the app.
+4. Desktop terminal features, starting with split panes (phase 3).
 
 ## Phase 2 — Vault hardening and account management
 
@@ -171,7 +170,15 @@ Known gaps inside phase 1 scope:
         desktop. Includes the extra key row and keyboard-aware sizing.
         **The plugin bridge, the on-screen keyboard behaviour and the terminal
         have not been run on a device.**
-  - [ ] Step 4: biometric unlock (Android Keystore), background sessions (foreground service), app icon and splash screen
+  - [x] Step 4: fingerprint / face unlock (`DeviceKeyPlugin.java`: the vault key
+        encrypted by an Android Keystore key that needs a biometric check and is
+        invalidated by new enrolments), background sessions (`SessionService.java`,
+        a `specialUse` foreground service with a notification while sessions are
+        open), and the app's own icon and launch screen. The shared logic for a
+        presence-protected device key is in `VaultService` and unit-tested.
+        **None of the Android parts has been run on a device.** Open questions
+        for a device test: whether long-idle sessions survive Doze without a wake
+        lock, and how the prompt behaves on phones with face unlock only.
   - [x] Step 5: signed `termterm-<version>.apk` on each release, when the signing key secrets are set (README, "Android signing key"). **Not yet exercised: needs the secrets and a real release.**
 - [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
 

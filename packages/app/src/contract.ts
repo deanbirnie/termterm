@@ -79,6 +79,8 @@ export interface AppInfo {
     ssh: boolean
     /** Can generate and import SSH keys. */
     keys: boolean
+    /** Unlocks with a fingerprint or face, rather than opening unlocked at launch. */
+    biometricUnlock: boolean
   }
 }
 
@@ -157,6 +159,10 @@ export interface TermtermApi {
   /** New device: fetch the account's vault from a sync server. */
   signIn(input: AccountInput): Promise<void>
   unlock(password: string): Promise<void>
+  /** Whether the locked vault can be opened right now with a fingerprint or face. */
+  biometricUnlockAvailable(): Promise<boolean>
+  /** Shows the system prompt and unlocks. Rejects if it is cancelled or fails. */
+  biometricUnlock(): Promise<void>
   /** Wipes the vault key from memory. Open SSH sessions keep running. */
   lock(): Promise<void>
   /** With sync on, this also signs out your other devices until they enter the new password. */

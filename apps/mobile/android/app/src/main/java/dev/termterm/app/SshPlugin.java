@@ -1,6 +1,11 @@
 package dev.termterm.app;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.util.Base64;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -34,6 +39,7 @@ public class SshPlugin extends Plugin {
   }
 
   private final Map<String, Live> sessions = new ConcurrentHashMap<>();
+  private volatile boolean askedForNotifications;
   /** Prompts waiting for the interface. The value is a Boolean, String, String[] or null. */
   private final Map<String, CompletableFuture<Object>> prompts = new ConcurrentHashMap<>();
 
@@ -80,6 +86,7 @@ public class SshPlugin extends Plugin {
               public void closed(String error) {
                 // Only report it if this is still the session the interface knows by that id.
                 if (sessions.remove(sessionId, live)) {
+                  sessionsChanged();
                   cancelPrompts(live);
                   status(sessionId, "closed", error);
                 }
@@ -126,6 +133,7 @@ public class SshPlugin extends Plugin {
               }
             });
     sessions.put(sessionId, live);
+    sessionsChanged();
     status(sessionId, "connecting", null);
     live.session.start();
     call.resolve();
@@ -243,8 +251,30 @@ public class SshPlugin extends Plugin {
   private void end(String sessionId) {
     Live live = sessions.remove(sessionId);
     if (live == null) return;
+    sessionsChanged();
     live.session.close();
     cancelPrompts(live);
+  }
+
+  /**
+   * Keeps the foreground service (and its notification) in step with the
+   * number of open sessions, so Android does not cut them off in the background.
+   */
+  private void sessionsChanged() {
+    int count = sessions.size();
+    if (count > 0) askForNotifications();
+    SessionService.update(getContext(), count);
+  }
+
+  /** Android 13+ hides the service's notification unless the user allows notifications. */
+  private void askForNotifications() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || askedForNotifications) return;
+    askedForNotifications = true;
+    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.POST_NOTIFICATIONS)
+        != PackageManager.PERMISSION_GRANTED) {
+      ActivityCompat.requestPermissions(
+          getActivity(), new String[] {Manifest.permission.POST_NOTIFICATIONS}, 0);
+    }
   }
 
   private void status(String sessionId, String state, String error) {

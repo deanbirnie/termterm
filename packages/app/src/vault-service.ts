@@ -138,6 +138,7 @@ export class VaultService {
    */
   async tryDeviceUnlock(): Promise<void> {
     await this.ready
+    if (this.deviceKey.userPresence) return // never without the user asking; see unlockWithDevice
     if (this.vault || !this.exists || !this.platform.rememberDevice()) return
     const key = await this.deviceKey.load()
     if (!key || this.vault) return
@@ -151,6 +152,34 @@ export class VaultService {
     }
   }
 
+  /** Whether the locked vault can be opened now with a fingerprint or face. */
+  async canUnlockWithDevice(): Promise<boolean> {
+    await this.ready
+    if (this.vault || !this.exists || !this.deviceKey.userPresence) return false
+    if (!this.platform.rememberDevice()) return false
+    return (await this.deviceKey.has?.()) ?? false
+  }
+
+  /**
+   * Unlocks with the key the device releases after a fingerprint or face
+   * check. A cancelled or failed check rejects and leaves the vault locked.
+   */
+  async unlockWithDevice(): Promise<void> {
+    if (this.vault) return
+    const key = await this.deviceKey.load()
+    if (!key) throw new Error('Fingerprint unlock is not set up. Use your master password.')
+    try {
+      const vault = Vault.unlockWithKey(await this.readFile(), key)
+      if (!this.vault) this.adopt(vault)
+    } catch {
+      // The stored key is for a different vault key (the vault was re-keyed).
+      await this.deviceKey.clear()
+      throw new Error('Fingerprint unlock needs setting up again. Use your master password.')
+    } finally {
+      key.fill(0)
+    }
+  }
+
   /** Brings the stored device key in line with the setting. */
   async applyRememberDevice(): Promise<void> {
     if (!this.platform.rememberDevice()) {
@@ -159,6 +188,8 @@ export class VaultService {
     }
     const vault = this.vault
     if (!vault) return
+    // Storing a presence-protected key prompts the user, so only do it when missing.
+    if (this.deviceKey.userPresence && (await this.deviceKey.has?.())) return
     const key = vault.exportKey()
     try {
       await this.deviceKey.save(key)
@@ -175,7 +206,8 @@ export class VaultService {
    * (`forget: false`) keeps it for the next launch.
    */
   lock({ forget = true } = {}): void {
-    if (forget) void this.deviceKey.clear()
+    // A presence-protected key stays: the fingerprint check is what guards it.
+    if (forget && !this.deviceKey.userPresence) void this.deviceKey.clear()
     if (!this.vault) return
     this.save()
     if (this.syncTimer) clearTimeout(this.syncTimer)
@@ -432,7 +464,9 @@ export class VaultService {
     const { authKey } = await deriveKeys(input.password, kdf)
     // The server checks the password first, so a wrong one changes nothing here.
     const { token, wrappedVaultKey } = await api.login(username, authKey)
-    await v.joinAccount(kdf, wrappedVaultKey, input.password)
+    const { merged } = await v.joinAccount(kdf, wrappedVaultKey, input.password)
+    // A merge changes the vault key, so a stored copy of the old one is useless.
+    if (merged) await this.deviceKey.clear()
     v.setSync(serverUrl, username, token)
     this.save()
     // The vault key may have changed, so refresh the copy in the OS credential store.

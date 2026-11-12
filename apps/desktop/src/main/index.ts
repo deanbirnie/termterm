@@ -105,6 +105,10 @@ if (!app.requestSingleInstanceLock()) {
   handle('vault:unlock', (password: string) => vault.unlock(password))
   // Locking wipes the vault key but leaves established SSH sessions running;
   // they no longer need the vault, and the UI hides them until it is unlocked.
+  handle('vault:biometricAvailable', () => false)
+  handle('vault:biometricUnlock', () => {
+    throw new Error('Not available on this device')
+  })
   handle('vault:lock', () => vault.lock())
   handle('vault:changePassword', (current: string, next: string) =>
     vault.changePassword(current, next),
@@ -139,7 +143,7 @@ if (!app.requestSingleInstanceLock()) {
   handle('app:info', () => ({
     version: app.getVersion(),
     packaged: app.isPackaged,
-    capabilities: { ssh: true, keys: true },
+    capabilities: { ssh: true, keys: true, biometricUnlock: false },
   }))
   handle('update:state', () => updater.get())
   handle('update:check', () => updater.check())

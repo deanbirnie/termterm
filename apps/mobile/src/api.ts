@@ -14,6 +14,7 @@ import {
   type UpdateState,
   type VaultSnapshot,
 } from '@termterm/app'
+import { BiometricCancelled, biometricKeyStore } from './device-key'
 import { createSsh, nativeKeyTools } from './ssh'
 import { vaultStorage } from './storage'
 
@@ -49,6 +50,7 @@ function loadSettings(): Settings {
     const minutes = Number(stored.autoLockMinutes)
     return {
       ...DEFAULT_SETTINGS,
+      rememberDevice: stored.rememberDevice === true,
       autoLockMinutes:
         Number.isFinite(minutes) && minutes >= 0 ? Math.floor(minutes) : DEFAULT_SETTINGS.autoLockMinutes,
     }
@@ -65,15 +67,18 @@ export function createApi(): TermtermApi {
   const vault = new VaultService(
     {
       storage: vaultStorage,
-      // Unlocking from the Android Keystore (with a fingerprint) comes later.
-      deviceKey: {
-        available: async () => false,
-        save: async () => {
-          throw new Error('Not available on this device yet')
-        },
-        load: async () => null,
-        clear: () => undefined,
-      },
+      // In the installed app the vault key can sit behind a fingerprint or
+      // face check; in a browser there is nothing comparable.
+      deviceKey: NATIVE
+        ? biometricKeyStore
+        : {
+            available: async () => false,
+            save: async () => {
+              throw new Error('Not available in a browser')
+            },
+            load: async () => null,
+            clear: () => undefined,
+          },
       keys: NATIVE
         ? nativeKeyTools
         : {
@@ -85,7 +90,7 @@ export function createApi(): TermtermApi {
             },
           },
       deviceName: () => (Capacitor.getPlatform() === 'android' ? 'Android device' : 'Mobile browser'),
-      rememberDevice: () => false,
+      rememberDevice: () => NATIVE && settings.rememberDevice,
     },
     (s) => snapshot.emit(s),
     (p) => phase.emit(p),
@@ -126,16 +131,34 @@ export function createApi(): TermtermApi {
     createVault: (password) => vault.create(password),
     signIn: (input) => vault.signIn(input),
     unlock: (password) => vault.unlock(password),
+    biometricUnlockAvailable: () => vault.canUnlockWithDevice(),
+    biometricUnlock: () => vault.unlockWithDevice(),
     lock: async () => vault.lock(),
     changePassword: (current, next) => vault.changePassword(current, next),
 
     settings: async () => settings,
     saveSettings: async (patch) => {
-      settings = { ...settings, ...patch, rememberDevice: false, autoCheckUpdates: false }
+      const before = settings
+      settings = {
+        ...settings,
+        ...patch,
+        rememberDevice: NATIVE && (patch.rememberDevice ?? settings.rememberDevice),
+        autoCheckUpdates: false,
+      }
+      if (settings.rememberDevice !== before.rememberDevice) {
+        try {
+          // Turning it on stores the key, which asks for a fingerprint first.
+          await vault.applyRememberDevice()
+        } catch (e) {
+          settings = before
+          if (e instanceof BiometricCancelled) return settings
+          throw e
+        }
+      }
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
       return settings
     },
-    deviceUnlockAvailable: async () => false,
+    deviceUnlockAvailable: async () => NATIVE && (await biometricKeyStore.available()),
 
     snapshot: async () => vault.snapshot(),
     onSnapshot: snapshot.on,
@@ -170,7 +193,7 @@ export function createApi(): TermtermApi {
     appInfo: async () => ({
       version: __APP_VERSION__,
       packaged: Capacitor.isNativePlatform(),
-      capabilities: { ssh: NATIVE, keys: NATIVE },
+      capabilities: { ssh: NATIVE, keys: NATIVE, biometricUnlock: true },
     }),
     updateState: async () => updateState,
     onUpdateState: () => () => undefined,
