@@ -13,8 +13,11 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same branch or pull request replaces an older one.
+# (The group was renamed from "build-..." after a GitHub incident left a run
+# stuck in that group that could not be cancelled and blocked later runs.)
 concurrency:
-  group: build-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

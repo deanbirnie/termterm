@@ -4,6 +4,8 @@ const config: CapacitorConfig = {
   appId: 'dev.termterm.app',
   appName: 'termterm',
   webDir: 'dist',
+  // Matches the interface, so there is no flash of another colour at start.
+  backgroundColor: '#11151c',
   android: {
     // Lets the app call a sync server over plain http, which people run on
     // home networks. The page itself is always loaded from inside the app and

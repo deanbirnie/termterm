@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Settings } from '@termterm/app'
 import { api } from '../api'
-import { AboutCard } from '../Update'
+import { AboutCard, useAppInfo } from '../Update'
 import { Button, ErrorText, Field, useAction } from '../ui'
 
 const AUTO_LOCK = [
@@ -51,6 +51,7 @@ function UpdatePreference() {
 function AutoLock() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [canRemember, setCanRemember] = useState(false)
+  const biometric = useAppInfo()?.capabilities.biometricUnlock ?? false
   const { error, run } = useAction()
   useEffect(() => {
     void api.settings().then(setSettings)
@@ -70,7 +71,9 @@ function AutoLock() {
         label="Lock the vault automatically"
         hint={
           settings.autoLockMinutes > 0
-            ? 'Also locks when the computer sleeps or its screen is locked. Open sessions keep running while locked.'
+            ? biometric
+              ? 'Locks after the app has been in the background this long. Open sessions keep running while locked.'
+              : 'Also locks when the computer sleeps or its screen is locked. Open sessions keep running while locked.'
             : 'The vault stays unlocked until you lock it or quit.'
         }
       >
@@ -93,12 +96,16 @@ function AutoLock() {
           aria-describedby="remember-hint"
           onChange={(e) => update({ rememberDevice: e.target.checked })}
         />
-        <span>Open unlocked on this device</span>
+        <span>{biometric ? 'Unlock with fingerprint or face' : 'Open unlocked on this device'}</span>
       </label>
       <p className="field-hint" id="remember-hint">
-        {canRemember
-          ? 'Keeps the vault key in this computer\u2019s credential store, so the app starts without asking for the master password. Locking the vault, by hand or automatically, removes it until you next enter the password.'
-          : 'Not available: this computer has no secure credential store.'}
+        {biometric
+          ? canRemember
+            ? 'Keeps the vault key in this phone\u2019s secure hardware, released only by your fingerprint or face. Your master password still works, and is needed again if you add a new fingerprint.'
+            : 'Not available: set up a fingerprint or face unlock in this phone\u2019s settings first.'
+          : canRemember
+            ? 'Keeps the vault key in this computer\u2019s credential store, so the app starts without asking for the master password. Locking the vault, by hand or automatically, removes it until you next enter the password.'
+            : 'Not available: this computer has no secure credential store.'}
       </p>
       <ErrorText error={error} />
     </div>

@@ -69,6 +69,8 @@ dependencies {
     // other modern algorithms that older Android versions do not provide.
     implementation 'com.github.mwiede:jsch:2.28.8'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.87'
+    // The system fingerprint / face prompt, for unlocking the vault.
+    implementation 'androidx.biometric:biometric:1.1.0'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

@@ -28,6 +28,8 @@ const api: TermtermApi = {
   createVault: invoke('vault:create'),
   signIn: invoke('vault:signIn'),
   unlock: invoke('vault:unlock'),
+  biometricUnlockAvailable: invoke('vault:biometricAvailable'),
+  biometricUnlock: invoke('vault:biometricUnlock'),
   lock: invoke('vault:lock'),
   changePassword: invoke('vault:changePassword'),
   settings: invoke('settings:get'),

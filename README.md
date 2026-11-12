@@ -81,8 +81,16 @@ The files land in `apps/desktop/release/`.
 `apps/mobile` is the Android app: the same interface in a native shell, with
 SSH provided by a native plugin. It does vault, sync and terminal sessions
 (password, key and keyboard-interactive logins, host key verification), with an
-extra key row for Esc, Tab, Ctrl and the arrows. Unlocking with a fingerprint
-and keeping sessions alive in the background are not there yet.
+extra key row for Esc, Tab, Ctrl and the arrows.
+
+- **Fingerprint or face unlock:** turn it on under Settings. The vault key is
+  then kept in the phone's secure hardware and released only by a biometric
+  check. The master password always still works, and is asked for again if a
+  new fingerprint is added to the phone.
+- **Sessions keep running in the background:** while a session is open the
+  app shows a notification ("1 SSH session open"), which is what lets Android
+  keep the connection alive when you switch apps or turn the screen off. The
+  first time, Android asks whether termterm may show notifications.
 
 **Installing:** download `termterm-<version>.apk` from the
 [Releases](https://github.com/deanbirnie/termterm/releases/latest) page and
@@ -205,6 +213,29 @@ npm run server
 Then in the app: **Sync → Create account and sync** on the first device, and
 **I already have one** on the start screen of every other device.
 
+Once your account exists, set `TERMTERM_ALLOW_REGISTRATION` to `false`,
+especially if the server is reachable from the internet; otherwise anyone who
+finds the address can create accounts on it.
+
+### Removing an account
+
+There is no account deletion in the app yet. On the server, list the accounts:
+
+```bash
+docker exec termterm-sync node --disable-warning=ExperimentalWarning -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('/data/termterm.db');console.table(db.prepare('SELECT u.username, (SELECT COUNT(*) FROM items i WHERE i.user_id = u.id) AS items, (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id) AS devices FROM users u ORDER BY u.id').all())"
+```
+
+and delete one, with its stored items and device sign-ins, by putting its
+username at the end (there is no undo):
+
+```bash
+docker exec termterm-sync node --disable-warning=ExperimentalWarning -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('/data/termterm.db');db.exec('PRAGMA foreign_keys = ON');const r=db.prepare('DELETE FROM users WHERE username = ?').run(process.argv[1]);console.log('accounts deleted:',r.changes)" USERNAME
+```
+
+Replace `termterm-sync` with your container's name. Devices keep their own
+full copy of the vault, so an account deleted by mistake can be recreated from
+any of them: turn sync off there and create the account again.
+
 ## Releasing
 
 One version number covers the app, the GitHub release and the server image.
@@ -282,6 +313,10 @@ with **dry run** ticked.
   of them out. Device names are encrypted too.
 - Changing the master password re-wraps the vault key and signs your other
   devices out of sync until they enter the new password.
+
+- On Android the vault and the interface run in one process, so the
+  desktop's separation between them does not exist there. The app loads no
+  remote content, and SSH runs in a native plugin.
 
 Known limits, also listed in the plan: a forgotten master password cannot be
 recovered, and a malicious sync server could withhold updates or serve an older
