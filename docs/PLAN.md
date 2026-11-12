@@ -176,7 +176,14 @@ Known gaps inside phase 1 scope:
         a `specialUse` foreground service with a notification while sessions are
         open), and the app's own icon and launch screen. The shared logic for a
         presence-protected device key is in `VaultService` and unit-tested.
-        **None of the Android parts has been run on a device.** Open questions
+        The terminal also switches the on-screen keyboard to plain typing while it
+        has focus (`TerminalWebView.java`: the field is reported as a
+        no-suggestions visible-password field, because keyboards ignore the web's
+        autocorrect hints), and has text-size buttons in the key row. Row spacing
+        and text size are per-device preferences (`packages/ui/src/terminal-prefs.ts`),
+        set under Settings → Terminal on every platform.
+        **None of these Android parts has been confirmed on a device**, though SSH
+        sessions themselves have been used on a phone. Open questions
         for a device test: whether long-idle sessions survive Doze without a wake
         lock, and how the prompt behaves on phones with face unlock only.
   - [x] Step 5: signed `termterm-<version>.apk` on each release, when the signing key secrets are set (README, "Android signing key"). **Not yet exercised: needs the secrets and a real release.**

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { SessionStatus, SnippetView } from '@termterm/app'
 import { api, errorMessage } from './api'
 import type { SessionTab } from './App'
+import { defaultFontSize, getTerminalPrefs, onTerminalPrefs, setTerminalPrefs } from './terminal-prefs'
 import { Button } from './ui'
 
 const THEME = {
@@ -61,6 +62,11 @@ export function TerminalTab({
   const [attempt, setAttempt] = useState(0)
   // On a touch screen there is no Esc, Tab, Ctrl or arrow key: offer them.
   const [touch] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false)
+  const changeFontSize = (delta: number) => {
+    const current = getTerminalPrefs().fontSize ?? defaultFontSize(touch)
+    setTerminalPrefs({ fontSize: current + delta }) // open terminals update through onTerminalPrefs
+    termRef.current?.focus()
+  }
   const [ctrl, setCtrl] = useState(false)
   const ctrlRef = useRef(false)
   const armCtrl = (on: boolean) => {
@@ -70,10 +76,12 @@ export function TerminalTab({
   const [snippetsOpen, setSnippetsOpen] = useState(false)
 
   useEffect(() => {
+    const prefs = getTerminalPrefs()
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: '"Cascadia Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
-      fontSize: 13.5,
+      fontSize: prefs.fontSize ?? defaultFontSize(touch),
+      lineHeight: prefs.lineHeight,
       scrollback: 10_000,
       theme: THEME,
     })
@@ -82,6 +90,21 @@ export function TerminalTab({
     term.open(hostRef.current!)
     termRef.current = term
     fitRef.current = fit
+
+    // What is typed here is commands, not prose: ask for it to be left alone.
+    // (On Android the keyboard ignores these hints, so the app also switches
+    // the keyboard itself while the terminal has focus.)
+    const input = term.textarea
+    const focused = () => api.terminalFocus(true)
+    const blurred = () => api.terminalFocus(false)
+    if (input) {
+      input.setAttribute('autocomplete', 'off')
+      input.setAttribute('autocorrect', 'off')
+      input.setAttribute('autocapitalize', 'none')
+      input.setAttribute('spellcheck', 'false')
+      input.addEventListener('focus', focused)
+      input.addEventListener('blur', blurred)
+    }
 
     // Ctrl+Shift+C / Ctrl+Shift+V, leaving plain Ctrl+C for the remote shell.
     term.attachCustomKeyEventHandler((e) => {
@@ -111,6 +134,12 @@ export function TerminalTab({
       term.onResize(({ cols, rows }) => api.sshResize(tab.id, cols, rows)),
     ]
     const off = [
+      // Text size or row spacing changed, here or in Settings.
+      onTerminalPrefs((next) => {
+        term.options.fontSize = next.fontSize ?? defaultFontSize(touch)
+        term.options.lineHeight = next.lineHeight
+        if (hostRef.current?.offsetParent) fit.fit()
+      }),
       api.onSshData((id, data) => id === tab.id && term.write(data)),
       api.onSshStatus((id, s) => id === tab.id && setStatus(s)),
     ]
@@ -120,6 +149,9 @@ export function TerminalTab({
     observer.observe(hostRef.current!)
 
     return () => {
+      input?.removeEventListener('focus', focused)
+      input?.removeEventListener('blur', blurred)
+      api.terminalFocus(false)
       observer.disconnect()
       off.forEach((fn) => fn())
       subscriptions.forEach((s) => s.dispose())
@@ -167,6 +199,12 @@ export function TerminalTab({
           ))}
           <button aria-pressed={ctrl} className={ctrl ? 'armed' : ''} onClick={() => armCtrl(!ctrl)}>
             Ctrl
+          </button>
+          <button aria-label="Smaller text" onClick={() => changeFontSize(-1)}>
+            A−
+          </button>
+          <button aria-label="Larger text" onClick={() => changeFontSize(1)}>
+            A+
           </button>
         </div>
       )}

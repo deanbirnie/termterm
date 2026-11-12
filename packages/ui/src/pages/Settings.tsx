@@ -1,6 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Settings } from '@termterm/app'
 import { api } from '../api'
+import {
+  DEFAULT_LINE_HEIGHT,
+  FONT_MAX,
+  FONT_MIN,
+  LINE_HEIGHTS,
+  getTerminalPrefs,
+  onTerminalPrefs,
+  setTerminalPrefs,
+} from '../terminal-prefs'
 import { AboutCard, useAppInfo } from '../Update'
 import { Button, ErrorText, Field, useAction } from '../ui'
 
@@ -17,6 +26,8 @@ export function SettingsPage({ synced }: { synced: boolean }) {
     <div className="split-main narrow-page">
       <h2 className="section-title">Settings</h2>
       <AutoLock />
+      <h2 className="section-title spaced">Terminal</h2>
+      <TerminalAppearance />
       <h2 className="section-title spaced">Master password</h2>
       <ChangePassword synced={synced} />
       <h2 className="section-title spaced">About</h2>
@@ -45,6 +56,45 @@ function UpdatePreference() {
       />
       <span>Check for updates when the app starts</span>
     </label>
+  )
+}
+
+function TerminalAppearance() {
+  const [prefs, setPrefs] = useState(getTerminalPrefs)
+  // Stay in step with the size buttons in an open terminal.
+  useEffect(() => onTerminalPrefs(setPrefs), [])
+  const sizes = Array.from({ length: FONT_MAX - FONT_MIN + 1 }, (_, i) => FONT_MIN + i)
+  return (
+    <div className="form-card">
+      <Field label="Line spacing" hint="The space between rows of text. Applies to open sessions straight away.">
+        <select
+          value={prefs.lineHeight}
+          onChange={(e) => setPrefs(setTerminalPrefs({ lineHeight: Number(e.target.value) }))}
+        >
+          {LINE_HEIGHTS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+              {o.value === DEFAULT_LINE_HEIGHT ? ' (default)' : ''}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Text size">
+        <select
+          value={prefs.fontSize ?? ''}
+          onChange={(e) =>
+            setPrefs(setTerminalPrefs({ fontSize: e.target.value === '' ? null : Number(e.target.value) }))
+          }
+        >
+          <option value="">Default</option>
+          {sizes.map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
+      </Field>
+    </div>
   )
 }
 

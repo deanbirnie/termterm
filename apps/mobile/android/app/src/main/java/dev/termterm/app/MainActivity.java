@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     // Plugins that live in this app (rather than in an npm package) are registered by hand.
     registerPlugin(SshPlugin.class);
     registerPlugin(DeviceKeyPlugin.class);
+    registerPlugin(TerminalInputPlugin.class);
     super.onCreate(savedInstanceState);
   }
 }

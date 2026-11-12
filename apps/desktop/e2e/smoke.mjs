@@ -295,6 +295,23 @@ try {
 
   // ---- master password change on A propagates to B ---------------------------------
   await nav(a.page, 'Settings').click()
+  // Row spacing: 40% by default, adjustable, and applied to sessions already open.
+  const rowHeight = () =>
+    a.page.evaluate(() => {
+      const row = document.querySelector('.xterm-rows > div')
+      return row ? parseFloat(getComputedStyle(row).height) : 0
+    })
+  assert.equal(await a.page.getByLabel('Line spacing').inputValue(), '1.4')
+  await a.page.getByRole('tab', { name: /Test box/ }).first().click()
+  const comfortable = await rowHeight()
+  await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
+  await a.page.getByLabel('Line spacing').selectOption('1')
+  await a.page.getByRole('tab', { name: /Test box/ }).first().click()
+  const compact = await rowHeight()
+  assert.ok(comfortable > compact * 1.25, `rows did not tighten: ${comfortable} -> ${compact}`)
+  await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
+  await a.page.getByLabel('Line spacing').selectOption('1.4')
+  step(`terminal row spacing is adjustable (${comfortable}px default, ${compact}px compact)`)
   await a.page.getByLabel('Current master password').fill('not it at all')
   await a.page.getByLabel('New master password', { exact: true }).fill(NEW_MASTER)
   await a.page.getByLabel('Confirm new master password').fill(NEW_MASTER)

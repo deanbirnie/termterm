@@ -13,6 +13,8 @@ type PromptBody = SshPrompt extends infer P
 
 interface Session {
   client: Client
+  /** The size the terminal last asked for, kept so one sent while connecting is not lost. */
+  size: { cols: number; rows: number }
   stream?: ClientChannel
   prompts: Set<string>
   closed: boolean
@@ -76,7 +78,7 @@ export class SshManager {
     const hostLabel = port === 22 ? address : `${address}:${port}`
 
     const client = new Client()
-    const session: Session = { client, prompts: new Set(), closed: false }
+    const session: Session = { client, size: { cols, rows }, prompts: new Set(), closed: false }
     this.sessions.set(sessionId, session)
 
     const ask = (body: PromptBody): Promise<SshPromptReply> => {
@@ -185,9 +187,12 @@ export class SshManager {
 
     client
       .on('ready', () => {
-        client.shell({ term: 'xterm-256color', cols, rows }, (err, stream) => {
+        const opened = session.size
+        client.shell({ term: 'xterm-256color', ...opened }, (err, stream) => {
           if (err) return finish(err.message)
           session.stream = stream
+          // A resize that arrived while the shell was being opened.
+          if (session.size !== opened) stream.setWindow(session.size.rows, session.size.cols, 0, 0)
           this.events.status(sessionId, { state: 'connected' })
           const forward = (chunk: Buffer) => this.events.data(sessionId, chunk)
           stream.on('data', forward)
@@ -218,7 +223,10 @@ export class SshManager {
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
-    this.sessions.get(sessionId)?.stream?.setWindow(rows, cols, 0, 0)
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    session.size = { cols, rows }
+    session.stream?.setWindow(rows, cols, 0, 0)
   }
 
   close(sessionId: string): void {

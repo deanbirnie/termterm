@@ -15,7 +15,7 @@ import {
   type VaultSnapshot,
 } from '@termterm/app'
 import { BiometricCancelled, biometricKeyStore } from './device-key'
-import { createSsh, nativeKeyTools } from './ssh'
+import { createSsh, nativeKeyTools, setTerminalFocus } from './ssh'
 import { vaultStorage } from './storage'
 
 declare const __APP_VERSION__: string
@@ -186,6 +186,9 @@ export function createApi(): TermtermApi {
     sshResize: (sessionId, cols, rows) => ssh?.resize(sessionId, cols, rows),
     sshClose: (sessionId) => ssh?.close(sessionId),
     sshPromptReply: (promptId, reply) => ssh?.promptReply(promptId, reply),
+    terminalFocus: (active) => {
+      if (NATIVE) setTerminalFocus(active)
+    },
     onSshData: sshData.on,
     onSshStatus: sshStatus.on,
     onSshPrompt: sshPrompt.on,

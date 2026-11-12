@@ -55,6 +55,7 @@ const api: TermtermApi = {
   sshResize: send('ssh:resize'),
   sshClose: send('ssh:close'),
   sshPromptReply: send('ssh:promptReply'),
+  terminalFocus: () => undefined, // a physical keyboard has nothing to switch
   onSshData: on('ssh:data'),
   onSshStatus: on('ssh:status'),
   onSshPrompt: on('ssh:prompt'),
