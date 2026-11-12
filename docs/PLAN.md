@@ -14,7 +14,7 @@ procedure in [MAINTENANCE.md](MAINTENANCE.md).
 
 | Piece | Location | Stack |
 |---|---|---|
-| Vault crypto, item model, sync client | `packages/core` | TypeScript, `hash-wasm` (Argon2id), `@noble/ciphers` (XChaCha20-Poly1305). No Node or DOM specifics, so it can be reused by a future mobile app or CLI. |
+| Vault crypto, item model, sync client | `packages/core` | TypeScript, `hash-wasm` (Argon2id), `@noble/ciphers` (XChaCha20-Poly1305). No Node or DOM specifics: the desktop and Android apps both use it. |
 | App logic shared by every client | `packages/app` | The UI-to-platform contract (`contract.ts`) and `VaultService`: unlock, edit, save, sync. Platform specifics (storage, OS credential store, SSH key handling) are injected as a `Platform`. |
 | Shared interface | `packages/ui` | React screens and terminal, used by desktop and mobile. Talks only to `window.termterm` (the contract). |
 | Sync server | `apps/server` | Node 22 `node:http` + `node:sqlite`, zero runtime dependencies, Docker image. |
@@ -34,9 +34,12 @@ Decisions worth knowing before changing things:
   A mismatch is a conflict; the client resolves last-writer-wins using the
   `updatedAt` inside the ciphertext and retries. Deletes are encrypted
   tombstones. See `packages/core/src/sync.ts` and `vault.ts#applyRemote`.
-- **Secrets stay in the Electron main process.** The renderer is sandboxed
-  (`contextIsolation`, `sandbox`, CSP, no navigation) and only receives redacted
-  items (`hasPassword`, public keys). SSH connections are made in main.
+- **On desktop, secrets stay in the Electron main process.** The renderer is
+  sandboxed (`contextIsolation`, `sandbox`, CSP, no navigation) and only
+  receives redacted items (`hasPassword`, public keys). SSH connections are
+  made in main. On Android there is one process, so the same separation is
+  kept by convention only: the interface still talks to the vault solely
+  through the contract.
 - **Host keys are verified** trust-on-first-use, stored as `knownHost` vault
   items (so they sync too); a changed key blocks the connection with a warning.
 - Item types today: `host`, `key`, `snippet`, `knownHost`
@@ -55,15 +58,39 @@ Decisions worth knowing before changing things:
 - [x] Desktop: SSH terminal sessions in tabs (password, key, keyboard-interactive auth)
 - [x] End-to-end smoke test driving the real app against a test SSH server
 
-Verified so far: `npm test` (23 tests) and `npm run e2e` (two app instances:
-create vault, generate key, save host, register sync, password and public-key
-logins, second-device sign-in, edit propagation, master password change across both
-devices, remote sign-out, lock/unlock with sessions surviving, launching
-unlocked from the credential store, changed host key refused). The sync server Docker image builds and passes its health check, and a
-packaged Linux build of the app starts and works. **Not yet verified by hand:**
-the app on Windows and macOS. The Windows installer is built by
-`.github/workflows/build.yml` on a Windows runner (it cannot be built on Linux
-without Wine); check that run's result before relying on it.
+## What has been verified, and how
+
+Automated, on every relevant change (see `.github/workflows/build.yml`):
+
+- `npm test`: 23 unit and integration tests for the vault, sync and server.
+- `npm run e2e`: two desktop app instances against a throwaway SSH server and
+  sync server (vault, keys, hosts, sync, password and key logins, password
+  change, remote sign-out, turning sync off and signing back in, lock with
+  sessions surviving, launch from the credential store, updater against a fake
+  feed, changed host key refused).
+- `npm run e2e:mobile`: the mobile app's web layer in a phone-sized browser.
+- `npm run test:ssh -w @termterm/mobile`: the Android SSH core on a JVM
+  against a throwaway SSH server.
+- The server image is started on a root-owned bind mount and health-checked.
+- The Windows installer and the Android debug APK are built.
+
+Confirmed in real use by the project owner:
+
+- Windows: installing from a release; syncing over HTTPS through a Cloudflare
+  tunnel.
+- Sync server: running from the published image on Unraid.
+- Android (on a phone): vault, sign-in and sync, including to a plain-http
+  server on the local network.
+- The Release and Cleanup workflows have each run successfully.
+
+Not yet confirmed anywhere:
+
+- Android SSH sessions, the extra key row and on-screen keyboard behaviour on
+  a real device (added after the last device test).
+- A signed release APK (needs the signing key secrets, then a release).
+- The Windows in-app update from one release to the next.
+- "Open unlocked on this device" against a real OS credential store.
+- Anything on macOS.
 
 Known gaps inside phase 1 scope:
 
@@ -76,6 +103,16 @@ Known gaps inside phase 1 scope:
   journal).
 - `ssh2` occasionally generates an Ed25519 key its own parser rejects;
   `apps/desktop/src/main/keys.ts` retries until the key parses.
+
+## Suggested order from here
+
+1. Try Android SSH on a device and fix what that turns up.
+2. Add the Android signing key secrets and cut a release, to get the first
+   signed APK; confirm the Windows update button at the same time.
+3. Android step 4: keep sessions alive in the background, fingerprint unlock,
+   a proper icon.
+4. Account deletion from the app.
+5. Desktop terminal features, starting with split panes (phase 3).
 
 ## Phase 2 — Vault hardening and account management
 
@@ -95,7 +132,7 @@ Known gaps inside phase 1 scope:
 - [ ] Encrypted export / import (and import from `~/.ssh/config`, `known_hosts`)
 - [ ] Identities (reusable username + credential shared across hosts), host groups
 - [ ] SSH certificates, FIDO2 / security-key keys, agent forwarding
-- [ ] Account deletion, server-side storage quota reporting, server backups doc
+- [ ] Account deletion from the app (today it takes a database command on the server; see the README), server-side storage quota reporting, server backups doc
 
 ## Phase 3 — Terminal and session features
 
@@ -114,17 +151,18 @@ Known gaps inside phase 1 scope:
 - [x] CI (`build.yml`): typecheck and unit tests always; the desktop e2e, Windows installer and server image jobs run only when that app or shared code changed (`.github/scripts/changed-areas.sh`); pushes to `main` that touch the server publish its image as `edge`
 - [x] Releases (`release.yml`): one version from a tag or a manual run stamps the app, publishes Windows + Linux installers on a GitHub release, and pushes the multi-arch server image to ghcr.io (`X.Y.Z`, `X.Y`, `latest`)
 - [x] In-app updates with electron-updater from GitHub releases (Settings → About, plus an Update button in the top bar); version shown in the sidebar and About
-- [x] Storage cleanup (`cleanup.yml` + `.github/scripts/cleanup.sh`): prunes artifacts, run logs, caches, old releases and old image versions. The script's selection logic was tested against sample data; the workflow itself and the image cleanup action have not yet run for real
-- [ ] **Run the first real release** and confirm on Windows that an installed older version updates itself. Until then the release workflow and the Windows update path are unproven (the updater is tested against a fake feed on Linux only)
+- [x] Storage cleanup (`cleanup.yml` + `.github/scripts/cleanup.sh`): prunes artifacts, run logs, caches, old releases and old image versions, keeping the newest 3. Has run for real after a release.
+- [x] First real releases made; the Release workflow works end to end
+- [ ] Confirm on Windows that an installed older version updates itself from the Update button (the updater is otherwise tested only against a fake feed on Linux)
 - [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
 - [ ] Android app (`apps/mobile`, Capacitor) reusing `packages/core`, `packages/app` and `packages/ui`:
   - [x] Step 1: shared UI and vault logic moved out of the desktop app into `packages/ui` and `packages/app`
   - [x] Step 2: Android app with vault and sync (no SSH yet). The web layer is
         covered by `npm run e2e:mobile` in a phone-sized browser (vault, storage,
-        cross-origin sync between two profiles). **The APK is built in CI but has
-        not been run on a device or emulator yet.** The sync server now sends CORS
-        headers for it. Still to do here: app icon and splash screen (currently
-        Capacitor's defaults), and an emulator test in CI.
+        cross-origin sync between two profiles), and it has been used on a real
+        phone. The sync server sends CORS headers for it, and the app accepts a
+        plain-http server on the local network. Still to do: an emulator test in
+        CI.
   - [x] Step 3: native SSH plugin and the terminal. The SSH core
         (`apps/mobile/android/app/src/main/java/dev/termterm/app/ssh`, plain Java
         on JSch) is tested on a JVM by `npm run test:ssh -w @termterm/mobile`.
