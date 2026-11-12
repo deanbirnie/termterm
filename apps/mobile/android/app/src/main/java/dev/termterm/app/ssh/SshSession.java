@@ -117,7 +117,13 @@ public final class SshSession {
       s.connect(CONNECT_TIMEOUT_MS);
 
       ChannelShell ch = (ChannelShell) s.openChannel("shell");
-      ch.setPtyType("xterm-256color", config.cols, config.rows, 0, 0);
+      int cols;
+      int rows;
+      synchronized (lock) {
+        cols = config.cols;
+        rows = config.rows;
+      }
+      ch.setPtyType("xterm-256color", cols, rows, 0, 0);
       InputStream fromRemote = ch.getInputStream();
       OutputStream out = ch.getOutputStream();
       ch.connect(CONNECT_TIMEOUT_MS);
@@ -125,6 +131,10 @@ public final class SshSession {
         if (closing) return;
         channel = ch;
         toRemote = out;
+        // A resize that arrived while the shell was being opened.
+        if (config.cols != cols || config.rows != rows) {
+          ch.setPtySize(config.cols, config.rows, 0, 0);
+        }
       }
       events.connected();
 
@@ -156,11 +166,18 @@ public final class SshSession {
   }
 
   public void resize(int cols, int rows) {
+    if (cols <= 0 || rows <= 0) return;
     ChannelShell ch;
     synchronized (lock) {
+      // Remembered even while still connecting (the screen often changes size
+      // then, for instance when the keyboard opens for a password), so the
+      // shell starts at the size the terminal has now, not the one it had at
+      // the start.
+      config.cols = cols;
+      config.rows = rows;
       ch = channel;
     }
-    if (ch != null && cols > 0 && rows > 0) ch.setPtySize(cols, rows, 0, 0);
+    if (ch != null) ch.setPtySize(cols, rows, 0, 0);
   }
 
   /** Ends the session without reporting an error. Safe to call more than once. */

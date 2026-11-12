@@ -60,6 +60,13 @@ interface SshPluginApi {
 
 const Ssh = registerPlugin<SshPluginApi>('Ssh')
 
+/** Switches the on-screen keyboard to plain typing while the terminal has focus. */
+const TerminalInput = registerPlugin<{ setActive(options: { active: boolean }): Promise<void> }>(
+  'TerminalInput',
+)
+export const setTerminalFocus = (active: boolean) =>
+  void TerminalInput.setActive({ active }).catch(() => undefined)
+
 /** Capacitor rejects with an Error whose message is what the native side passed to reject(). */
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 

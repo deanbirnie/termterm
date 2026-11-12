@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Replaces Capacitor's layout of the same name so the app uses TerminalWebView
+     (which controls keyboard autocorrect for the terminal) instead of the
+     stock CapacitorWebView. The id must stay "webview": Capacitor looks it up. -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <dev.termterm.app.TerminalWebView
+        android:id="@+id/webview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

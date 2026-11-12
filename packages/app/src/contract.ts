@@ -202,6 +202,11 @@ export interface TermtermApi {
   sshResize(sessionId: string, cols: number, rows: number): void
   sshClose(sessionId: string): void
   sshPromptReply(promptId: string, reply: SshPromptReply): void
+  /**
+   * Tells the platform whether the terminal has keyboard focus, so a phone
+   * can switch its on-screen keyboard to plain typing (no autocorrect).
+   */
+  terminalFocus(active: boolean): void
   onSshData(cb: (sessionId: string, data: Uint8Array) => void): () => void
   onSshStatus(cb: (sessionId: string, status: SessionStatus) => void): () => void
   onSshPrompt(cb: (prompt: SshPrompt) => void): () => void
