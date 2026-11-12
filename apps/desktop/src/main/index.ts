@@ -2,12 +2,18 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, Menu, app, clipboard, ipcMain, powerMonitor, shell } from 'electron'
 import type { ConnectTarget, Settings } from '@termterm/app'
+import type { DeviceKeyStore as DeviceKeyStorage } from '@termterm/app'
 import { DeviceKeyStore } from './device-key'
+import { HelloKeyStore } from './hello-key-store'
 import { keyTools } from './keys'
 import { SettingsStore } from './settings'
+import { LocalTerminals } from './local-terminal'
+import { pickShell } from './local-shells'
 import { SshManager } from './ssh'
 import { FileVaultStorage } from './storage'
 import { Updater } from './updater'
+import { fakeHelloSigner } from './fake-hello'
+import { windowsHelloSigner } from './windows-hello'
 import { VaultService } from '@termterm/app'
 
 if (process.env.TERMTERM_DATA_DIR) app.setPath('userData', process.env.TERMTERM_DATA_DIR)
@@ -60,7 +66,37 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
-  const deviceKey = new DeviceKeyStore(join(app.getPath('userData'), 'device-key.bin'))
+  // Where the vault key is kept for unlocking without the master password.
+  // With Windows Hello set up, it is locked behind Hello (face, fingerprint or
+  // PIN) and asked for on the lock screen. Otherwise it is the operating
+  // system's credential store, used silently at launch ("open unlocked").
+  const silentKey = new DeviceKeyStore(join(app.getPath('userData'), 'device-key.bin'))
+  // Automated tests stand in for Windows Hello. Never honoured by a packaged app.
+  const fakeHello = !app.isPackaged && process.env.TERMTERM_FAKE_HELLO === '1'
+  const helloKey = new HelloKeyStore(
+    join(app.getPath('userData'), 'hello-key.json'),
+    fakeHello ? fakeHelloSigner(app.getPath('userData')) : windowsHelloSigner,
+  )
+  let useHello = false
+  /** Settles once it is known whether Windows Hello is set up. */
+  const helloReady: Promise<void> = app
+    .whenReady()
+    .then(() => (process.platform === 'win32' || fakeHello ? helloKey.available() : false))
+    .then((available) => {
+      useHello = available
+      // A silently usable copy would get round Windows Hello, so none may remain.
+      if (useHello) silentKey.clear()
+    })
+  const deviceKey: DeviceKeyStorage = {
+    get userPresence() {
+      return useHello
+    },
+    available: () => (useHello ? helloKey.available() : silentKey.available()),
+    has: async () => (useHello ? helloKey.has() : silentKey.has()),
+    save: (key) => (useHello ? helloKey.save(key) : silentKey.save(key)),
+    load: () => (useHello ? helloKey.load() : silentKey.load()),
+    clear: () => (useHello ? helloKey.clear() : silentKey.clear()),
+  }
   const vault = new VaultService(
     {
       storage: new FileVaultStorage(join(app.getPath('userData'), 'vault.json')),
@@ -72,6 +108,12 @@ if (!app.requestSingleInstanceLock()) {
     (snapshot) => emit('vault:snapshot', snapshot),
     (phase) => emit('phase', phase),
   )
+  // Shells on this computer. They report through the same events as SSH
+  // sessions, so the interface handles both the same way.
+  const local = new LocalTerminals({
+    data: (id, data) => emit('ssh:data', id, data),
+    status: (id, status) => emit('ssh:status', id, status),
+  })
   const ssh = new SshManager(vault, {
     data: (id, data) => emit('ssh:data', id, data),
     status: (id, status) => emit('ssh:status', id, status),
@@ -105,24 +147,38 @@ if (!app.requestSingleInstanceLock()) {
   handle('vault:unlock', (password: string) => vault.unlock(password))
   // Locking wipes the vault key but leaves established SSH sessions running;
   // they no longer need the vault, and the UI hides them until it is unlocked.
-  handle('vault:biometricAvailable', () => false)
-  handle('vault:biometricUnlock', () => {
-    throw new Error('Not available on this device')
+  handle('vault:biometricAvailable', async () => {
+    await helloReady
+    return vault.canUnlockWithDevice()
   })
+  handle('vault:biometricUnlock', () => vault.unlockWithDevice())
   handle('vault:lock', () => vault.lock())
   handle('vault:changePassword', (current: string, next: string) =>
     vault.changePassword(current, next),
   )
   handle('settings:get', () => settings.get())
   handle('settings:save', async (input: Partial<Settings>) => {
+    await helloReady
     if (input?.rememberDevice && !(await deviceKey.available())) {
       throw new Error('No secure credential store is available on this device')
     }
+    const before = settings.get()
     const saved = settings.save(input)
-    await vault.applyRememberDevice()
+    if (saved.rememberDevice === before.rememberDevice) return saved
+    try {
+      // With Windows Hello, turning this on asks for Hello before storing the key.
+      await vault.applyRememberDevice()
+    } catch (err) {
+      settings.save(before)
+      if ((err as Error).message === 'Cancelled') return settings.get()
+      throw err
+    }
     return saved
   })
-  handle('settings:deviceUnlockAvailable', () => deviceKey.available())
+  handle('settings:deviceUnlockAvailable', async () => {
+    await helloReady
+    return deviceKey.available()
+  })
   handle('sync:devices', () => vault.syncDevices())
   handle('sync:revokeDevice', (id: string) => vault.syncRevokeDevice(id))
   handle('vault:snapshot', () => vault.snapshot())
@@ -137,36 +193,68 @@ if (!app.requestSingleInstanceLock()) {
   handle('sync:reauth', (password: string) => vault.syncReauth(password))
   handle('sync:now', () => vault.syncNow())
   handle('sync:disconnect', () => vault.syncDisconnect())
-  handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) =>
-    ssh.connect(String(id), target, Number(cols) || 80, Number(rows) || 24),
-  )
-  handle('app:info', () => ({
-    version: app.getVersion(),
-    packaged: app.isPackaged,
-    capabilities: { ssh: true, keys: true, biometricUnlock: false },
-  }))
+  handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) => {
+    if (target && 'local' in target) {
+      const shell = typeof target.local === 'string' ? target.local : settings.get().defaultShell
+      return local.start(String(id), shell, Number(cols) || 80, Number(rows) || 24)
+    }
+    return ssh.connect(String(id), target, Number(cols) || 80, Number(rows) || 24)
+  })
+  handle('terminal:shells', () => {
+    const shells = local.list()
+    const first = pickShell(shells, settings.get().defaultShell)
+    // The default first, then the rest in the order they were found.
+    return [first, ...shells.filter((s) => s !== first)]
+      .filter((s) => s !== undefined)
+      .map(({ id, name }) => ({ id, name }))
+  })
+  handle('app:info', async () => {
+    await helloReady
+    return {
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      platform: 'desktop' as const,
+      capabilities: {
+        ssh: true,
+        keys: true,
+        biometricUnlock: useHello,
+        biometricName: useHello ? 'Windows Hello' : undefined,
+        localTerminal: true,
+      },
+    }
+  })
   handle('update:state', () => updater.get())
   handle('update:check', () => updater.check())
   handle('update:download', () => updater.download())
   handle('update:install', async () => {
     ssh.closeAll()
+    local.closeAll()
     vault.lock({ forget: false })
     await vault.flush()
     updater.install()
   })
   handle('clipboard:read', () => clipboard.readText())
-  listen('ssh:write', (id: string, data: string) => ssh.write(id, String(data)))
-  listen('ssh:resize', (id: string, cols: number, rows: number) => {
-    if (cols > 0 && rows > 0) ssh.resize(id, Math.floor(cols), Math.floor(rows))
+  listen('ssh:write', (id: string, data: string) => {
+    if (local.has(id)) local.write(id, String(data))
+    else ssh.write(id, String(data))
   })
-  listen('ssh:close', (id: string) => ssh.close(id))
+  listen('ssh:resize', (id: string, cols: number, rows: number) => {
+    if (!(cols > 0 && rows > 0)) return
+    if (local.has(id)) local.resize(id, Math.floor(cols), Math.floor(rows))
+    else ssh.resize(id, Math.floor(cols), Math.floor(rows))
+  })
+  listen('ssh:close', (id: string) => {
+    local.close(id)
+    ssh.close(id)
+  })
   listen('ssh:promptReply', (promptId: string, reply) => ssh.promptReply(promptId, reply))
   listen('clipboard:write', (text: string) => clipboard.writeText(String(text)))
 
   void app.whenReady().then(async () => {
     // macOS needs the default menu for standard edit shortcuts.
     if (!devUrl && process.platform !== 'darwin') Menu.setApplicationMenu(null)
-    await vault.tryDeviceUnlock()
+    await helloReady
+    await vault.tryDeviceUnlock() // does nothing with Windows Hello: the lock screen asks instead
     createWindow()
 
     // Auto-lock: after a period without keyboard or mouse input anywhere on the
@@ -197,6 +285,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     ssh.closeAll()
+    local.closeAll()
     vault.lock({ forget: false })
     // Let the last save reach the disk before the process goes away.
     void vault.flush().finally(() => app.quit())

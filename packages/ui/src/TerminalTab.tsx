@@ -60,6 +60,7 @@ export function TerminalTab({
   const fitRef = useRef<FitAddon | null>(null)
   const [status, setStatus] = useState<SessionStatus>({ state: 'connecting' })
   const [attempt, setAttempt] = useState(0)
+  const isLocal = 'local' in tab.target
   // On a touch screen there is no Esc, Tab, Ctrl or arrow key: offer them.
   const [touch] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false)
   const changeFontSize = (delta: number) => {
@@ -113,6 +114,7 @@ export function TerminalTab({
         if (term.hasSelection()) api.clipboardWrite(term.getSelection())
         return false
       }
+      if (e.code === 'KeyT') return false // Ctrl+Shift+T: a new local terminal, not input
       if (e.code === 'KeyV') {
         e.preventDefault()
         void api.clipboardRead().then((text) => term.paste(text))
@@ -236,7 +238,9 @@ export function TerminalTab({
         <div className={`session-bar ${status.state === 'closed' && status.error ? 'failed' : ''}`} role="status">
           <span>
             {status.state === 'connecting'
-              ? `Connecting to ${tab.title}…`
+              ? isLocal
+                ? `Starting ${tab.title}…`
+                : `Connecting to ${tab.title}…`
               : status.error
                 ? `Disconnected: ${status.error}`
                 : 'Session ended'}
@@ -244,7 +248,7 @@ export function TerminalTab({
           {status.state === 'closed' && (
             <span className="session-actions">
               <Button onClick={() => setAttempt((a) => a + 1)}>
-                <RotateCw size={14} /> Reconnect
+                <RotateCw size={14} /> {isLocal ? 'Restart' : 'Reconnect'}
               </Button>
               <Button variant="ghost" onClick={onClose}>
                 Close tab

@@ -1,5 +1,6 @@
+import { TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
-import type { Settings } from '@termterm/app'
+import type { Settings, LocalShell } from '@termterm/app'
 import { api } from '../api'
 import {
   DEFAULT_LINE_HEIGHT,
@@ -10,6 +11,7 @@ import {
   onTerminalPrefs,
   setTerminalPrefs,
 } from '../terminal-prefs'
+import { notePasswordUsed, REMINDER_DAYS } from '../password-reminder'
 import { AboutCard, useAppInfo } from '../Update'
 import { Button, ErrorText, Field, useAction } from '../ui'
 
@@ -28,6 +30,7 @@ export function SettingsPage({ synced }: { synced: boolean }) {
       <AutoLock />
       <h2 className="section-title spaced">Terminal</h2>
       <TerminalAppearance />
+      <DefaultShell />
       <h2 className="section-title spaced">Master password</h2>
       <ChangePassword synced={synced} />
       <h2 className="section-title spaced">About</h2>
@@ -56,6 +59,44 @@ function UpdatePreference() {
       />
       <span>Check for updates when the app starts</span>
     </label>
+  )
+}
+
+/** Which shell the Terminal button opens, on platforms that have local terminals. */
+function DefaultShell() {
+  const info = useAppInfo()
+  const [shells, setShells] = useState<LocalShell[]>([])
+  const [chosen, setChosen] = useState('')
+  const { error, run } = useAction()
+  useEffect(() => {
+    if (!info?.capabilities.localTerminal) return
+    void api.localShells().then(setShells)
+    void api.settings().then((s) => setChosen(s.defaultShell ?? ''))
+  }, [info?.capabilities.localTerminal])
+  if (!info?.capabilities.localTerminal || shells.length === 0) return null
+  // Sorted by name, so the list does not reorder when the default changes.
+  const sorted = [...shells].sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <div className="form-card spaced-card">
+      <Field label="Terminal on this computer" hint="What the Terminal button and Ctrl+Shift+T open. The arrow next to the button opens any of the others.">
+        <select
+          value={chosen}
+          onChange={(e) => {
+            const value = e.target.value
+            setChosen(value)
+            void run(() => api.saveSettings({ defaultShell: value }))
+          }}
+        >
+          <option value="">System default</option>
+          {sorted.map((shell) => (
+            <option key={shell.id} value={shell.id}>
+              {shell.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <ErrorText error={error} />
+    </div>
   )
 }
 
@@ -101,7 +142,10 @@ function TerminalAppearance() {
 function AutoLock() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [canRemember, setCanRemember] = useState(false)
-  const biometric = useAppInfo()?.capabilities.biometricUnlock ?? false
+  const info = useAppInfo()
+  const biometric = info?.capabilities.biometricUnlock ?? false
+  const hello = info?.capabilities.biometricName
+  const phone = info?.platform === 'mobile'
   const { error, run } = useAction()
   useEffect(() => {
     void api.settings().then(setSettings)
@@ -121,7 +165,7 @@ function AutoLock() {
         label="Lock the vault automatically"
         hint={
           settings.autoLockMinutes > 0
-            ? biometric
+            ? phone
               ? 'Locks after the app has been in the background this long. Open sessions keep running while locked.'
               : 'Also locks when the computer sleeps or its screen is locked. Open sessions keep running while locked.'
             : 'The vault stays unlocked until you lock it or quit.'
@@ -146,10 +190,14 @@ function AutoLock() {
           aria-describedby="remember-hint"
           onChange={(e) => update({ rememberDevice: e.target.checked })}
         />
-        <span>{biometric ? 'Unlock with fingerprint or face' : 'Open unlocked on this device'}</span>
+        <span>
+          {biometric ? `Unlock with ${hello ?? 'fingerprint or face'}` : 'Open unlocked on this device'}
+        </span>
       </label>
       <p className="field-hint" id="remember-hint">
-        {biometric
+        {biometric && hello
+          ? `Keeps the vault key locked by ${hello} (face, fingerprint or PIN), using this computer\u2019s security chip. The lock screen asks for it instead of your master password, which always still works.`
+          : biometric
           ? canRemember
             ? 'Keeps the vault key in this phone\u2019s secure hardware, released only by your fingerprint or face. Your master password still works, and is needed again if you add a new fingerprint.'
             : 'Not available: set up a fingerprint or face unlock in this phone\u2019s settings first.'
@@ -157,6 +205,17 @@ function AutoLock() {
             ? 'Keeps the vault key in this computer\u2019s credential store, so the app starts without asking for the master password. Locking the vault, by hand or automatically, removes it until you next enter the password.'
             : 'Not available: this computer has no secure credential store.'}
       </p>
+      {biometric && (canRemember || settings.rememberDevice) && (
+        <p className="warning" role="note">
+          <TriangleAlert size={16} />
+          <span>
+            {hello ?? 'Fingerprint unlock'} does not replace your master password. You still need it
+            to set up new devices and sync, and if {hello ?? 'fingerprint unlock'} is reset. It
+            cannot be recovered if forgotten, so keep it in a password manager. As a reminder, it
+            is asked for if it has not been used here for {REMINDER_DAYS} days.
+          </span>
+        </p>
+      )}
       <ErrorText error={error} />
     </div>
   )
@@ -173,7 +232,10 @@ function ChangePassword({ synced }: { synced: boolean }) {
     e.preventDefault()
     setDone(false)
     if (next !== confirm) return setError('The new passwords do not match')
-    void run(() => api.changePassword(current, next)).then((ok) => {
+    void run(async () => {
+      await api.changePassword(current, next)
+      notePasswordUsed()
+    }).then((ok) => {
       if (!ok) return
       setCurrent('')
       setNext('')

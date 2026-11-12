@@ -206,6 +206,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
       let privateKey: string | undefined
       let passphrase: string | undefined
 
+      if ('local' in target) throw new Error('A local terminal is not available on a phone')
       if ('hostId' in target) {
         const host = vault.host(target.hostId)
         if (host?.type !== 'host') throw new Error('Host not found')

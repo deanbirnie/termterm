@@ -35,6 +35,10 @@ export class SettingsStore {
     const minutes = Number(raw?.autoLockMinutes)
     return {
       rememberDevice: raw?.rememberDevice === true,
+      defaultShell:
+        typeof raw?.defaultShell === 'string' && /^[a-z0-9-]{1,32}$/.test(raw.defaultShell)
+          ? raw.defaultShell
+          : undefined,
       autoCheckUpdates: raw?.autoCheckUpdates !== false,
       autoLockMinutes:
         Number.isFinite(minutes) && minutes >= 0 && minutes <= 24 * 60

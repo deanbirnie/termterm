@@ -211,6 +211,48 @@ try {
   assert.equal(await a.page.getByRole('dialog').count(), 0)
   step('second tab logged in with the vault key, no trust prompt this time')
 
+  // ---- a terminal on this computer -------------------------------------------------
+  const activeRows = () => a.page.locator('.pane:not([hidden]) .xterm-rows')
+  await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
+  await a.page.getByRole('button', { name: 'Terminal', exact: true }).click()
+  await a.page.waitForTimeout(800) // let the shell print its prompt
+  await a.page.keyboard.type('echo local-$((6*7))')
+  await a.page.keyboard.press('Enter')
+  await activeRows().getByText('local-42').waitFor()
+  step('the Terminal button opened a shell on this computer, which ran a command')
+
+  await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
+  await a.page.getByRole('button', { name: 'Choose a shell' }).click()
+  await a.page.getByRole('menuitem', { name: /Bash/ }).waitFor()
+  await shot(a.page, '07-shell-menu')
+  await a.page.getByRole('menuitem', { name: /^sh$/ }).click()
+  await a.page.getByRole('tab', { name: /^sh/ }).waitFor()
+  await a.page.waitForTimeout(500)
+  await a.page.keyboard.type('echo sh-$((2+2)); exit')
+  await a.page.keyboard.press('Enter')
+  await a.page.getByText('Session ended').waitFor()
+  await a.page.getByRole('button', { name: 'Restart' }).click()
+  await a.page.waitForTimeout(500)
+  await a.page.keyboard.type('echo again-$((3+3))')
+  await a.page.keyboard.press('Enter')
+  await activeRows().getByText('again-6').waitFor()
+  step('the shell menu opened another shell; it can exit and be restarted')
+
+  // The default shell is a setting; Ctrl+Shift+T opens it.
+  await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
+  await a.page.getByRole('navigation').getByRole('button', { name: 'Settings', exact: true }).click()
+  await a.page.getByLabel('Terminal on this computer').selectOption('sh')
+  await a.page.waitForTimeout(300)
+  await a.page.keyboard.press('Control+Shift+T')
+  await assertCount(a.page.getByRole('tab', { name: /^sh/ }), 2)
+  await a.page.getByRole('button', { name: 'Vault', exact: true }).click() // the shortcut switched to the new tab
+  await a.page.getByLabel('Terminal on this computer').selectOption('')
+  for (const name of ['sh', 'sh', 'Bash']) {
+    await a.page.getByRole('button', { name: `Close ${name}` }).first().click()
+  }
+  await a.page.getByRole('navigation').getByRole('button', { name: 'Hosts', exact: true }).click()
+  step('a chosen default shell opens with Ctrl+Shift+T')
+
   // ---- device B: sign in, everything arrives, no trust prompt --------------------
   const b = await launch('device-b')
   await b.page.getByRole('tab', { name: 'I already have one' }).click()
@@ -433,6 +475,67 @@ try {
   assert.equal(await noFeed.page.getByRole('button', { name: 'Check for updates' }).count(), 0)
   await noFeed.app.close()
   step('a build run from source reports that it cannot update itself')
+
+  // ---- Windows Hello: a choice of Hello or master password on the lock screen ------
+  // (A stand-in for Windows Hello; the real one needs a Windows machine with it set up.)
+  const fakeHello = { TERMTERM_FAKE_HELLO: '1' }
+  const h = await launch('device-a', fakeHello)
+  // Hello replaces "open unlocked": the silently usable key is gone, so this launch asks.
+  await h.page.getByText('Vault locked').waitFor()
+  assert.ok(!existsSync(join(a.dataDir, 'device-key.bin')), 'a silent key survived switching to Hello')
+  await h.page.getByLabel('Master password').fill(NEW_MASTER)
+  await h.page.getByRole('button', { name: 'Unlock', exact: true }).click()
+  await h.page.locator('.card', { hasText: 'Renamed on B' }).waitFor()
+  for (let i = 0; i < 100 && !existsSync(join(a.dataDir, 'hello-key.json')); i++) {
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  assert.ok(existsSync(join(a.dataDir, 'hello-key.json')), 'Windows Hello was not set up after unlocking')
+  await nav(h.page, 'Settings').click()
+  await h.page.getByText('Unlock with Windows Hello', { exact: true }).waitFor()
+
+  await h.page.getByRole('button', { name: 'Lock vault' }).click()
+  await h.page.getByText('Choose how to unlock.').waitFor()
+  await assertCount(h.page.getByLabel('Master password'), 0) // nothing happens until the user picks
+  await shot(h.page, '13-unlock-choice')
+  await h.page.getByRole('button', { name: 'Unlock with Windows Hello' }).click()
+  await h.page.getByRole('button', { name: 'Lock vault' }).waitFor()
+  step('lock screen offers Windows Hello or the master password; Hello unlocked')
+
+  await h.page.getByRole('button', { name: 'Lock vault' }).click()
+  await h.page.getByRole('button', { name: 'Use master password' }).click()
+  await h.page.getByLabel('Master password').fill(NEW_MASTER)
+  await h.page.getByRole('button', { name: 'Unlock', exact: true }).click()
+  await h.page.getByRole('button', { name: 'Lock vault' }).waitFor()
+  step('choosing the master password unlocks with it')
+
+  await h.page.getByRole('button', { name: 'Lock vault' }).click()
+  writeFileSync(join(a.dataDir, 'fake-hello-cancel'), '')
+  await h.page.getByRole('button', { name: 'Unlock with Windows Hello' }).click()
+  await h.page.getByRole('button', { name: 'Unlock with Windows Hello' }).waitFor()
+  assert.equal(await h.page.getByText('Vault locked').count(), 1)
+  assert.equal(await h.page.locator('.error').count(), 0) // a cancel is not an error
+  await h.page.getByRole('button', { name: 'Use master password' }).click()
+  await h.page.getByRole('button', { name: 'Use Windows Hello instead' }).click()
+  await h.page.getByRole('button', { name: 'Lock vault' }).waitFor()
+  step('a cancelled Hello prompt leaves both choices; Hello is offered from the password form too')
+
+  // After two weeks without the master password, the lock screen asks for it first.
+  await nav(h.page, 'Settings').click()
+  await h.page.getByText('does not replace your master password').waitFor()
+  await h.page.evaluate(() =>
+    localStorage.setItem('termterm.lastPasswordUse', String(Date.now() - 15 * 24 * 60 * 60 * 1000)),
+  )
+  await h.page.getByRole('button', { name: 'Lock vault' }).click()
+  await h.page.getByText('for over 14 days').waitFor()
+  await shot(h.page, '14-password-reminder')
+  await h.page.getByLabel('Master password').fill(NEW_MASTER)
+  await h.page.getByRole('button', { name: 'Unlock', exact: true }).click()
+  await h.page.getByRole('button', { name: 'Lock vault' }).click()
+  await h.page.getByText('Choose how to unlock.').waitFor() // using it reset the reminder
+  await h.page.getByRole('button', { name: 'Unlock with Windows Hello' }).click()
+  await h.page.getByRole('button', { name: 'Lock vault' }).waitFor()
+  await h.app.close()
+  step('Settings warns that Hello does not replace the password; a 14-day reminder asks for it')
 
   impostor.close()
   console.log('\nE2E smoke test passed')

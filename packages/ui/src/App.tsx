@@ -1,11 +1,11 @@
-import { Lock, Plus, Server, Terminal as TerminalIcon, X } from 'lucide-react'
+import { Laptop, Lock, Plus, Server, Terminal as TerminalIcon, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { AppPhase, ConnectTarget, SshPrompt, VaultSnapshot } from '@termterm/app'
 import { api } from './api'
 import { Onboarding, Unlock } from './Auth'
 import { PromptDialog } from './Prompts'
 import { TerminalTab } from './TerminalTab'
-import { UpdatePill } from './Update'
+import { UpdatePill, useAppInfo } from './Update'
 import { VaultView } from './VaultView'
 
 export interface SessionTab {
@@ -51,11 +51,25 @@ function Workspace({ locked }: { locked: boolean }) {
 
   useEffect(() => api.onSshPrompt((p) => setPrompts((q) => [...q, p])), [])
 
+
   const connect = useCallback((target: ConnectTarget, title: string) => {
     const id = crypto.randomUUID()
     setTabs((t) => [...t, { id, title, target }])
     setActive(id)
   }, [])
+
+  // Ctrl+Shift+T opens a terminal on this computer, where the app can.
+  const localTerminal = useAppInfo()?.capabilities.localTerminal ?? false
+  useEffect(() => {
+    if (!localTerminal || locked) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || !e.shiftKey || e.code !== 'KeyT') return
+      e.preventDefault()
+      void api.localShells().then((shells) => connect({ local: null }, shells[0]?.name ?? 'Terminal'))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [localTerminal, locked])
 
   const closeTab = useCallback((id: string) => {
     api.sshClose(id)
@@ -93,7 +107,7 @@ function Workspace({ locked }: { locked: boolean }) {
               onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
               title={tab.title}
             >
-              <TerminalIcon size={14} />
+              {'local' in tab.target ? <Laptop size={14} /> : <TerminalIcon size={14} />}
               <span className="tab-title">{tab.title}</span>
               <button
                 className="tab-close"

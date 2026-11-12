@@ -55,6 +55,7 @@ export class SshManager {
     let privateKey: string | undefined
     let passphrase: string | undefined
 
+    if ('local' in target) throw new Error('Not an SSH target')
     if ('hostId' in target) {
       const host = this.vault.host(target.hostId)
       if (host?.type !== 'host') throw new Error('Host not found')

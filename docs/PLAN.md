@@ -62,7 +62,7 @@ Decisions worth knowing before changing things:
 
 Automated, on every relevant change (see `.github/workflows/build.yml`):
 
-- `npm test`: 29 unit and integration tests for the vault, sync, server and the shared app logic.
+- `npm test`: 37 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
 - `npm run e2e`: two desktop app instances against a throwaway SSH server and
   sync server (vault, keys, hosts, sync, password and key logins, password
   change, remote sign-out, turning sync off and signing back in, lock with
@@ -88,6 +88,7 @@ Not yet confirmed anywhere:
 - Android SSH sessions, the extra key row and on-screen keyboard behaviour on
   a real device (added after the last device test).
 - Android fingerprint unlock, background sessions and the new icon on a device.
+- Windows Hello unlock on a real Windows machine.
 - A signed release APK (needs the signing key secrets, then a release).
 - The Windows in-app update from one release to the next.
 - "Open unlocked on this device" against a real OS credential store.
@@ -122,7 +123,26 @@ Known gaps inside phase 1 scope:
       without a real keyring. Tested in e2e with a stand-in store
       (`TERMTERM_INSECURE_KEYSTORE=1`, tests only); **not yet run against real
       DPAPI / Keychain / libsecret.**
-- [ ] Optional biometric gate (Windows Hello / Touch ID) in front of the stored key
+- [x] Windows Hello unlock (`apps/desktop/src/main/hello-key-store.ts`,
+      `windows-hello.ts`, `windows-hello.ps1`): the vault key encrypted under a
+      key derived from a Windows Hello signature of a random challenge (Hello
+      keys are TPM-backed RSA and sign deterministically). Runs through the
+      system's Windows PowerShell 5.1 to reach the Windows Runtime API, so no
+      native module is needed. When Hello is set up it replaces "open unlocked"
+      and any silently usable copy of the key is deleted. Unit-tested with a fake
+      signer; CI runs the script on Windows for the steps that need no person.
+      Settings warns, next to the option, that Hello does not replace the master
+      password, and the lock screen asks for the password first if it has not
+      been used on that device for 14 days (`packages/ui/src/password-reminder.ts`,
+      also for phone fingerprint unlock).
+      The lock screen offers a choice of Windows Hello or the master password and
+      starts neither until one is picked (the phone still opens its fingerprint
+      prompt at once). The desktop e2e covers this flow with a stand-in signer
+      (`fake-hello.ts`, `TERMTERM_FAKE_HELLO=1`, ignored by packaged apps).
+      **The prompt itself has not been run**: no Windows machine with Hello was
+      available. Open questions: whether the prompt comes to the front reliably
+      (the script raises it by window class), and whether setup asks twice.
+- [ ] Touch ID unlock on macOS (after a macOS build exists)
 - [x] Auto-lock after system idle time and on sleep / screen lock (device-local `settings.json`, default 15 minutes). The idle timer itself has no automated test.
 - [x] Locking keeps established SSH sessions running (hidden until unlock)
 - [x] Device list and remote sign-out (`/v1/sessions*`); device names are sealed with the vault key so the server cannot read them
@@ -136,7 +156,15 @@ Known gaps inside phase 1 scope:
 ## Phase 3 — Terminal and session features
 
 - [ ] Split panes / tiling of sessions inside a tab
-- [ ] Local terminal tab (`node-pty`)
+- [x] Local terminal tab (desktop): `apps/desktop/src/main/local-terminal.ts` runs the
+      shell in a pseudo-terminal through `node-pty` (prebuilt binaries for Windows and
+      macOS, N-API so no rebuild for Electron; built from source on Linux) and reports
+      through the same events as SSH, so `TerminalTab` serves both. Shells are
+      detected by `local-shells.ts` (unit-tested for Windows and Unix layouts); a split
+      "Terminal" button lists them, Settings picks the default, Ctrl+Shift+T opens it.
+      Not on Android, where apps only reach a restricted built-in shell. CI starts
+      every detected shell on Windows and checks it runs a command
+      (`scripts/check-local-shells.mjs`); **not yet used on a Windows desktop by hand.**
 - [ ] Reconnect, keep-alive settings, per-host startup snippet, env vars
 - [ ] Host chaining (jump hosts / ProxyJump), SOCKS/HTTP proxy
 - [ ] Port forwarding (local, remote, dynamic) as vault items

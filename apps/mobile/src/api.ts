@@ -179,6 +179,7 @@ export function createApi(): TermtermApi {
     syncRevokeDevice: (id) => vault.syncRevokeDevice(id),
 
     sshConnect: async (sessionId, target, cols, rows) => {
+      if ('local' in target) throw new Error('A local terminal is not available on a phone')
       if (!ssh) throw new Error(SSH_UNAVAILABLE)
       await ssh.connect(sessionId, target, cols, rows)
     },
@@ -196,8 +197,10 @@ export function createApi(): TermtermApi {
     appInfo: async () => ({
       version: __APP_VERSION__,
       packaged: Capacitor.isNativePlatform(),
+      platform: 'mobile',
       capabilities: { ssh: NATIVE, keys: NATIVE, biometricUnlock: true },
     }),
+    localShells: async () => [],
     updateState: async () => updateState,
     onUpdateState: () => () => undefined,
     updateCheck: async () => updateState,
