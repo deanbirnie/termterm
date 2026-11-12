@@ -14,6 +14,45 @@ host yourself.
 What comes next is tracked in [docs/PLAN.md](docs/PLAN.md). Keeping
 dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENANCE.md).
 
+## Screenshots
+
+<img src="docs/screenshots/desktop-terminal.png" alt="The desktop app with two SSH sessions open in tabs, one showing command output and the snippets menu">
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/desktop-hosts.png" alt="Hosts, with one open in the details panel"></td>
+    <td width="33%"><img src="docs/screenshots/desktop-keychain.png" alt="The keychain, showing a key's public half and fingerprint"></td>
+    <td width="33%"><img src="docs/screenshots/desktop-lock.png" alt="The lock screen offering Windows Hello or the master password"></td>
+  </tr>
+  <tr>
+    <td align="center">Hosts and their details</td>
+    <td align="center">Keychain</td>
+    <td align="center">Unlock with Windows Hello or the master password</td>
+  </tr>
+</table>
+
+On Android:
+
+<table>
+  <tr>
+    <td width="25%"><img src="docs/screenshots/mobile-hosts.png" alt="The host list on a phone"></td>
+    <td width="25%"><img src="docs/screenshots/mobile-host.png" alt="A host's details on a phone"></td>
+    <td width="25%"><img src="docs/screenshots/mobile-terminal.png" alt="An SSH session on a phone, with the extra key row"></td>
+    <td width="25%"><img src="docs/screenshots/mobile-settings.png" alt="Settings on a phone: auto-lock, fingerprint unlock and terminal appearance"></td>
+  </tr>
+  <tr>
+    <td align="center">Hosts</td>
+    <td align="center">Host details</td>
+    <td align="center">Terminal, with Esc, Tab, Ctrl and arrow keys</td>
+    <td align="center">Settings</td>
+  </tr>
+</table>
+
+The screenshots use a made-up demo vault. To take them again after interface
+changes, run `npm run screenshots` in `apps/desktop` (under `xvfb-run -a` on
+Linux without a display) and in `apps/mobile` (with `CHROME_PATH` set to a
+Chromium-based browser).
+
 ## Layout
 
 | Path | What |

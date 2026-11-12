@@ -12,7 +12,8 @@
     "e2e": "vite build && node e2e/smoke.mjs",
     "sync": "vite build && cap sync android",
     "apk": "npm run sync && cd android && ./gradlew assembleDebug",
-    "test:ssh": "bash ssh-test/run.sh"
+    "test:ssh": "bash ssh-test/run.sh",
+    "screenshots": "vite build && node e2e/screenshots.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
