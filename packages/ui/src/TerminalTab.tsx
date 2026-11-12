@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { SessionStatus, SnippetView } from '@termterm/app'
 import { api, errorMessage } from './api'
 import type { SessionTab } from './App'
+import { defaultFontSize, getTerminalPrefs, onTerminalPrefs, setTerminalPrefs } from './terminal-prefs'
 import { Button } from './ui'
 
 const THEME = {
@@ -43,19 +44,6 @@ const EXTRA_KEYS = [
   { label: '~', name: 'Tilde', send: '~' },
 ]
 
-const FONT_KEY = 'termterm.terminalFontSize'
-const FONT_MIN = 7
-const FONT_MAX = 24
-
-function storedFontSize(): number | null {
-  try {
-    const size = Number(localStorage.getItem(FONT_KEY))
-    return size >= FONT_MIN && size <= FONT_MAX ? size : null
-  } catch {
-    return null
-  }
-}
-
 export function TerminalTab({
   tab,
   active,
@@ -74,18 +62,9 @@ export function TerminalTab({
   const [attempt, setAttempt] = useState(0)
   // On a touch screen there is no Esc, Tab, Ctrl or arrow key: offer them.
   const [touch] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false)
-  // Smaller text by default on a phone, where width is scarce; adjustable either way.
-  const fontSizeRef = useRef(storedFontSize() ?? (touch ? 11.5 : 13.5))
   const changeFontSize = (delta: number) => {
-    const size = Math.min(FONT_MAX, Math.max(FONT_MIN, fontSizeRef.current + delta))
-    fontSizeRef.current = size
-    try {
-      localStorage.setItem(FONT_KEY, String(size))
-    } catch {
-      // not remembered, but still applied
-    }
-    if (termRef.current) termRef.current.options.fontSize = size
-    fitRef.current?.fit()
+    const current = getTerminalPrefs().fontSize ?? defaultFontSize(touch)
+    setTerminalPrefs({ fontSize: current + delta }) // open terminals update through onTerminalPrefs
     termRef.current?.focus()
   }
   const [ctrl, setCtrl] = useState(false)
@@ -97,10 +76,12 @@ export function TerminalTab({
   const [snippetsOpen, setSnippetsOpen] = useState(false)
 
   useEffect(() => {
+    const prefs = getTerminalPrefs()
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: '"Cascadia Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
-      fontSize: fontSizeRef.current,
+      fontSize: prefs.fontSize ?? defaultFontSize(touch),
+      lineHeight: prefs.lineHeight,
       scrollback: 10_000,
       theme: THEME,
     })
@@ -153,6 +134,12 @@ export function TerminalTab({
       term.onResize(({ cols, rows }) => api.sshResize(tab.id, cols, rows)),
     ]
     const off = [
+      // Text size or row spacing changed, here or in Settings.
+      onTerminalPrefs((next) => {
+        term.options.fontSize = next.fontSize ?? defaultFontSize(touch)
+        term.options.lineHeight = next.lineHeight
+        if (hostRef.current?.offsetParent) fit.fit()
+      }),
       api.onSshData((id, data) => id === tab.id && term.write(data)),
       api.onSshStatus((id, s) => id === tab.id && setStatus(s)),
     ]

@@ -179,7 +179,9 @@ Known gaps inside phase 1 scope:
         The terminal also switches the on-screen keyboard to plain typing while it
         has focus (`TerminalWebView.java`: the field is reported as a
         no-suggestions visible-password field, because keyboards ignore the web's
-        autocorrect hints), and has text-size buttons in the key row.
+        autocorrect hints), and has text-size buttons in the key row. Row spacing
+        and text size are per-device preferences (`packages/ui/src/terminal-prefs.ts`),
+        set under Settings → Terminal on every platform.
         **None of these Android parts has been confirmed on a device**, though SSH
         sessions themselves have been used on a phone. Open questions
         for a device test: whether long-idle sessions survive Doze without a wake
