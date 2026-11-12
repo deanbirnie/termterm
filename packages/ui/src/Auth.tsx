@@ -1,6 +1,7 @@
 import { Fingerprint, KeyRound } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, errorMessage } from './api'
+import { notePasswordUsed, passwordReminderDue, REMINDER_DAYS } from './password-reminder'
 import { useAppInfo } from './Update'
 import { Button, ErrorText, Field, InsecureUrlHint, useAction } from './ui'
 
@@ -25,6 +26,8 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
   const [biometric, setBiometric] = useState<boolean | null>(null)
   /** With both options on offer, which one the user picked. Nothing happens until they pick. */
   const [mode, setMode] = useState<'choose' | 'password'>('choose')
+  /** Set when the master password has not been used for a while, so it is asked for first. */
+  const [reminder, setReminder] = useState(false)
   const info = useAppInfo()
   const biometricName = info?.capabilities.biometricName ?? 'fingerprint or face'
   const { busy, error, run, setError } = useAction()
@@ -51,6 +54,11 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
       .then((available) => {
         if (!current) return
         setBiometric(available)
+        if (available && passwordReminderDue()) {
+          setReminder(true)
+          setMode('password')
+          return
+        }
         // On a phone the fingerprint prompt is expected straight away. On a
         // computer nothing pops up until the user chooses.
         if (available && info?.platform === 'mobile') unlockWithBiometrics()
@@ -62,7 +70,10 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    void run(() => api.unlock(password))
+    void run(async () => {
+      await api.unlock(password)
+      notePasswordUsed()
+    })
   }
   const choose = (next: 'choose' | 'password') => {
     setError(null)
@@ -96,6 +107,16 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
         </div>
       ) : (
         <form onSubmit={submit}>
+          {reminder && (
+            <p className="note reminder" role="note">
+              <KeyRound size={16} />
+              <span>
+                You have not used your master password on this device for over {REMINDER_DAYS} days.
+                Enter it this time so you do not forget it: it cannot be recovered, and you need
+                it to set up new devices.
+              </span>
+            </p>
+          )}
           <Field label="Master password">
             <input
               type="password"
@@ -131,9 +152,15 @@ export function Onboarding() {
     e.preventDefault()
     if (mode === 'create') {
       if (password !== confirm) return setError('The passwords do not match')
-      void run(() => api.createVault(password))
+      void run(async () => {
+        await api.createVault(password)
+        notePasswordUsed()
+      })
     } else {
-      void run(() => api.signIn({ serverUrl, username, password }))
+      void run(async () => {
+        await api.signIn({ serverUrl, username, password })
+        notePasswordUsed()
+      })
     }
   }
 

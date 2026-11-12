@@ -1,3 +1,4 @@
+import { TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Settings } from '@termterm/app'
 import { api } from '../api'
@@ -10,6 +11,7 @@ import {
   onTerminalPrefs,
   setTerminalPrefs,
 } from '../terminal-prefs'
+import { notePasswordUsed, REMINDER_DAYS } from '../password-reminder'
 import { AboutCard, useAppInfo } from '../Update'
 import { Button, ErrorText, Field, useAction } from '../ui'
 
@@ -164,6 +166,17 @@ function AutoLock() {
             ? 'Keeps the vault key in this computer\u2019s credential store, so the app starts without asking for the master password. Locking the vault, by hand or automatically, removes it until you next enter the password.'
             : 'Not available: this computer has no secure credential store.'}
       </p>
+      {biometric && (canRemember || settings.rememberDevice) && (
+        <p className="warning" role="note">
+          <TriangleAlert size={16} />
+          <span>
+            {hello ?? 'Fingerprint unlock'} does not replace your master password. You still need it
+            to set up new devices and sync, and if {hello ?? 'fingerprint unlock'} is reset. It
+            cannot be recovered if forgotten, so keep it in a password manager. As a reminder, it
+            is asked for if it has not been used here for {REMINDER_DAYS} days.
+          </span>
+        </p>
+      )}
       <ErrorText error={error} />
     </div>
   )
@@ -180,7 +193,10 @@ function ChangePassword({ synced }: { synced: boolean }) {
     e.preventDefault()
     setDone(false)
     if (next !== confirm) return setError('The new passwords do not match')
-    void run(() => api.changePassword(current, next)).then((ok) => {
+    void run(async () => {
+      await api.changePassword(current, next)
+      notePasswordUsed()
+    }).then((ok) => {
       if (!ok) return
       setCurrent('')
       setNext('')

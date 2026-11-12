@@ -475,8 +475,25 @@ try {
   await h.page.getByRole('button', { name: 'Use master password' }).click()
   await h.page.getByRole('button', { name: 'Use Windows Hello instead' }).click()
   await h.page.getByRole('button', { name: 'Lock vault' }).waitFor()
-  await h.app.close()
   step('a cancelled Hello prompt leaves both choices; Hello is offered from the password form too')
+
+  // After two weeks without the master password, the lock screen asks for it first.
+  await nav(h.page, 'Settings').click()
+  await h.page.getByText('does not replace your master password').waitFor()
+  await h.page.evaluate(() =>
+    localStorage.setItem('termterm.lastPasswordUse', String(Date.now() - 15 * 24 * 60 * 60 * 1000)),
+  )
+  await h.page.getByRole('button', { name: 'Lock vault' }).click()
+  await h.page.getByText('for over 14 days').waitFor()
+  await shot(h.page, '14-password-reminder')
+  await h.page.getByLabel('Master password').fill(NEW_MASTER)
+  await h.page.getByRole('button', { name: 'Unlock', exact: true }).click()
+  await h.page.getByRole('button', { name: 'Lock vault' }).click()
+  await h.page.getByText('Choose how to unlock.').waitFor() // using it reset the reminder
+  await h.page.getByRole('button', { name: 'Unlock with Windows Hello' }).click()
+  await h.page.getByRole('button', { name: 'Lock vault' }).waitFor()
+  await h.app.close()
+  step('Settings warns that Hello does not replace the password; a 14-day reminder asks for it')
 
   impostor.close()
   console.log('\nE2E smoke test passed')

@@ -312,6 +312,10 @@ with **dry run** ticked.
   with a key derived from a Windows Hello signature, whose private key stays
   in the computer's security chip, so the file on disk is useless without
   Windows Hello and the user. The master password always still works.
+  Windows Hello does not replace the master password, which is still needed
+  for new devices and sync and cannot be recovered; to keep it from being
+  forgotten, the lock screen asks for it if it has not been used on that
+  device for 14 days.
 - Elsewhere, the vault key can optionally be kept in the operating system's
   credential store (DPAPI, Keychain, or the desktop keyring) so the app opens
   unlocked. Locking the vault removes that stored key until the password is
