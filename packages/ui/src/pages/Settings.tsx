@@ -1,6 +1,6 @@
 import { TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
-import type { Settings } from '@termterm/app'
+import type { Settings, LocalShell } from '@termterm/app'
 import { api } from '../api'
 import {
   DEFAULT_LINE_HEIGHT,
@@ -30,6 +30,7 @@ export function SettingsPage({ synced }: { synced: boolean }) {
       <AutoLock />
       <h2 className="section-title spaced">Terminal</h2>
       <TerminalAppearance />
+      <DefaultShell />
       <h2 className="section-title spaced">Master password</h2>
       <ChangePassword synced={synced} />
       <h2 className="section-title spaced">About</h2>
@@ -58,6 +59,44 @@ function UpdatePreference() {
       />
       <span>Check for updates when the app starts</span>
     </label>
+  )
+}
+
+/** Which shell the Terminal button opens, on platforms that have local terminals. */
+function DefaultShell() {
+  const info = useAppInfo()
+  const [shells, setShells] = useState<LocalShell[]>([])
+  const [chosen, setChosen] = useState('')
+  const { error, run } = useAction()
+  useEffect(() => {
+    if (!info?.capabilities.localTerminal) return
+    void api.localShells().then(setShells)
+    void api.settings().then((s) => setChosen(s.defaultShell ?? ''))
+  }, [info?.capabilities.localTerminal])
+  if (!info?.capabilities.localTerminal || shells.length === 0) return null
+  // Sorted by name, so the list does not reorder when the default changes.
+  const sorted = [...shells].sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <div className="form-card spaced-card">
+      <Field label="Terminal on this computer" hint="What the Terminal button and Ctrl+Shift+T open. The arrow next to the button opens any of the others.">
+        <select
+          value={chosen}
+          onChange={(e) => {
+            const value = e.target.value
+            setChosen(value)
+            void run(() => api.saveSettings({ defaultShell: value }))
+          }}
+        >
+          <option value="">System default</option>
+          {sorted.map((shell) => (
+            <option key={shell.id} value={shell.id}>
+              {shell.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <ErrorText error={error} />
+    </div>
   )
 }
 

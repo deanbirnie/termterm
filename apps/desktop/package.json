@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.11",
+    "node-pty": "^1.1.0",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
@@ -35,7 +36,9 @@
     },
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/node-pty/{src,deps,third_party,scripts,binding.gyp,typings}/**",
+      "!**/node_modules/node-pty/**/*.pdb"
     ],
     "win": {
       "target": [
@@ -80,6 +83,9 @@
         "repo": "termterm",
         "releaseType": "release"
       }
+    ],
+    "asarUnpack": [
+      "**/node_modules/node-pty/**"
     ]
   },
   "author": "termterm",

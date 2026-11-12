@@ -10,6 +10,9 @@ host yourself.
   server that only ever stores ciphertext.
 - **Terminal** — SSH sessions in tabs (xterm.js), password / key /
   keyboard-interactive login, host key verification, run snippets in a session.
+  On desktop, a **Terminal** button (or Ctrl+Shift+T) also opens a shell on your
+  own computer, with a choice of the shells installed: PowerShell, Command
+  Prompt, WSL and Git Bash on Windows; zsh, Bash, fish and others elsewhere.
 
 What comes next is tracked in [docs/PLAN.md](docs/PLAN.md). Keeping
 dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENANCE.md).

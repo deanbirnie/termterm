@@ -2,6 +2,7 @@ import { KeyRound, Plus, Server, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
+import { LocalTerminalButton } from '../LocalTerminalButton'
 import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, useAction } from '../ui'
 
@@ -34,7 +35,9 @@ export function HostsPage({
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
   // Assume full capability until told otherwise, so nothing flickers on desktop.
-  const canConnect = useAppInfo()?.capabilities.ssh ?? true
+  const info = useAppInfo()
+  const canConnect = info?.capabilities.ssh ?? true
+  const localTerminal = info?.capabilities.localTerminal ?? false
   const quick = canConnect ? parseQuickConnect(query) : null
   const explicit = /^ssh\s|@/.test(query.trim())
 
@@ -84,6 +87,9 @@ export function HostsPage({
           <Button onClick={() => setEditing({ id: null })}>
             <Plus size={15} /> New host
           </Button>
+          {localTerminal && (
+            <LocalTerminalButton onOpen={(shell, title) => onConnect({ local: shell?.id ?? null }, title)} />
+          )}
         </div>
 
         {snapshot.hosts.length === 0 ? (

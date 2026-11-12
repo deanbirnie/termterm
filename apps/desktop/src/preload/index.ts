@@ -60,6 +60,7 @@ const api: TermtermApi = {
   onSshStatus: on('ssh:status'),
   onSshPrompt: on('ssh:prompt'),
   appInfo: invoke('app:info'),
+  localShells: invoke('terminal:shells'),
   updateState: invoke('update:state'),
   onUpdateState: on('update:state'),
   updateCheck: invoke('update:check'),

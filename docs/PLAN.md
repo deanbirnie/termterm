@@ -156,7 +156,15 @@ Known gaps inside phase 1 scope:
 ## Phase 3 — Terminal and session features
 
 - [ ] Split panes / tiling of sessions inside a tab
-- [ ] Local terminal tab (`node-pty`)
+- [x] Local terminal tab (desktop): `apps/desktop/src/main/local-terminal.ts` runs the
+      shell in a pseudo-terminal through `node-pty` (prebuilt binaries for Windows and
+      macOS, N-API so no rebuild for Electron; built from source on Linux) and reports
+      through the same events as SSH, so `TerminalTab` serves both. Shells are
+      detected by `local-shells.ts` (unit-tested for Windows and Unix layouts); a split
+      "Terminal" button lists them, Settings picks the default, Ctrl+Shift+T opens it.
+      Not on Android, where apps only reach a restricted built-in shell. CI starts
+      every detected shell on Windows and checks it runs a command
+      (`scripts/check-local-shells.mjs`); **not yet used on a Windows desktop by hand.**
 - [ ] Reconnect, keep-alive settings, per-host startup snippet, env vars
 - [ ] Host chaining (jump hosts / ProxyJump), SOCKS/HTTP proxy
 - [ ] Port forwarding (local, remote, dynamic) as vault items

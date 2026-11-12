@@ -67,6 +67,8 @@ export interface Settings {
   rememberDevice: boolean
   /** Look for a new release shortly after launch. Nothing is downloaded without asking. */
   autoCheckUpdates: boolean
+  /** The local shell the Terminal button opens (a LocalShell id); unset for the system default. */
+  defaultShell?: string
 }
 
 export interface AppInfo {
@@ -84,6 +86,8 @@ export interface AppInfo {
     biometricUnlock: boolean
     /** What the check is called on this device, for example "Windows Hello". */
     biometricName?: string
+    /** Can open a terminal running a shell on this computer. */
+    localTerminal?: boolean
   }
 }
 
@@ -133,6 +137,13 @@ export interface AccountInput {
 export type ConnectTarget =
   | { hostId: string }
   | { address: string; port: number; username: string }
+  /** A shell on this computer: a shell id from localShells(), or null for the default. */
+  | { local: string | null }
+
+export interface LocalShell {
+  id: string
+  name: string
+}
 
 export type SessionStatus =
   | { state: 'connecting' }
@@ -215,6 +226,8 @@ export interface TermtermApi {
   onSshPrompt(cb: (prompt: SshPrompt) => void): () => void
 
   appInfo(): Promise<AppInfo>
+  /** Shells on this computer, the one the Terminal button opens by default first. */
+  localShells(): Promise<LocalShell[]>
   updateState(): Promise<UpdateState>
   onUpdateState(cb: (state: UpdateState) => void): () => void
   updateCheck(): Promise<UpdateState>

@@ -7,6 +7,8 @@ import { DeviceKeyStore } from './device-key'
 import { HelloKeyStore } from './hello-key-store'
 import { keyTools } from './keys'
 import { SettingsStore } from './settings'
+import { LocalTerminals } from './local-terminal'
+import { pickShell } from './local-shells'
 import { SshManager } from './ssh'
 import { FileVaultStorage } from './storage'
 import { Updater } from './updater'
@@ -106,6 +108,12 @@ if (!app.requestSingleInstanceLock()) {
     (snapshot) => emit('vault:snapshot', snapshot),
     (phase) => emit('phase', phase),
   )
+  // Shells on this computer. They report through the same events as SSH
+  // sessions, so the interface handles both the same way.
+  const local = new LocalTerminals({
+    data: (id, data) => emit('ssh:data', id, data),
+    status: (id, status) => emit('ssh:status', id, status),
+  })
   const ssh = new SshManager(vault, {
     data: (id, data) => emit('ssh:data', id, data),
     status: (id, status) => emit('ssh:status', id, status),
@@ -185,9 +193,21 @@ if (!app.requestSingleInstanceLock()) {
   handle('sync:reauth', (password: string) => vault.syncReauth(password))
   handle('sync:now', () => vault.syncNow())
   handle('sync:disconnect', () => vault.syncDisconnect())
-  handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) =>
-    ssh.connect(String(id), target, Number(cols) || 80, Number(rows) || 24),
-  )
+  handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) => {
+    if (target && 'local' in target) {
+      const shell = typeof target.local === 'string' ? target.local : settings.get().defaultShell
+      return local.start(String(id), shell, Number(cols) || 80, Number(rows) || 24)
+    }
+    return ssh.connect(String(id), target, Number(cols) || 80, Number(rows) || 24)
+  })
+  handle('terminal:shells', () => {
+    const shells = local.list()
+    const first = pickShell(shells, settings.get().defaultShell)
+    // The default first, then the rest in the order they were found.
+    return [first, ...shells.filter((s) => s !== first)]
+      .filter((s) => s !== undefined)
+      .map(({ id, name }) => ({ id, name }))
+  })
   handle('app:info', async () => {
     await helloReady
     return {
@@ -199,6 +219,7 @@ if (!app.requestSingleInstanceLock()) {
         keys: true,
         biometricUnlock: useHello,
         biometricName: useHello ? 'Windows Hello' : undefined,
+        localTerminal: true,
       },
     }
   })
@@ -207,16 +228,25 @@ if (!app.requestSingleInstanceLock()) {
   handle('update:download', () => updater.download())
   handle('update:install', async () => {
     ssh.closeAll()
+    local.closeAll()
     vault.lock({ forget: false })
     await vault.flush()
     updater.install()
   })
   handle('clipboard:read', () => clipboard.readText())
-  listen('ssh:write', (id: string, data: string) => ssh.write(id, String(data)))
-  listen('ssh:resize', (id: string, cols: number, rows: number) => {
-    if (cols > 0 && rows > 0) ssh.resize(id, Math.floor(cols), Math.floor(rows))
+  listen('ssh:write', (id: string, data: string) => {
+    if (local.has(id)) local.write(id, String(data))
+    else ssh.write(id, String(data))
   })
-  listen('ssh:close', (id: string) => ssh.close(id))
+  listen('ssh:resize', (id: string, cols: number, rows: number) => {
+    if (!(cols > 0 && rows > 0)) return
+    if (local.has(id)) local.resize(id, Math.floor(cols), Math.floor(rows))
+    else ssh.resize(id, Math.floor(cols), Math.floor(rows))
+  })
+  listen('ssh:close', (id: string) => {
+    local.close(id)
+    ssh.close(id)
+  })
   listen('ssh:promptReply', (promptId: string, reply) => ssh.promptReply(promptId, reply))
   listen('clipboard:write', (text: string) => clipboard.writeText(String(text)))
 
@@ -255,6 +285,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     ssh.closeAll()
+    local.closeAll()
     vault.lock({ forget: false })
     // Let the last save reach the disk before the process goes away.
     void vault.flush().finally(() => app.quit())
