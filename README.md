@@ -306,9 +306,16 @@ with **dry run** ticked.
 - The vault locks itself after 15 minutes without input (configurable) and
   when the computer sleeps or its screen is locked. Open SSH sessions keep
   running behind the lock screen.
-- Optionally, the vault key can be kept in the operating system's credential
-  store (DPAPI, Keychain, or the desktop keyring) so the app opens unlocked.
-  Locking the vault removes that stored key until the password is next entered.
+- On Windows with Windows Hello set up, the vault can be unlocked with
+  Windows Hello (face, fingerprint or PIN) instead of the master password
+  (Settings → "Unlock with Windows Hello"). The vault key is then encrypted
+  with a key derived from a Windows Hello signature, whose private key stays
+  in the computer's security chip, so the file on disk is useless without
+  Windows Hello and the user. The master password always still works.
+- Elsewhere, the vault key can optionally be kept in the operating system's
+  credential store (DPAPI, Keychain, or the desktop keyring) so the app opens
+  unlocked. Locking the vault removes that stored key until the password is
+  next entered.
 - The Sync page lists the devices signed in to your account and can sign any
   of them out. Device names are encrypted too.
 - Changing the master password re-wraps the vault key and signs your other

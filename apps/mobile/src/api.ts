@@ -196,6 +196,7 @@ export function createApi(): TermtermApi {
     appInfo: async () => ({
       version: __APP_VERSION__,
       packaged: Capacitor.isNativePlatform(),
+      platform: 'mobile',
       capabilities: { ssh: NATIVE, keys: NATIVE, biometricUnlock: true },
     }),
     updateState: async () => updateState,

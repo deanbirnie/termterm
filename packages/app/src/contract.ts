@@ -73,14 +73,17 @@ export interface AppInfo {
   version: string
   /** false when running from source */
   packaged: boolean
+  platform: 'desktop' | 'mobile'
   /** What this build can do; the interface hides what is not available. */
   capabilities: {
     /** Can open SSH sessions. */
     ssh: boolean
     /** Can generate and import SSH keys. */
     keys: boolean
-    /** Unlocks with a fingerprint or face, rather than opening unlocked at launch. */
+    /** Unlocks with a fingerprint, face or PIN check, rather than opening unlocked at launch. */
     biometricUnlock: boolean
+    /** What the check is called on this device, for example "Windows Hello". */
+    biometricName?: string
   }
 }
 

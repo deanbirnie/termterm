@@ -101,7 +101,10 @@ function TerminalAppearance() {
 function AutoLock() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [canRemember, setCanRemember] = useState(false)
-  const biometric = useAppInfo()?.capabilities.biometricUnlock ?? false
+  const info = useAppInfo()
+  const biometric = info?.capabilities.biometricUnlock ?? false
+  const hello = info?.capabilities.biometricName
+  const phone = info?.platform === 'mobile'
   const { error, run } = useAction()
   useEffect(() => {
     void api.settings().then(setSettings)
@@ -121,7 +124,7 @@ function AutoLock() {
         label="Lock the vault automatically"
         hint={
           settings.autoLockMinutes > 0
-            ? biometric
+            ? phone
               ? 'Locks after the app has been in the background this long. Open sessions keep running while locked.'
               : 'Also locks when the computer sleeps or its screen is locked. Open sessions keep running while locked.'
             : 'The vault stays unlocked until you lock it or quit.'
@@ -146,10 +149,14 @@ function AutoLock() {
           aria-describedby="remember-hint"
           onChange={(e) => update({ rememberDevice: e.target.checked })}
         />
-        <span>{biometric ? 'Unlock with fingerprint or face' : 'Open unlocked on this device'}</span>
+        <span>
+          {biometric ? `Unlock with ${hello ?? 'fingerprint or face'}` : 'Open unlocked on this device'}
+        </span>
       </label>
       <p className="field-hint" id="remember-hint">
-        {biometric
+        {biometric && hello
+          ? `Keeps the vault key locked by ${hello} (face, fingerprint or PIN), using this computer\u2019s security chip. The lock screen asks for it instead of your master password, which always still works.`
+          : biometric
           ? canRemember
             ? 'Keeps the vault key in this phone\u2019s secure hardware, released only by your fingerprint or face. Your master password still works, and is needed again if you add a new fingerprint.'
             : 'Not available: set up a fingerprint or face unlock in this phone\u2019s settings first.'

@@ -2,12 +2,15 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, Menu, app, clipboard, ipcMain, powerMonitor, shell } from 'electron'
 import type { ConnectTarget, Settings } from '@termterm/app'
+import type { DeviceKeyStore as DeviceKeyStorage } from '@termterm/app'
 import { DeviceKeyStore } from './device-key'
+import { HelloKeyStore } from './hello-key-store'
 import { keyTools } from './keys'
 import { SettingsStore } from './settings'
 import { SshManager } from './ssh'
 import { FileVaultStorage } from './storage'
 import { Updater } from './updater'
+import { windowsHelloSigner } from './windows-hello'
 import { VaultService } from '@termterm/app'
 
 if (process.env.TERMTERM_DATA_DIR) app.setPath('userData', process.env.TERMTERM_DATA_DIR)
@@ -60,7 +63,32 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   const settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
-  const deviceKey = new DeviceKeyStore(join(app.getPath('userData'), 'device-key.bin'))
+  // Where the vault key is kept for unlocking without the master password.
+  // With Windows Hello set up, it is locked behind Hello (face, fingerprint or
+  // PIN) and asked for on the lock screen. Otherwise it is the operating
+  // system's credential store, used silently at launch ("open unlocked").
+  const silentKey = new DeviceKeyStore(join(app.getPath('userData'), 'device-key.bin'))
+  const helloKey = new HelloKeyStore(join(app.getPath('userData'), 'hello-key.json'), windowsHelloSigner)
+  let useHello = false
+  /** Settles once it is known whether Windows Hello is set up. */
+  const helloReady: Promise<void> = app
+    .whenReady()
+    .then(() => (process.platform === 'win32' ? helloKey.available() : false))
+    .then((available) => {
+      useHello = available
+      // A silently usable copy would get round Windows Hello, so none may remain.
+      if (useHello) silentKey.clear()
+    })
+  const deviceKey: DeviceKeyStorage = {
+    get userPresence() {
+      return useHello
+    },
+    available: () => (useHello ? helloKey.available() : silentKey.available()),
+    has: async () => (useHello ? helloKey.has() : silentKey.has()),
+    save: (key) => (useHello ? helloKey.save(key) : silentKey.save(key)),
+    load: () => (useHello ? helloKey.load() : silentKey.load()),
+    clear: () => (useHello ? helloKey.clear() : silentKey.clear()),
+  }
   const vault = new VaultService(
     {
       storage: new FileVaultStorage(join(app.getPath('userData'), 'vault.json')),
@@ -105,24 +133,38 @@ if (!app.requestSingleInstanceLock()) {
   handle('vault:unlock', (password: string) => vault.unlock(password))
   // Locking wipes the vault key but leaves established SSH sessions running;
   // they no longer need the vault, and the UI hides them until it is unlocked.
-  handle('vault:biometricAvailable', () => false)
-  handle('vault:biometricUnlock', () => {
-    throw new Error('Not available on this device')
+  handle('vault:biometricAvailable', async () => {
+    await helloReady
+    return vault.canUnlockWithDevice()
   })
+  handle('vault:biometricUnlock', () => vault.unlockWithDevice())
   handle('vault:lock', () => vault.lock())
   handle('vault:changePassword', (current: string, next: string) =>
     vault.changePassword(current, next),
   )
   handle('settings:get', () => settings.get())
   handle('settings:save', async (input: Partial<Settings>) => {
+    await helloReady
     if (input?.rememberDevice && !(await deviceKey.available())) {
       throw new Error('No secure credential store is available on this device')
     }
+    const before = settings.get()
     const saved = settings.save(input)
-    await vault.applyRememberDevice()
+    if (saved.rememberDevice === before.rememberDevice) return saved
+    try {
+      // With Windows Hello, turning this on asks for Hello before storing the key.
+      await vault.applyRememberDevice()
+    } catch (err) {
+      settings.save(before)
+      if ((err as Error).message === 'Cancelled') return settings.get()
+      throw err
+    }
     return saved
   })
-  handle('settings:deviceUnlockAvailable', () => deviceKey.available())
+  handle('settings:deviceUnlockAvailable', async () => {
+    await helloReady
+    return deviceKey.available()
+  })
   handle('sync:devices', () => vault.syncDevices())
   handle('sync:revokeDevice', (id: string) => vault.syncRevokeDevice(id))
   handle('vault:snapshot', () => vault.snapshot())
@@ -140,11 +182,20 @@ if (!app.requestSingleInstanceLock()) {
   handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) =>
     ssh.connect(String(id), target, Number(cols) || 80, Number(rows) || 24),
   )
-  handle('app:info', () => ({
-    version: app.getVersion(),
-    packaged: app.isPackaged,
-    capabilities: { ssh: true, keys: true, biometricUnlock: false },
-  }))
+  handle('app:info', async () => {
+    await helloReady
+    return {
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      platform: 'desktop' as const,
+      capabilities: {
+        ssh: true,
+        keys: true,
+        biometricUnlock: useHello,
+        biometricName: useHello ? 'Windows Hello' : undefined,
+      },
+    }
+  })
   handle('update:state', () => updater.get())
   handle('update:check', () => updater.check())
   handle('update:download', () => updater.download())
@@ -166,7 +217,8 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(async () => {
     // macOS needs the default menu for standard edit shortcuts.
     if (!devUrl && process.platform !== 'darwin') Menu.setApplicationMenu(null)
-    await vault.tryDeviceUnlock()
+    await helloReady
+    await vault.tryDeviceUnlock() // does nothing with Windows Hello: the lock screen asks instead
     createWindow()
 
     // Auto-lock: after a period without keyboard or mouse input anywhere on the

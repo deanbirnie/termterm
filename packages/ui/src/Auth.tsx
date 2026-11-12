@@ -1,6 +1,7 @@
 import { Fingerprint } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, errorMessage } from './api'
+import { useAppInfo } from './Update'
 import { Button, ErrorText, Field, InsecureUrlHint, useAction } from './ui'
 
 function Shell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
@@ -21,6 +22,7 @@ function Shell({ title, subtitle, children }: { title: string; subtitle: string;
 export function Unlock({ sessions = 0 }: { sessions?: number }) {
   const [password, setPassword] = useState('')
   const [biometric, setBiometric] = useState(false)
+  const biometricName = useAppInfo()?.capabilities.biometricName ?? 'fingerprint or face'
   const { busy, error, run } = useAction()
 
   const unlockWithBiometrics = () =>
@@ -73,7 +75,7 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
         </Button>
         {biometric && (
           <Button className="wide spaced" disabled={busy} onClick={unlockWithBiometrics}>
-            <Fingerprint size={16} /> Unlock with fingerprint or face
+            <Fingerprint size={16} /> Unlock with {biometricName}
           </Button>
         )}
       </form>
