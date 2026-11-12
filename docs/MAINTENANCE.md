@@ -12,7 +12,7 @@ changing, plus a new row in the [run log](#run-log) at the bottom of this file.
 ## Goals, in priority order
 
 1. **No known vulnerabilities** in anything that ships: the desktop app, the
-   sync server image, and the libraries bundled into them.
+   Android app, sync server image, and the libraries bundled into them.
 2. **Nothing deprecated or broken** in use: no deprecated APIs, no
    end-of-life runtimes, no abandoned packages.
 3. **Stay close to current** releases so that upgrades remain small.
@@ -25,11 +25,11 @@ changing, plus a new row in the [run log](#run-log) at the bottom of this file.
 |---|---|---|
 | npm packages | the root `package.json` and one in each folder under `packages/` and `apps/`, with a single root `package-lock.json` | npm workspaces. The server has no runtime dependencies on purpose. |
 | Electron | `apps/desktop/package.json` (`electron`, pinned exactly) | Security-critical: it bundles Chromium and Node. electron-builder needs an exact version. |
-| Node.js | `engines` in `package.json`, `node-version` in `.github/workflows/*.yml`, `FROM node:…` in `apps/server/Dockerfile` | All three must agree on the major version. The server relies on type stripping and `node:sqlite`. |
-| GitHub Actions | `uses:` lines in `.github/workflows/*.yml` | Pinned by major version tag. Includes one third-party action with delete rights over the image registry (`dataaxiom/ghcr-cleanup-action` in `cleanup.yml`): review its changes before moving to a new major. |
-| Android toolchain | `apps/mobile/android` (`variables.gradle`, `build.gradle`, `gradle/wrapper/gradle-wrapper.properties`), `java-version` in `build.yml` | Capacitor sets the expected Gradle, Android Gradle Plugin, JDK and SDK levels. Upgrade Capacitor majors with its migration guide (`npx cap migrate`), and raise `targetSdkVersion` when Google Play's requirement moves. |
+| Node.js | `engines` in `package.json`, `node-version` in `.github/workflows/*.yml`, `FROM node:…` in `apps/server/Dockerfile` | Document the supported development/CI and server Node versions; ensure `engines` and tests cover them. Electron bundles its own Node runtime and does not have to match the server. The server relies on type stripping and `node:sqlite`. |
+| GitHub Actions | `uses:` lines in `.github/workflows/*.yml` | Currently pinned by major version tag; migrate to verified full commit SHAs with version comments and automated update proposals. Review permissions and changes, especially actions with signing, publishing or registry deletion access. |
+| Android toolchain | `apps/mobile/android` (`variables.gradle`, `build.gradle`, `gradle/wrapper/gradle-wrapper.properties`), `java-version` in build and release workflows | Capacitor sets the expected Gradle, Android Gradle Plugin, JDK and SDK levels. Upgrade Capacitor majors with its migration guide (`npx cap migrate`), and raise `targetSdkVersion` when Google Play's requirement moves. |
 | Android SSH libraries | `apps/mobile/android/app/build.gradle` (`com.github.mwiede:jsch`, `org.bouncycastle:bcprov-jdk18on`) and the same versions with checksums in `apps/mobile/ssh-test/run.sh` | Security-critical: they implement SSH on Android. Not covered by `npm audit`; check Maven Central and each project's advisories. Update both files together and run `npm run test:ssh -w @termterm/mobile`. |
-| Docker base image | `apps/server/Dockerfile` | Rebuilt on every release and every push to `main`. |
+| Docker base image | `apps/server/Dockerfile` | Built on releases and relevant pushes to `main`; scan the resulting image, including OS packages. |
 | Cryptography | `packages/core/src/crypto.ts` | Argon2id parameters, HKDF, XChaCha20-Poly1305. See "Cryptography review". |
 
 ## Procedure
@@ -38,6 +38,12 @@ Work on a fresh branch from `main`. Do the steps in order; stop and report if
 a step in "Ask first" applies.
 
 ### 1. Establish a clean baseline
+
+Record the starting commit and the actual Node/npm, Electron, JDK, Android SDK
+and OS versions used. Check prerequisites first: a JDK with `javac` for the
+Java SSH tests, JDK 21 and the compatible Android SDK for current APK builds,
+and a display or Xvfb for desktop tests. Re-check these requirements when
+upgrading the toolchain. Distinguish missing tooling from application failures.
 
 ```bash
 npm ci
@@ -75,9 +81,16 @@ npm audit
 - Fix every finding that affects shipped code (anything reachable from
   `dependencies`, or bundled into the app: `ssh2`, `electron-updater`,
   `hash-wasm`, `@noble/*`, `@xterm/*`, `react`, `electron`).
-- Findings confined to build-time tooling (for example inside
-  `electron-builder`) are lower priority, but still upgrade when a fixed
-  version exists. Record any you leave, with the reason, in the run log.
+- Assess build tooling by exposure, not only by whether it ships. Install
+  scripts, build tools and Actions can access signing or publishing credentials.
+- Check Android Maven dependencies (including JSch and Bouncy Castle) against
+  upstream advisories and scan the built server image for OS/package findings.
+  `npm audit` does not cover either of these surfaces.
+- For every deferred finding, record the advisory URL/ID, component/version,
+  severity, reachable exposure, mitigation or reason for deferral, owner and
+  next review date. Link the record from the run log. Do not call a scan clean
+  when a required scanner was unavailable. Prioritize exploitable shipped-code
+  and credential-exposure findings; explain any unresolved release risk.
 - Never run `npm audit fix --force`: it makes unreviewed major upgrades.
 - Check Electron against its security releases: the installed major must
   still be a supported one (Electron supports the latest three majors). If it
@@ -90,7 +103,10 @@ npm audit
 npm outdated
 ```
 
-- **Patch and minor updates:** take them all, together, in one commit.
+- **Patch and minor updates:** use small, independently reviewable groups:
+  Electron/updater, Android/SSH, cryptography, and ordinary tooling. Keep
+  tightly coupled packages together. Read release notes even for minor changes;
+  a version label is not a guarantee of compatibility.
 - **Major updates:** one package (or one tightly coupled family, such as
   `react` + `react-dom` + `@types/react*`, or `vite` + `electron-vite` +
   `@vitejs/plugin-react`) per commit. Read the release notes or migration
@@ -99,9 +115,15 @@ npm outdated
 - **GitHub Actions:** check each `uses:` action for a newer major version and
   for deprecation notices from GitHub (old Node runtimes in actions get
   retired on a schedule).
-- **Docker base image and Node:** move to a newer Node LTS when one is in
-  active LTS and Electron, the CI config and the Dockerfile can all move
-  together.
+- **Docker base image and Node:** choose a supported LTS and verify server
+  dependencies, type stripping, SQLite and build tooling before adopting it.
+  Keep development/CI and server versions documented and compatible; assess
+  Electron's bundled Node and Android's JDK independently.
+- **Automated discovery:** configure Dependabot or Renovate for weekly update
+  proposals covering supported npm, Actions, Docker and Gradle dependencies.
+  Verify coverage rather than assuming one bot finds everything. Keep the
+  grouping above and require the applicable checks before merging. For Java
+  SSH updates, keep Gradle declarations and test-script checksums in sync.
 
 ### 4. Deprecations and code patterns
 
@@ -122,16 +144,56 @@ deprecated.
 
 ### 5. Verify
 
-Everything from step 1 must pass again, plus:
+After dependency or implementation changes, repeat the baseline checks and
+require the relevant platform checks below. Documentation-only edits require
+review of the changed text and references, not application builds.
 
-```bash
-npm run dist
-```
+| Change area | Required verification |
+|---|---|
+| Desktop dependencies or code | Desktop e2e and a Windows installer build (`npm run dist` on Windows); verify the Linux package when its packaging/runtime is affected. |
+| Android dependencies or code | Mobile browser e2e, Java SSH tests, and `npm run apk -w @termterm/mobile`. Capacitor, native SSH, storage or lifecycle changes also need device/emulator smoke testing. |
+| Server dependencies, runtime or image | Core/server tests, server image build and health check, persistence and expected runtime UID checks. |
+| Shared vault, app or UI dependencies/code | Both desktop and Android checks, plus server checks when crypto, sync or server-consumed code is affected. |
+| Actions, release or cleanup scripts | Workflow validation (for example actionlint), shell validation (for example ShellCheck), and focused tests of changed selection/version logic; preview cleanup with its dry-run mode. |
 
-on at least one platform, to prove packaging still works (it also runs in CI
-on Windows for every pull request). For an Electron, electron-builder or
-electron-updater upgrade, additionally confirm in the pull request's CI that
-the **Windows installer** job is green.
+Record the actual job results for the tested commit. Build CI conditionally
+skips jobs based on changed paths: a green workflow with a skipped required
+job is not evidence that the platform passed. Run the missing job through
+an appropriate manual build or equivalent check and link the result.
+
+**Existing data and upgrades.** For vault, crypto, sync, persistence or runtime
+changes, use synthetic fixtures generated by previous supported releases.
+Verify unlock, hosts, credentials, keys and known hosts survive; test sync
+between old and new clients against supported server versions. Never commit
+real user vaults or credentials. For server storage changes, back up a test
+database using a SQLite-consistent procedure, restore into an isolated instance,
+and verify that clients can sign in and recover their items. Record fixture
+versions and results. Do not promise downgrade compatibility after an
+irreversible migration; document recovery before release.
+
+**Platform behaviour.** Credential-store changes need a real Windows DPAPI
+check; sleep/idle/lock changes need the corresponding OS checks. Android native
+changes need an installed-app test of the bridge, authentication, keyboard,
+resize, background/resume and vault persistence. Browser and plain-Java tests
+do not substitute for that test. Updater/signing changes need an installed
+previous-version-to-candidate upgrade that preserves the vault, with the
+signing identity and installer behavior verified.
+
+**Release checks.** Before publishing, validate the version and expected assets,
+installer/update metadata, and Android signing when an APK is intended. Trim
+only surrounding whitespace and an optional leading `v`; reject embedded
+whitespace and invalid versions. Test stable/prerelease inputs, duplicate tags,
+and invalid input. Verify that updater metadata points to the correct assets
+and that APK signatures/version codes support installation over the previous
+release. An intentionally desktop-only release must explicitly report the
+missing APK. Run mobile browser and Java SSH tests for the exact release
+commit before releasing Android, even if an earlier build passed. Use an
+isolated test feed or prerelease channel for upgrade checks; do not publish a
+production release merely to complete a maintenance check.
+
+Missing automation must be reported as a gap, not a passing check. Perform
+an equivalent manual check where feasible; otherwise leave affected work
+explicitly unverified and do not mark it ready to release.
 
 Never make a check pass by weakening it: do not skip, delete or loosen a test,
 and do not add `skipLibCheck`-style escapes for new errors.
@@ -141,7 +203,29 @@ and do not add `skipLibCheck`-style escapes for new errors.
 Open one pull request titled `Maintenance: <date>` that lists what was
 upgraded (from → to), what was deliberately left and why, any code changes
 made for deprecations, and the verification that was run. Add the run-log row
-in the same pull request.
+in the same pull request. Include the starting and tested commit SHAs, tool/OS
+versions, exact checks and CI links, manual device results, and any blocked or
+skipped checks with reasons. Link deferred advisories and follow-up work with
+owners and review dates. Make clear whether the change is ready to merge and
+whether platform/release verification is still outstanding.
+
+## Automation to add
+
+These are follow-up implementation tasks, not checks supplied by this policy
+edit. Mark them complete only when their implementation and evidence exist.
+
+- [ ] Previous-release synthetic vault fixtures and mixed-version sync tests.
+- [ ] Automated server backup/restore verification.
+- [ ] Native Android device/emulator smoke coverage and targeted Windows
+      credential-store and installed-upgrade coverage.
+- [ ] Mobile browser and Java SSH tests in the release workflow; expected-asset,
+      signing and update-metadata validation.
+- [ ] Version-normalisation/validation tests; trim surrounding whitespace only.
+- [ ] Scheduled dependency proposals, verified Action SHA pins with version
+      comments, workflow and shell validation, and Maven/container scans.
+
+Prioritize platform verification, existing-data compatibility and release
+checks. Preserve an explicit manual verification path until automation lands.
 
 ## Ask first
 
@@ -184,7 +268,12 @@ each run whether the cause has gone away.
 | `apps/desktop/src/main/updater.ts` | `TERMTERM_UPDATE_FEED` points an unpackaged build at a test feed; packaged builds ignore it. | Keep. Must never be honoured by a packaged build. |
 | `apps/desktop/package.json` (`electron` pinned exactly) | electron-builder refuses a version range. | Keep. Bump the exact version during maintenance. |
 
-## Baseline at the time of writing
+## Historical baseline — 2026-11-11
+
+These are observations recorded when this policy was written, not current
+scan results or permanent version recommendations. Re-run checks and consult
+upstream release/support information on every maintenance run. Policy-only
+edits do not refresh this baseline.
 
 - `npm audit`: 6 moderate findings, all inside `electron-builder`'s own
   dependencies (build-time tooling, not shipped in the app).
@@ -200,4 +289,5 @@ Add a row per run, newest first.
 
 | Date | By | Upgraded | Left alone (why) | Notes |
 |---|---|---|---|---|
+| 2026-11-12 | Codex | Policy only; no dependency upgrades | Runtime code and workflows unchanged | Added platform, compatibility and release verification; security deferral records; runtime distinctions; update grouping and automation backlog. Documentation reviewed; no maintenance suite run. |
 | 2026-11-11 | initial | n/a | n/a | Policy written; baseline recorded above. |
