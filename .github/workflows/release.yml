@@ -40,10 +40,13 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            version="${INPUT_VERSION#v}"
+            version="$INPUT_VERSION"
           else
-            version="${GITHUB_REF_NAME#v}"
+            version="$GITHUB_REF_NAME"
           fi
+          # Forgive stray spaces from typing or pasting, and a leading "v".
+          version="$(printf '%s' "$version" | tr -d '[:space:]')"
+          version="${version#v}"
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
             echo "::error::\"$version\" is not a version like 1.2.3 or 1.2.3-beta.1"
             exit 1
