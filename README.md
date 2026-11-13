@@ -284,8 +284,23 @@ One version number covers the app, the GitHub release and the server image.
 It comes from the release itself, not from `package.json` (whose `0.1.0` is
 only what source builds report).
 
-To publish a version, open **Actions → Release → Run workflow** and enter a
-version such as `0.2.0`. Pushing a tag does the same:
+The usual way is a label. Merge pull requests as they are ready; they release
+nothing on their own. When one of them should ship everything merged so far,
+give it a release label, before or after merging it:
+
+| Label | Version change | For |
+|---|---|---|
+| `release: patch` | 0.3.0 → 0.3.1 | fixes |
+| `release: minor` | 0.3.0 → 0.4.0 | new features |
+| `release: major` | 0.3.0 → 1.0.0 | breaking changes |
+
+Once that pull request is merged and labelled,
+`.github/workflows/release-on-merge.yml` counts on from the latest release and
+publishes its merge commit. A second label on the same pull request does not
+release it again.
+
+To choose the version yourself, open **Actions → Release → Run workflow** and
+enter a version such as `0.2.0`. Pushing a tag does the same:
 
 ```bash
 git tag v0.2.0

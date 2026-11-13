@@ -34,9 +34,32 @@ try {
   $retrievalResult = [Windows.Security.Credentials.KeyCredentialRetrievalResult,Windows.Security.Credentials,ContentType=WindowsRuntime]
   $operationResult = [Windows.Security.Credentials.KeyCredentialOperationResult,Windows.Security.Credentials,ContentType=WindowsRuntime]
   $creationOption = [Windows.Security.Credentials.KeyCredentialCreationOption,Windows.Security.Credentials,ContentType=WindowsRuntime]
-  # Windows PowerShell sees Windows Runtime buffers as bare COM objects, which
-  # .NET's byte-array conversions do not accept. Windows' own base64 helpers
-  # take and return them as they are, so data only crosses as base64 text.
+  $bufferExtensions = [System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions]
+  # Buffers that Windows returns (such as the signature) reach Windows
+  # PowerShell as bare COM objects, which neither .NET's ToArray nor Windows'
+  # own CryptographicBuffer accept from PowerShell. This reads the bytes
+  # through the buffer's COM interfaces directly instead. Compiled only when
+  # needed, as it takes a moment.
+  function Enable-Buffers {
+    if ('TermTerm.Buffers' -as [Type]) { return }
+    Add-Type -Namespace TermTerm -Name Buffers -MemberDefinition @'
+[ComImport, Guid("905a0fe0-bc53-11df-8c49-001e4fc686da"), InterfaceType(ComInterfaceType.InterfaceIsIInspectable)]
+public interface IBuffer {
+  uint Capacity { get; }
+  uint Length { get; set; }
+}
+[ComImport, Guid("905a0fef-bc53-11df-8c49-001e4fc686da"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IBufferByteAccess {
+  System.IntPtr Buffer();
+}
+public static byte[] ToArray(object buffer) {
+  uint length = ((IBuffer)buffer).Length;
+  byte[] bytes = new byte[length];
+  if (length > 0) Marshal.Copy(((IBufferByteAccess)buffer).Buffer(), bytes, 0, (int)length);
+  return bytes;
+}
+'@
+  }
   $cryptographicBuffer = [Windows.Security.Cryptography.CryptographicBuffer,Windows.Security.Cryptography,ContentType=WindowsRuntime]
 
   # Windows Runtime calls are asynchronous; these turn them into .NET tasks to wait on.
@@ -98,17 +121,22 @@ public static extern bool SetForegroundWindow(System.IntPtr window);
         break
       }
       Enable-Focus
-      $buffer = $cryptographicBuffer::DecodeFromBase64String($Challenge)
+      $buffer = $bufferExtensions::AsBuffer([System.Convert]::FromBase64String($Challenge))
       $signed = Wait-Operation ($opened.Credential.RequestSignAsync($buffer)) $operationResult $true
       if ($signed.Status.ToString() -ne 'Success') {
         Write-Result @{ ok = $false; status = $signed.Status.ToString() }
         break
       }
-      Write-Result @{ ok = $true; signature = $cryptographicBuffer::EncodeToBase64String($signed.Result) }
+      Enable-Buffers
+      $signature = [TermTerm.Buffers]::ToArray($signed.Result)
+      Write-Result @{ ok = $true; signature = [System.Convert]::ToBase64String($signature) }
     }
     'buffers' {
+      # A buffer made by Windows, like the signature, read back the same way.
+      Enable-Buffers
       $buffer = $cryptographicBuffer::DecodeFromBase64String($Challenge)
-      Write-Result @{ ok = $true; length = [int]$buffer.Length; signature = $cryptographicBuffer::EncodeToBase64String($buffer) }
+      $bytes = [TermTerm.Buffers]::ToArray($buffer)
+      Write-Result @{ ok = $true; length = $bytes.Length; signature = [System.Convert]::ToBase64String($bytes) }
     }
     'delete' {
       try {
