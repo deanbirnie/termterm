@@ -52,6 +52,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # node-pty and ssh2's cpu-features compile during npm ci, at the same
+      # time. Left alone, each downloads Node's headers into one shared cache
+      # and one can read a half-written file (an empty common.gypi). Use the
+      # headers that come with this Node instead, so nothing is downloaded.
+      - name: Use the installed Node's headers for native modules
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "npm_config_nodedir=$(dirname "$(dirname "$(command -v node)")")" >> "$GITHUB_ENV"
       - run: npm ci
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -70,6 +78,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # node-pty and ssh2's cpu-features compile during npm ci, at the same
+      # time. Left alone, each downloads Node's headers into one shared cache
+      # and one can read a half-written file (an empty common.gypi). Use the
+      # headers that come with this Node instead, so nothing is downloaded.
+      - name: Use the installed Node's headers for native modules
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "npm_config_nodedir=$(dirname "$(dirname "$(command -v node)")")" >> "$GITHUB_ENV"
       - run: npm ci
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -145,6 +161,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # node-pty and ssh2's cpu-features compile during npm ci, at the same
+      # time. Left alone, each downloads Node's headers into one shared cache
+      # and one can read a half-written file (an empty common.gypi). Use the
+      # headers that come with this Node instead, so nothing is downloaded.
+      - name: Use the installed Node's headers for native modules
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "npm_config_nodedir=$(dirname "$(dirname "$(command -v node)")")" >> "$GITHUB_ENV"
       - run: npm ci
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -180,6 +204,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      # node-pty and ssh2's cpu-features compile during npm ci, at the same
+      # time. Left alone, each downloads Node's headers into one shared cache
+      # and one can read a half-written file (an empty common.gypi). Use the
+      # headers that come with this Node instead, so nothing is downloaded.
+      - name: Use the installed Node's headers for native modules
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "npm_config_nodedir=$(dirname "$(dirname "$(command -v node)")")" >> "$GITHUB_ENV"
       - run: npm ci
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
