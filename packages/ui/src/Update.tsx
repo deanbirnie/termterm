@@ -21,11 +21,18 @@ export function useAppInfo(): AppInfo | null {
   return info
 }
 
-/** The one action that moves an update forward from its current state. */
-function nextStep(state: UpdateState): { label: string; run: () => void } | null {
+const LATEST_RELEASE = 'https://github.com/deanbirnie/termterm/releases/latest'
+
+/**
+ * The one action that moves an update forward from its current state: a
+ * button, or a link where the update is downloaded and installed by hand.
+ */
+function nextStep(state: UpdateState): { label: string; run?: () => void; href?: string } | null {
   switch (state.status) {
     case 'available':
-      return { label: `Update to ${state.version}`, run: () => void api.updateDownload() }
+      return state.downloadUrl
+        ? { label: `Download ${state.version}`, href: state.downloadUrl }
+        : { label: `Update to ${state.version}`, run: () => void api.updateDownload() }
     case 'ready':
       return { label: 'Restart to update', run: () => void api.updateInstall() }
     default:
@@ -46,6 +53,13 @@ export function UpdatePill() {
   }
   const step = nextStep(state)
   if (!step) return null
+  if (step.href) {
+    return (
+      <a className="update-pill action" href={step.href} target="_blank" rel="noreferrer">
+        <ArrowDownCircle size={14} /> {step.label}
+      </a>
+    )
+  }
   return (
     <button className="update-pill action" onClick={step.run}>
       <ArrowDownCircle size={14} /> {step.label}
@@ -64,7 +78,9 @@ function describe(state: UpdateState): string {
     case 'current':
       return `You have the latest version. Checked ${new Date(state.checkedAt).toLocaleTimeString()}.`
     case 'available':
-      return `Version ${state.version} is available.`
+      return state.downloadUrl
+        ? `Version ${state.version} is available. Download it, then open the file to install it over this one; your vault is kept.`
+        : `Version ${state.version} is available.`
     case 'downloading':
       return `Downloading version ${state.version}: ${state.percent}%`
     case 'ready':
@@ -96,6 +112,10 @@ export function AboutCard() {
           >
             Release notes
           </a>
+          {' · '}
+          <a className="link" href={LATEST_RELEASE} target="_blank" rel="noreferrer">
+            Latest release
+          </a>
         </dd>
         <dt>Updates</dt>
         <dd className={state.status === 'error' ? 'error' : undefined} role="status">
@@ -103,7 +123,12 @@ export function AboutCard() {
         </dd>
       </dl>
       <div className="panel-actions">
-        {step && (
+        {step?.href && (
+          <a className="btn btn-primary" href={step.href} target="_blank" rel="noreferrer">
+            {step.label}
+          </a>
+        )}
+        {step?.run && (
           <Button variant="primary" onClick={step.run}>
             {step.label}
           </Button>

@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { api, errorMessage } from './api'
 import { notePasswordUsed, passwordReminderDue, REMINDER_DAYS } from './password-reminder'
 import { useAppInfo } from './Update'
-import { Button, ErrorText, Field, InsecureUrlHint, useAction } from './ui'
+import { Button, ErrorText, Field, InsecureUrlHint, PasswordInput, useAction } from './ui'
 
 function Shell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
@@ -118,8 +118,7 @@ export function Unlock({ sessions = 0 }: { sessions?: number }) {
             </p>
           )}
           <Field label="Master password">
-            <input
-              type="password"
+            <PasswordInput
               autoFocus
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -199,8 +198,7 @@ export function Onboarding() {
           </>
         )}
         <Field label="Master password">
-          <input
-            type="password"
+          <PasswordInput
             autoFocus={mode === 'create'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -211,7 +209,7 @@ export function Onboarding() {
             label="Confirm master password"
             hint="There is no reset. If you forget it, the vault cannot be recovered."
           >
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+            <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} />
           </Field>
         )}
         <ErrorText error={error} />

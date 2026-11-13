@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react'
 import type { KeyView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { useAppInfo } from '../Update'
-import { Button, Empty, ErrorText, Field, useAction } from '../ui'
+import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
 
 type Mode = { kind: 'generate' } | { kind: 'import' } | { kind: 'view'; id: string }
 
@@ -144,7 +144,7 @@ function ImportPanel({ onClose, onDone }: { onClose: () => void; onDone: (id: st
           />
         </Field>
         <Field label="Passphrase" hint="Only if the key is encrypted.">
-          <input type="password" autoComplete="new-password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
+          <PasswordInput autoComplete="new-password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
         </Field>
         <ErrorText error={error} />
         <div className="panel-actions">

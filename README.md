@@ -180,8 +180,16 @@ base64 -w0 termterm-release.jks
    already on your phones**: you would have to uninstall and reinstall.
 
 Builds on pull requests and `main` still produce a debug APK as the
-`termterm-android-debug` artifact. That one is signed with a throwaway key
-and will not install over a release version or another debug build.
+`termterm-android-debug` artifact. That one is signed with a throwaway key,
+so it is a separate app (`dev.termterm.app.debug`, version shown as
+`…-debug`) that installs next to the release version instead of over it. Two
+debug builds from different CI runs still cannot replace each other: uninstall
+the old one first.
+
+If a release APK says it cannot be installed, the phone most likely has a
+debug build from before this change, which used the release's app ID.
+Uninstall it (sign in to sync again afterwards; the vault comes back from the
+server), then install the release.
 
 ### Working on it
 

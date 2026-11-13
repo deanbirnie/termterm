@@ -4,7 +4,7 @@ import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termter
 import { api } from '../api'
 import { LocalTerminalButton } from '../LocalTerminalButton'
 import { useAppInfo } from '../Update'
-import { Button, Empty, ErrorText, Field, useAction } from '../ui'
+import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
 
 /** Parses `ssh user@host -p 2222`, `user@host:2222` or a bare hostname. */
 export function parseQuickConnect(input: string): ConnectTarget | null {
@@ -276,8 +276,7 @@ function HostPanel({
             )
           }
         >
-          <input
-            type="password"
+          <PasswordInput
             autoComplete="new-password"
             placeholder={host?.hasPassword && !clearPassword ? '•••••••• (unchanged)' : ''}
             value={password}

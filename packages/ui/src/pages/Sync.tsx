@@ -2,7 +2,7 @@ import { CloudOff, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { DeviceView, SyncStatus } from '@termterm/app'
 import { api } from '../api'
-import { Button, ErrorText, Field, InsecureUrlHint, useAction } from '../ui'
+import { Button, ErrorText, Field, InsecureUrlHint, PasswordInput, useAction } from '../ui'
 
 export function SyncPage({ sync }: { sync: SyncStatus }) {
   return (
@@ -67,7 +67,7 @@ function Setup() {
             : 'The account’s master password. If this vault was started separately with a different one, this device will unlock with the account’s password from now on.'
         }
       >
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
       <ErrorText error={error} />
       <Button variant="primary" type="submit" disabled={busy || !serverUrl || !username || !password}>
@@ -123,7 +123,7 @@ function Connected({ sync }: { sync: SyncStatus }) {
             label="Master password"
             hint="If you changed it on another device, enter the new one. This device will use it from now on."
           >
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} />
           </Field>
           <Button variant="primary" type="submit" disabled={busy || !password}>
             Sign in again

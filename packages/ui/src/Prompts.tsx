@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { SshPrompt, SshPromptReply } from '@termterm/app'
-import { Button, Field, Modal } from './ui'
+import { Button, Field, Modal, PasswordInput } from './ui'
 
 export function PromptDialog({
   prompt,
@@ -82,12 +82,19 @@ export function PromptDialog({
         {prompt.kind === 'keyboard' && prompt.instructions && <p>{prompt.instructions}</p>}
         {fields.map((f, i) => (
           <Field key={i} label={f.prompt.replace(/:\s*$/, '')}>
-            <input
-              type={f.echo ? 'text' : 'password'}
-              autoFocus={i === 0}
-              value={values[i] ?? ''}
-              onChange={(e) => setValues((v) => v.map((x, j) => (j === i ? e.target.value : x)))}
-            />
+            {f.echo ? (
+              <input
+                autoFocus={i === 0}
+                value={values[i] ?? ''}
+                onChange={(e) => setValues((v) => v.map((x, j) => (j === i ? e.target.value : x)))}
+              />
+            ) : (
+              <PasswordInput
+                autoFocus={i === 0}
+                value={values[i] ?? ''}
+                onChange={(e) => setValues((v) => v.map((x, j) => (j === i ? e.target.value : x)))}
+              />
+            )}
           </Field>
         ))}
         <div className="modal-actions">

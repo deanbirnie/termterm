@@ -96,7 +96,8 @@ export type UpdateState =
   | { status: 'idle' }
   | { status: 'checking' }
   | { status: 'current'; checkedAt: number }
-  | { status: 'available'; version: string }
+  /** With a downloadUrl, the update is installed by hand (Android): open that link. */
+  | { status: 'available'; version: string; downloadUrl?: string }
   | { status: 'downloading'; version: string; percent: number }
   | { status: 'ready'; version: string }
   | { status: 'error'; message: string }
