@@ -26,6 +26,21 @@ const sign = await runPowerShell(
 // No key by that name exists, so Windows must say so (and must not prompt).
 report('sign without a key', sign, sign.ok === false && !['Error', 'Timeout'].includes(sign.status))
 
+// Signing hands the challenge to Windows and the signature back as Windows
+// Runtime buffers; these must survive the trip intact (a real signature cannot
+// be made here, so the same conversions are run on a sample).
+const sample = Buffer.from(Array.from({ length: 256 }, (_, i) => i))
+const buffers = await runPowerShell(
+  script,
+  { Action: 'buffers', Challenge: sample.toString('base64') },
+  60_000,
+)
+report(
+  'buffer conversions',
+  { ok: buffers.ok, length: buffers.length, status: buffers.status, message: buffers.message },
+  buffers.ok === true && buffers.length === 256 && buffers.signature === sample.toString('base64'),
+)
+
 const remove = await runPowerShell(script, { Action: 'delete', Name: name }, 60_000)
 report('delete', remove, remove.ok === true)
 

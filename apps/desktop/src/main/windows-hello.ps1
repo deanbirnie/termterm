@@ -7,13 +7,15 @@
 #   -Action create      Create (or replace) termterm's Windows Hello key. Prompts.
 #   -Action sign        Sign -Challenge (base64) with that key. Prompts.
 #   -Action delete      Remove the key.
+#   -Action buffers     Round-trip -Challenge through the buffer conversions
+#                       sign uses, without a key or a prompt. For CI.
 #
 # Prints one line of JSON. The key lives in the computer's security chip and
 # is only usable after a face, fingerprint or PIN check; the signature of a
 # fixed challenge is what unlocks the vault key (see hello-key-store.ts).
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('supported', 'create', 'sign', 'delete')]
+  [ValidateSet('supported', 'create', 'sign', 'delete', 'buffers')]
   [string]$Action,
   [string]$Challenge = '',
   [string]$Name = 'termterm-vault'
@@ -32,7 +34,10 @@ try {
   $retrievalResult = [Windows.Security.Credentials.KeyCredentialRetrievalResult,Windows.Security.Credentials,ContentType=WindowsRuntime]
   $operationResult = [Windows.Security.Credentials.KeyCredentialOperationResult,Windows.Security.Credentials,ContentType=WindowsRuntime]
   $creationOption = [Windows.Security.Credentials.KeyCredentialCreationOption,Windows.Security.Credentials,ContentType=WindowsRuntime]
-  $bufferExtensions = [System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions]
+  # Windows PowerShell sees Windows Runtime buffers as bare COM objects, which
+  # .NET's byte-array conversions do not accept. Windows' own base64 helpers
+  # take and return them as they are, so data only crosses as base64 text.
+  $cryptographicBuffer = [Windows.Security.Cryptography.CryptographicBuffer,Windows.Security.Cryptography,ContentType=WindowsRuntime]
 
   # Windows Runtime calls are asynchronous; these turn them into .NET tasks to wait on.
   $taskMethods = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
@@ -93,14 +98,17 @@ public static extern bool SetForegroundWindow(System.IntPtr window);
         break
       }
       Enable-Focus
-      $buffer = $bufferExtensions::AsBuffer([System.Convert]::FromBase64String($Challenge))
+      $buffer = $cryptographicBuffer::DecodeFromBase64String($Challenge)
       $signed = Wait-Operation ($opened.Credential.RequestSignAsync($buffer)) $operationResult $true
       if ($signed.Status.ToString() -ne 'Success') {
         Write-Result @{ ok = $false; status = $signed.Status.ToString() }
         break
       }
-      $signature = $bufferExtensions::ToArray($signed.Result)
-      Write-Result @{ ok = $true; signature = [System.Convert]::ToBase64String($signature) }
+      Write-Result @{ ok = $true; signature = $cryptographicBuffer::EncodeToBase64String($signed.Result) }
+    }
+    'buffers' {
+      $buffer = $cryptographicBuffer::DecodeFromBase64String($Challenge)
+      Write-Result @{ ok = $true; length = [int]$buffer.Length; signature = $cryptographicBuffer::EncodeToBase64String($buffer) }
     }
     'delete' {
       try {
