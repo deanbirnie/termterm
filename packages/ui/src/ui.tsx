@@ -4,9 +4,11 @@ import {
   useId,
   useState,
   type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
   type ReactElement,
   type ReactNode,
 } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { errorMessage } from './api'
 
 export function Button({
@@ -17,6 +19,50 @@ export function Button({
   variant?: 'default' | 'primary' | 'danger' | 'ghost'
 }) {
   return <button type="button" {...props} className={`btn btn-${variant} ${className}`} />
+}
+
+/**
+ * A password input with a button to show what has been typed. Use it like an
+ * input (inside a Field it takes the label's id). Hidden again whenever the
+ * field is emptied, so a revealed password does not carry over to the next one.
+ */
+export function PasswordInput({
+  id,
+  'aria-describedby': describedBy,
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { id?: string; 'aria-describedby'?: string }) {
+  const [shown, setShown] = useState(false)
+  const empty = props.value === undefined || props.value === ''
+  useEffect(() => {
+    if (empty) setShown(false)
+  }, [empty])
+  return (
+    <div className="password-input">
+      <input
+        {...props}
+        id={id}
+        aria-describedby={describedBy}
+        type={shown ? 'text' : 'password'}
+        // Revealed text is still a password: no autocorrect or capitals on phones.
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+      <button
+        type="button"
+        className="password-toggle"
+        aria-label={shown ? 'Hide password' : 'Show password'}
+        aria-controls={id}
+        aria-pressed={shown}
+        title={shown ? 'Hide password' : 'Show password'}
+        // Keeps the focus (and the phone keyboard) in the field.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setShown((s) => !s)}
+      >
+        {shown ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  )
 }
 
 /** Labels its single form control; the hint is linked as a description, not part of the name. */

@@ -43,6 +43,13 @@ android {
         }
     }
     buildTypes {
+        // Debug builds (the CI artifact) are signed with a throwaway key, so
+        // they get their own app ID: installed side by side with the release
+        // instead of blocking it with Android's "can't install".
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
         release {
             if (System.getenv('ANDROID_KEYSTORE_FILE')) {
                 signingConfig signingConfigs.release

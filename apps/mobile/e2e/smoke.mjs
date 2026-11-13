@@ -37,6 +37,16 @@ const nav = (page, name) => page.getByRole('navigation').getByRole('button', { n
 
 async function device() {
   const context = await browser.newContext({ ...devices['Pixel 7'] })
+  // The update check asks GitHub for the latest release; answer with a newer one.
+  await context.route('https://api.github.com/**', (route) =>
+    route.fulfill({
+      json: {
+        tag_name: 'v99.0.0',
+        html_url: 'https://github.com/deanbirnie/termterm/releases/tag/v99.0.0',
+        assets: [{ name: 'termterm-99.0.0.apk', browser_download_url: 'https://example.test/termterm-99.0.0.apk' }],
+      },
+    }),
+  )
   const page = await context.newPage()
   page.on('pageerror', (e) => {
     throw e
@@ -50,6 +60,14 @@ try {
   const a = await device()
   await a.getByLabel('Master password', { exact: true }).fill(MASTER)
   await a.getByLabel('Confirm master password').fill(MASTER)
+  const field = a.getByLabel('Master password', { exact: true })
+  assert.equal(await field.getAttribute('type'), 'password')
+  await a.getByRole('button', { name: 'Show password' }).first().click()
+  assert.equal(await field.getAttribute('type'), 'text')
+  assert.equal(await field.inputValue(), MASTER)
+  await a.getByRole('button', { name: 'Hide password' }).click()
+  assert.equal(await field.getAttribute('type'), 'password')
+  step('the typed password can be shown and hidden')
   await a.getByRole('button', { name: 'Create vault' }).click()
   await a.getByText('No hosts yet').waitFor()
   step('vault created in the browser engine')
@@ -145,7 +163,22 @@ try {
   step('an edit on one device reached the other')
 
   await nav(a, 'Settings').click()
-  await a.getByText('To update, download the new APK from the releases page and install it over this one.').waitFor()
+  await a.getByText('Version 99.0.0 is available.', { exact: false }).waitFor()
+  const download = a.getByRole('link', { name: 'Download 99.0.0' })
+  assert.equal(await download.first().getAttribute('href'), 'https://example.test/termterm-99.0.0.apk')
+  assert.equal(
+    await a.getByRole('link', { name: 'Latest release' }).getAttribute('href'),
+    'https://github.com/deanbirnie/termterm/releases/latest',
+  )
+  step('a newer release is found and its APK linked')
+  await a.getByRole('checkbox', { name: 'Check for updates when the app starts' }).uncheck()
+  await a.reload()
+  await a.getByLabel('Master password').fill(MASTER)
+  await a.getByRole('button', { name: 'Unlock' }).click()
+  await nav(a, 'Settings').click()
+  await a.getByText('Not checked yet.').waitFor()
+  assert.equal(await a.getByRole('checkbox', { name: 'Check for updates when the app starts' }).isChecked(), false)
+  step('turning off the start-up check sticks')
   await a.screenshot({ path: join(shots, '03-settings.png') })
   console.log('\nMobile E2E smoke test passed')
 } finally {

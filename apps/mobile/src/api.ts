@@ -17,6 +17,7 @@ import {
 import { BiometricCancelled, biometricKeyStore } from './device-key'
 import { createSsh, nativeKeyTools, setTerminalFocus } from './ssh'
 import { vaultStorage } from './storage'
+import { checkForUpdate } from './updates'
 
 declare const __APP_VERSION__: string
 
@@ -42,7 +43,7 @@ class Emitter<Args extends unknown[]> {
 
 // ---- settings: not secret, so plain local storage --------------------------------
 
-const DEFAULT_SETTINGS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: false }
+const DEFAULT_SETTINGS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: true }
 
 function loadSettings(): Settings {
   try {
@@ -51,6 +52,7 @@ function loadSettings(): Settings {
     return {
       ...DEFAULT_SETTINGS,
       rememberDevice: stored.rememberDevice === true,
+      autoCheckUpdates: stored.autoCheckUpdates !== false,
       autoLockMinutes:
         Number.isFinite(minutes) && minutes >= 0 ? Math.floor(minutes) : DEFAULT_SETTINGS.autoLockMinutes,
     }
@@ -120,10 +122,21 @@ export function createApi(): TermtermApi {
     }
   })
 
-  const updateState: UpdateState = {
-    status: 'unsupported',
-    reason: 'To update, download the new APK from the releases page and install it over this one.',
+  // Android apps cannot replace themselves: a check finds the newer APK, and
+  // the person downloads it in the browser and installs it over this one.
+  let updateState: UpdateState = { status: 'idle' }
+  const updateChanged = new Emitter<[UpdateState]>()
+  const setUpdateState = (state: UpdateState) => {
+    updateState = state
+    updateChanged.emit(state)
   }
+  const checkUpdates = async () => {
+    if (updateState.status === 'checking') return updateState
+    setUpdateState({ status: 'checking' })
+    setUpdateState(await checkForUpdate(__APP_VERSION__))
+    return updateState
+  }
+  if (settings.autoCheckUpdates) void checkUpdates()
 
   return {
     phase: () => vault.phase(),
@@ -143,7 +156,6 @@ export function createApi(): TermtermApi {
         ...settings,
         ...patch,
         rememberDevice: NATIVE && (patch.rememberDevice ?? settings.rememberDevice),
-        autoCheckUpdates: false,
       }
       if (settings.rememberDevice !== before.rememberDevice) {
         try {
@@ -202,8 +214,8 @@ export function createApi(): TermtermApi {
     }),
     localShells: async () => [],
     updateState: async () => updateState,
-    onUpdateState: () => () => undefined,
-    updateCheck: async () => updateState,
+    onUpdateState: updateChanged.on,
+    updateCheck: checkUpdates,
     updateDownload: async () => undefined,
     updateInstall: async () => undefined,
 

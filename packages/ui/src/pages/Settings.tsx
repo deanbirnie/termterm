@@ -13,7 +13,7 @@ import {
 } from '../terminal-prefs'
 import { notePasswordUsed, REMINDER_DAYS } from '../password-reminder'
 import { AboutCard, useAppInfo } from '../Update'
-import { Button, ErrorText, Field, useAction } from '../ui'
+import { Button, ErrorText, Field, PasswordInput, useAction } from '../ui'
 
 const AUTO_LOCK = [
   { minutes: 5, label: 'After 5 minutes' },
@@ -252,13 +252,13 @@ function ChangePassword({ synced }: { synced: boolean }) {
           : 'Changes the password that unlocks the vault on this device.'}
       </p>
       <Field label="Current master password">
-        <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        <PasswordInput value={current} onChange={(e) => setCurrent(e.target.value)} />
       </Field>
       <Field label="New master password">
-        <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+        <PasswordInput autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
       </Field>
       <Field label="Confirm new master password" hint="There is no reset. If you forget it, the vault cannot be recovered.">
-        <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        <PasswordInput autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
       </Field>
       <ErrorText error={error} />
       {done && <p className="success" role="status">Master password changed.</p>}

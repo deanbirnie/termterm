@@ -134,6 +134,15 @@ try {
   const a = await launch('device-a')
   await a.page.getByLabel('Master password', { exact: true }).fill(MASTER)
   await a.page.getByLabel('Confirm master password').fill(MASTER)
+  {
+    const confirm = a.page.getByLabel('Confirm master password')
+    await a.page.getByRole('button', { name: 'Show password' }).nth(1).click()
+    assert.equal(await confirm.getAttribute('type'), 'text')
+    assert.equal(await a.page.getByLabel('Master password', { exact: true }).getAttribute('type'), 'password')
+    await a.page.getByRole('button', { name: 'Hide password' }).click()
+    assert.equal(await confirm.getAttribute('type'), 'password')
+    step('each password field can be shown on its own')
+  }
   await shot(a.page, '01-create-vault')
   await a.page.getByRole('button', { name: 'Create vault' }).click()
   await a.page.getByText('No hosts yet').waitFor()
