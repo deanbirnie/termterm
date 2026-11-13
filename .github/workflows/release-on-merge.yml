@@ -1,0 +1,88 @@
+name: Release on merge
+
+# Turns a merged pull request into a release when it carries one of these
+# labels, which say how far the version moves from the latest release:
+#
+#   release: patch   0.3.0 -> 0.3.1   fixes
+#   release: minor   0.3.0 -> 0.4.0   new features
+#   release: major   0.3.0 -> 1.0.0   breaking changes
+#
+# Merge any number of unlabelled pull requests first; they release nothing.
+# The label can go on before the merge, or onto a pull request that is already
+# merged. Either way the release is built from that pull request's merge
+# commit, by release.yml, which runs the tests before publishing anything.
+on:
+  pull_request:
+    types: [closed, labeled]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: write # to start release.yml
+
+concurrency:
+  group: release-on-merge
+  cancel-in-progress: false
+
+jobs:
+  start:
+    name: Start release
+    # Merged, and either just merged or just given a release label. Pull
+    # requests from forks cannot start one (their token cannot start workflows).
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action == 'closed' || startsWith(github.event.label.name, 'release: '))
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ github.event.action }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a labels <<< "$LABELS"
+          bump=""
+          count=0
+          for label in "${labels[@]}"; do
+            case "$label" in
+              'release: major') bump=major; count=$((count + 1)) ;;
+              'release: minor') [ "$bump" = major ] || bump=minor; count=$((count + 1)) ;;
+              'release: patch') [ -n "$bump" ] || bump=patch; count=$((count + 1)) ;;
+            esac
+          done
+          if [ -z "$bump" ]; then
+            echo "#$PR has no release label; nothing to release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # A second release label added after the merge must not release twice.
+          if [ "$ACTION" = labeled ] && [ "$count" -gt 1 ]; then
+            echo "#$PR already had a release label; not releasing again." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          released="$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq ".[] | select(.commit.sha == \"$SHA\") | .name")"
+          if [ -n "$released" ]; then
+            echo "$SHA is already released as $released." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Count from the latest published release (not from tags, so a stray
+          # tag without a release cannot skip versions).
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)" || latest=v0.0.0
+          latest="${latest#v}"
+          if ! printf '%s' "$latest" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::The latest release, \"$latest\", is not a version like 1.2.3."
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<< "$latest"
+          case "$bump" in
+            major) next="$((major + 1)).0.0" ;;
+            minor) next="$major.$((minor + 1)).0" ;;
+            patch) next="$major.$minor.$((patch + 1))" ;;
+          esac
+
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f version="$next" -f ref="$SHA"
+          echo "Started release $next ($bump, from $latest) for #$PR at $SHA." >> "$GITHUB_STEP_SUMMARY"
