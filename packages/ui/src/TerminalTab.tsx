@@ -4,7 +4,7 @@ import { Braces, RotateCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { SessionStatus, SnippetView } from '@termterm/app'
 import { api, errorMessage } from './api'
-import type { SessionTab } from './App'
+import type { SessionTab } from './Workspace'
 import { defaultFontSize, getTerminalPrefs, onTerminalPrefs, setTerminalPrefs } from './terminal-prefs'
 import { Button } from './ui'
 
@@ -48,13 +48,23 @@ export function TerminalTab({
   tab,
   active,
   snippets,
+  closeLabel = 'Close tab',
   onClose,
+  isShortcut,
+  refocus = 0,
 }: {
   tab: SessionTab
   active: boolean
   snippets: SnippetView[]
+  closeLabel?: string
   onClose: () => void
+  /** Keys the workspace handles (new tab, panes); the terminal ignores them. */
+  isShortcut?: (e: KeyboardEvent) => boolean
+  /** Changes when the active terminal should take the keyboard back. */
+  refocus?: number
 }) {
+  const shortcutRef = useRef(isShortcut)
+  shortcutRef.current = isShortcut
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -109,12 +119,12 @@ export function TerminalTab({
 
     // Ctrl+Shift+C / Ctrl+Shift+V, leaving plain Ctrl+C for the remote shell.
     term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && shortcutRef.current?.(e)) return false
       if (e.type !== 'keydown' || !e.ctrlKey || !e.shiftKey) return true
       if (e.code === 'KeyC') {
         if (term.hasSelection()) api.clipboardWrite(term.getSelection())
         return false
       }
-      if (e.code === 'KeyT') return false // Ctrl+Shift+T: a new local terminal, not input
       if (e.code === 'KeyV') {
         e.preventDefault()
         void api.clipboardRead().then((text) => term.paste(text))
@@ -174,7 +184,7 @@ export function TerminalTab({
     if (!active) return
     fitRef.current?.fit()
     termRef.current?.focus()
-  }, [active, status.state])
+  }, [active, status.state, refocus])
 
   const runSnippet = (script: string) => {
     api.sshWrite(tab.id, script.replace(/\r?\n/g, '\r').replace(/\r?$/, '\r'))
@@ -251,7 +261,7 @@ export function TerminalTab({
                 <RotateCw size={14} /> {isLocal ? 'Restart' : 'Reconnect'}
               </Button>
               <Button variant="ghost" onClick={onClose}>
-                Close tab
+                {closeLabel}
               </Button>
             </span>
           )}

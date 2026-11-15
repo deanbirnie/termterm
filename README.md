@@ -13,6 +13,18 @@ host yourself.
   On desktop, a **Terminal** button (or Ctrl+Shift+T) also opens a shell on your
   own computer, with a choice of the shells installed: PowerShell, Command
   Prompt, WSL and Git Bash on Windows; zsh, Bash, fish and others elsewhere.
+- **Panes** (desktop) — split a tab into as many terminals as fit, side by side
+  or stacked, like tmux. Drag a tab onto a terminal to put it beside it, drag a
+  pane's title bar to move it, drag the lines between panes to resize them.
+
+  | Keys | Does |
+  |---|---|
+  | Alt+Shift+= | split the current pane to the right (a new session to the same host or shell) |
+  | Alt+Shift+- | split it downwards |
+  | Alt+arrow keys | move between panes |
+  | Alt+Shift+Z | zoom: show the current pane alone, and back |
+  | Ctrl+Shift+W | close the current pane |
+  | Ctrl+Shift+T | open a terminal on this computer in a new tab |
 
 What comes next is tracked in [docs/PLAN.md](docs/PLAN.md). Keeping
 dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENANCE.md).
