@@ -112,7 +112,7 @@ Known gaps inside phase 1 scope:
 2. Add the Android signing key secrets and cut a release, to get the first
    signed APK; confirm the Windows update button at the same time.
 3. Account deletion from the app.
-4. Desktop terminal features, starting with split panes (phase 3).
+4. More desktop terminal features (phase 3): reconnect and keep-alive, port forwarding.
 
 ## Phase 2 — Vault hardening and account management
 
@@ -155,7 +155,15 @@ Known gaps inside phase 1 scope:
 
 ## Phase 3 — Terminal and session features
 
-- [ ] Split panes / tiling of sessions inside a tab
+- [x] Split panes / tiling of sessions inside a tab (desktop): each tab holds a
+      layout tree (`packages/ui/src/layout.ts`, unit-tested); every session is
+      rendered once and placed by its tab's layout (`Workspace.tsx`), so splitting,
+      moving a pane, dragging a tab into another or out again never restarts a
+      session. Split right/down (a new session to the same target), drag tabs and
+      pane headers onto a pane's edge, resize by dragging dividers (double-click
+      evens them out), zoom, keyboard focus moves (Alt+arrows). No limit on depth
+      beyond a minimum pane size. Layouts are not remembered across restarts, and
+      phones keep one terminal per tab.
 - [x] Local terminal tab (desktop): `apps/desktop/src/main/local-terminal.ts` runs the
       shell in a pseudo-terminal through `node-pty` (prebuilt binaries for Windows and
       macOS, N-API so no rebuild for Electron; built from source on Linux) and reports

@@ -262,6 +262,105 @@ try {
   await a.page.getByRole('navigation').getByRole('button', { name: 'Hosts', exact: true }).click()
   step('a chosen default shell opens with Ctrl+Shift+T')
 
+  // ---- panes: split, move around, resize, zoom, close, move between tabs -----------
+  {
+    const page = a.page
+    const shown = page.locator('.terminal-pane:not([hidden])')
+    const run = async (command) => {
+      await page.keyboard.type(command)
+      await page.keyboard.press('Enter')
+    }
+    // In screen order: left to right, then top to bottom.
+    const boxes = () =>
+      shown.evaluateAll((els) =>
+        els.map((el) => el.getBoundingClientRect().toJSON()).sort((p, q) => p.x - q.x || p.y - q.y),
+      )
+    const near = (x, y, msg) => assert.ok(Math.abs(x - y) <= 3, `${msg}: ${x} vs ${y}`)
+
+    await page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click()
+    await page.waitForTimeout(800)
+    await run('echo pane-$((40+2))-one')
+    await shown.first().locator('.xterm-rows').getByText('pane-42-one').waitFor()
+
+    await page.getByRole('button', { name: 'Split right' }).click()
+    await assertCount(shown, 2)
+    await page.waitForTimeout(800)
+    await run('echo pane-$((40+2))-two') // the new pane has the keyboard
+    await page.locator('.terminal-pane.focused .xterm-rows').getByText('pane-42-two').waitFor()
+    let [left, right] = await boxes()
+    near(right.x, left.x + left.width, 'side by side')
+    near(left.width, right.width, 'equal widths')
+    await shown.first().locator('.xterm-rows').getByText('pane-42-one').waitFor() // not restarted
+    step('Split right opened a second shell beside the first, which kept running')
+
+    await page.keyboard.press('Alt+Shift+Minus') // split the focused (right) pane down
+    await assertCount(shown, 3)
+    await page.getByLabel('3 panes').waitFor()
+    const [, top, bottom] = await boxes()
+    near(bottom.y, top.y + top.height, 'stacked')
+    near(top.x, bottom.x, 'same column')
+    await page.keyboard.press('Alt+ArrowLeft')
+    await run('echo moved-$((40+2))-left')
+    await shown.first().locator('.xterm-rows').getByText('moved-42-left').waitFor()
+    step('Alt+Shift+- split a pane down; Alt+arrow keys move between panes')
+
+    const divider = await page.locator('.divider-row').boundingBox()
+    // A quarter of the way down: halfway is where the right column's own divider meets it.
+    const grabY = divider.y + divider.height / 4
+    await page.mouse.move(divider.x + divider.width / 2, grabY)
+    await page.mouse.down()
+    await page.mouse.move(divider.x + divider.width / 2 + 150, grabY, { steps: 5 })
+    await page.mouse.up()
+    ;[left] = await boxes()
+    near(left.width, divider.x + divider.width / 2 + 150 - left.x, 'dragged divider')
+    await page.locator('.divider-row').dblclick({ position: { x: 4, y: 40 } })
+    ;[left, right] = await boxes()
+    near(left.width, right.width, 'equal again')
+    step('dividers resize panes; a double-click makes them equal')
+
+    await page.keyboard.press('Alt+Shift+Z')
+    await assertCount(shown, 1)
+    await page.keyboard.press('Alt+Shift+Z')
+    await assertCount(shown, 3)
+    await page.keyboard.press('Control+Shift+W') // closes the focused (left) pane
+    await assertCount(shown, 2)
+    const [afterClose] = await boxes()
+    near(afterClose.y, top.y, 'the right column now fills the tab')
+    step('zoom shows one pane and back; Ctrl+Shift+W closes a pane')
+
+    await page.getByRole('button', { name: /^Move .* to a new tab$/ }).first().click()
+    await assertCount(page.getByRole('tab', { name: /^Bash/ }), 2)
+    await assertCount(shown, 1)
+    await page.waitForTimeout(500)
+    await run('echo moved-$((40+2))-out')
+    await shown.locator('.xterm-rows').getByText('moved-42-out').waitFor()
+    step('a pane moved out into a tab of its own')
+
+    // Drag the new tab back onto the right half of the other tab's terminal.
+    const tabsList = page.getByRole('tab', { name: /^Bash/ })
+    await tabsList.first().click()
+    const source = await tabsList.nth(1).boundingBox()
+    const target = await shown.first().boundingBox()
+    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(source.x + source.width / 2 + 10, source.y + source.height / 2 + 10, { steps: 3 })
+    await page.mouse.move(target.x + target.width - 20, target.y + target.height / 2, { steps: 10 })
+    await page.locator('.drop-preview').waitFor()
+    await shot(page, '08-pane-drop')
+    await page.mouse.up()
+    await assertCount(page.getByRole('tab', { name: /^Bash/ }), 1)
+    await assertCount(shown, 2)
+    ;[left, right] = await boxes()
+    near(right.x, left.x + left.width, 'dropped on the right')
+    await page.locator('.terminal-pane:not([hidden])').filter({ hasText: 'moved-42-out' }).waitFor()
+    await shot(page, '09-panes')
+    step('dragging a tab onto a terminal put it beside, still connected')
+
+    await page.getByRole('button', { name: /^Close Bash$/ }).click()
+    await assertCount(page.getByRole('tab', { name: /^Bash/ }), 0)
+  }
+
   // ---- device B: sign in, everything arrives, no trust prompt --------------------
   const b = await launch('device-b')
   await b.page.getByRole('tab', { name: 'I already have one' }).click()
