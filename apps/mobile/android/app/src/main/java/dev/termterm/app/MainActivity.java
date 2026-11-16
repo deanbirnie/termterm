@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(SshPlugin.class);
     registerPlugin(DeviceKeyPlugin.class);
     registerPlugin(TerminalInputPlugin.class);
+    registerPlugin(AppUpdatePlugin.class);
     super.onCreate(savedInstanceState);
   }
 }

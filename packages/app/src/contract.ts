@@ -1,3 +1,4 @@
+import type { ReleaseNotes } from './release-notes.ts'
 /**
  * The contract between the sandboxed renderer and the main process.
  * Nothing here ever carries a stored password, private key or passphrase
@@ -96,10 +97,14 @@ export type UpdateState =
   | { status: 'idle' }
   | { status: 'checking' }
   | { status: 'current'; checkedAt: number }
-  /** With a downloadUrl, the update is installed by hand (Android): open that link. */
-  | { status: 'available'; version: string; downloadUrl?: string }
+  /**
+   * `notes`: what changed since the installed version, newest first.
+   * `downloadUrl`: the update cannot be downloaded in the app; open this link.
+   */
+  | { status: 'available'; version: string; notes?: ReleaseNotes[]; downloadUrl?: string }
   | { status: 'downloading'; version: string; percent: number }
-  | { status: 'ready'; version: string }
+  /** Downloaded. `install`: it is handed to the system installer instead of restarting (Android). */
+  | { status: 'ready'; version: string; install?: boolean }
   | { status: 'error'; message: string }
 
 export interface DeviceView {

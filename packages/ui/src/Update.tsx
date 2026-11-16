@@ -1,4 +1,4 @@
-import { ArrowDownCircle } from 'lucide-react'
+import { ArrowDownCircle, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AppInfo, UpdateState } from '@termterm/app'
 import { api } from './api'
@@ -34,7 +34,7 @@ function nextStep(state: UpdateState): { label: string; run?: () => void; href?:
         ? { label: `Download ${state.version}`, href: state.downloadUrl }
         : { label: `Update to ${state.version}`, run: () => void api.updateDownload() }
     case 'ready':
-      return { label: 'Restart to update', run: () => void api.updateInstall() }
+      return { label: state.install ? 'Install update' : 'Restart to update', run: () => void api.updateInstall() }
     default:
       return null
   }
@@ -84,7 +84,9 @@ function describe(state: UpdateState): string {
     case 'downloading':
       return `Downloading version ${state.version}: ${state.percent}%`
     case 'ready':
-      return `Version ${state.version} is downloaded. Restarting closes any open sessions.`
+      return state.install
+        ? `Version ${state.version} is downloaded. Installing it closes the app; your vault is kept.`
+        : `Version ${state.version} is downloaded. Restarting closes any open sessions.`
     case 'error':
       return state.message
   }
@@ -140,5 +142,79 @@ export function AboutCard() {
         )}
       </div>
     </div>
+  )
+}
+
+const DISMISSED_KEY = 'termterm.updateCardDismissed'
+
+function dismissedVersion(): string | null {
+  try {
+    return localStorage.getItem(DISMISSED_KEY)
+  } catch {
+    return null
+  }
+}
+
+/** Changes listed per version in the card before it points to the release page. */
+const MAX_CHANGES = 6
+
+/**
+ * "New update": shown once a newer version is found, with what changed since
+ * the installed one. Update starts the download (the title bar then shows its
+ * progress and the restart or install button); Not now hides the card for
+ * that version, leaving the title bar button.
+ */
+export function UpdateCard() {
+  const state = useUpdateState()
+  const [dismissed, setDismissed] = useState(dismissedVersion)
+  if (state?.status !== 'available' || dismissed === state.version) return null
+  const version = state.version
+  const notNow = () => {
+    try {
+      localStorage.setItem(DISMISSED_KEY, version)
+    } catch {
+      // without storage it is hidden until the app restarts
+    }
+    setDismissed(version)
+  }
+  const notes = state.notes ?? []
+  return (
+    <section className="update-card" role="dialog" aria-labelledby="update-card-title">
+      <h2 id="update-card-title">
+        <Sparkles size={16} /> New update: version {version}
+      </h2>
+      <div className="update-notes">
+        {notes.length === 0 && <p>A newer version of termterm is available.</p>}
+        {notes.map((n) => (
+          <div key={n.version}>
+            {notes.length > 1 && <h3>{n.version}</h3>}
+            {n.changes.length > 0 ? (
+              <ul>
+                {n.changes.slice(0, MAX_CHANGES).map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            ) : null}
+            {(n.changes.length === 0 || n.changes.length > MAX_CHANGES) && (
+              <a className="link" href={n.url} target="_blank" rel="noreferrer">
+                {n.changes.length > MAX_CHANGES ? `and ${n.changes.length - MAX_CHANGES} more` : `What's new in ${n.version}`}
+              </a>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="update-card-actions">
+        <Button onClick={notNow}>Not now</Button>
+        {state.downloadUrl ? (
+          <a className="btn btn-primary" href={state.downloadUrl} target="_blank" rel="noreferrer" onClick={notNow}>
+            Download
+          </a>
+        ) : (
+          <Button variant="primary" onClick={() => void api.updateDownload()}>
+            Update
+          </Button>
+        )}
+      </div>
+    </section>
   )
 }

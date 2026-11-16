@@ -325,3 +325,22 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .menu li button:hover { background: var(--bg-hover); }
 .spaced-card { margin-top: 10px; }
 a.btn, a.update-pill { text-decoration: none; }
+
+/* ---- "New update" card ---- */
+.update-card {
+  position: fixed; right: 16px; bottom: 16px; z-index: 40; width: min(380px, calc(100vw - 32px));
+  max-height: min(70vh, 520px); display: flex; flex-direction: column;
+  background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); padding: 14px 16px;
+}
+.update-card h2 { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 8px; }
+.update-card h2 svg { color: var(--accent); flex: none; }
+.update-notes { overflow-y: auto; min-height: 0; font-size: 13px; color: var(--text-muted); }
+.update-notes h3 { font-size: 12px; font-weight: 650; color: var(--text); margin: 8px 0 2px; }
+.update-notes ul { margin: 2px 0 4px; padding-left: 18px; list-style: disc; }
+.update-notes li { margin: 3px 0; }
+.update-card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+@media (max-width: 640px) {
+  /* Above the navigation bar along the bottom. */
+  .update-card { left: 10px; right: 10px; bottom: calc(68px + env(safe-area-inset-bottom)); width: auto; }
+}

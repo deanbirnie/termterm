@@ -121,11 +121,15 @@ Download the latest version from the repository's
 - **Linux:** `termterm-<version>-x86_64.AppImage`.
 - **Android:** `termterm-<version>.apk` (see [Android app](#android-app)).
 
-Installed copies update themselves. When a newer release exists an **Update**
-button appears in the top bar; you can also check by hand under
-**Settings → About**, which shows the version you are running. The app
-downloads the new installer only when you click, then asks to restart. The
-portable build and builds run from source do not self-update.
+Installed copies update themselves. Shortly after the app starts (unless that
+is turned off under **Settings → About**), it checks for a newer release. If
+there is one, a **New update** card lists what changed since your version,
+with **Update** and **Not now**. Update downloads the new installer, showing
+progress in the top bar, then offers **Restart to update**. Not now hides the
+card for that version; the **Update** button in the top bar stays. You can
+also check by hand under **Settings → About**, which shows the version you
+are running. The portable build and builds run from source do not
+self-update.
 
 To build installers yourself (Node 22.18+): `npm install`, then `npm run dist`.
 The files land in `apps/desktop/release/`.
@@ -150,8 +154,15 @@ extra key row for Esc, Tab, Ctrl and the arrows.
 [Releases](https://github.com/deanbirnie/termterm/releases/latest) page and
 open it on the phone. Android asks once to allow installs from your browser
 or file manager. A newer version installs over an older one and keeps the
-vault. The app does not update itself: Settings → About tells you where to
-get the new APK.
+vault.
+
+**Updating:** the app checks for a newer release when it starts and shows the
+same **New update** card as the desktop app. **Update** downloads the APK
+inside the app, then **Install update** in the top bar hands it to Android's
+installer, which asks you to confirm. The first time, Android asks whether
+termterm may install apps: allow it, come back and tap **Install update**
+again. Only a release signed with the same key can replace the app, and the
+app checks the download is a newer termterm before offering it.
 
 The app accepts a plain `http://` sync server address, for a server on your
 home network, and warns when you enter one. Use `https://` for anything

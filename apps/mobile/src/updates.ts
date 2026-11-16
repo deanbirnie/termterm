@@ -1,51 +1,76 @@
 /**
- * Update checks for the Android app. Android apps cannot replace themselves,
- * so this only finds out whether a newer release exists and where its APK is;
- * the person downloads it in the browser and installs it over this one.
+ * Updates for the Android app. A check reads the releases list from GitHub:
+ * the newest release, what changed since this version, and its APK. The
+ * installed app downloads the APK itself (AppUpdatePlugin) and hands it to
+ * Android's installer; in a plain browser the APK is offered as a link.
  */
-import type { UpdateState } from '@termterm/app'
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core'
+import {
+  fetchReleases,
+  isNewer,
+  latestRelease,
+  notesBetween,
+  RELEASES_API,
+  RELEASES_PAGE,
+  versionOf,
+  type UpdateState,
+} from '@termterm/app'
 
-const LATEST = 'https://api.github.com/repos/deanbirnie/termterm/releases/latest'
-export const RELEASES_PAGE = 'https://github.com/deanbirnie/termterm/releases/latest'
+export { isNewer, RELEASES_PAGE }
 
-interface Release {
-  tag_name?: unknown
-  html_url?: unknown
-  assets?: { name?: unknown; browser_download_url?: unknown }[]
+export interface UpdateCheck {
+  state: UpdateState
+  /** The newest release's APK, when there is one to download. */
+  apkUrl?: string
 }
 
-/** Compares plain x.y.z versions; anything else (a dev build) counts as oldest. */
-export function isNewer(candidate: string, current: string): boolean {
-  const parse = (v: string) => (/^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null)
-  const a = parse(candidate)
-  const b = parse(current)
-  if (!a) return false
-  if (!b) return true
-  for (let i = 0; i < 3; i++) if (a[i]! !== b[i]!) return a[i]! > b[i]!
-  return false
-}
-
-/** Asks GitHub for the latest release and compares it with this app's version. */
+/** Asks GitHub for the releases and compares the newest with this app's version. */
 export async function checkForUpdate(
   current: string,
   fetchImpl: typeof fetch = (input, init) => fetch(input, init),
-): Promise<UpdateState> {
+): Promise<UpdateCheck> {
   try {
-    const response = await fetchImpl(LATEST, { headers: { Accept: 'application/vnd.github+json' } })
-    if (!response.ok) throw new Error(`GitHub answered ${response.status}`)
-    const release = (await response.json()) as Release
-    const tag = typeof release.tag_name === 'string' ? release.tag_name : ''
-    const version = tag.replace(/^v/, '')
-    if (!isNewer(version, current)) return { status: 'current', checkedAt: Date.now() }
-    const apk = release.assets?.find((a) => a.name === `termterm-${version}.apk`)
-    const downloadUrl =
-      typeof apk?.browser_download_url === 'string'
-        ? apk.browser_download_url
-        : typeof release.html_url === 'string'
-          ? release.html_url
-          : RELEASES_PAGE
-    return { status: 'available', version, downloadUrl }
+    const releases = await fetchReleases(RELEASES_API, fetchImpl)
+    const latest = latestRelease(releases)
+    const version = latest ? versionOf(latest) : ''
+    if (!latest || !isNewer(version, current)) return { state: { status: 'current', checkedAt: Date.now() } }
+    const apk = latest.assets?.find((a) => a.name === `termterm-${version}.apk`)
+    const apkUrl = typeof apk?.browser_download_url === 'string' ? apk.browser_download_url : undefined
+    const page = typeof latest.html_url === 'string' ? latest.html_url : RELEASES_PAGE
+    return {
+      state: { status: 'available', version, notes: notesBetween(releases, current, version), downloadUrl: apkUrl ?? page },
+      apkUrl,
+    }
   } catch (e) {
-    return { status: 'error', message: `Could not check for updates: ${(e as Error).message}` }
+    return { state: { status: 'error', message: `Could not check for updates: ${(e as Error).message}` } }
   }
+}
+
+// ---- downloading and installing, in the installed app ----------------------------
+
+interface AppUpdatePluginApi {
+  download(options: { url: string }): Promise<void>
+  install(): Promise<{ needsPermission: boolean }>
+  addListener(event: 'progress', cb: (e: { percent: number }) => void): Promise<PluginListenerHandle>
+}
+
+const AppUpdate = registerPlugin<AppUpdatePluginApi>('AppUpdate')
+
+/** Downloads the APK into the app, reporting progress; rejects with a readable message. */
+export async function downloadApk(url: string, onProgress: (percent: number) => void): Promise<void> {
+  const listener = await AppUpdate.addListener('progress', (e) => onProgress(e.percent))
+  try {
+    await AppUpdate.download({ url })
+  } finally {
+    await listener.remove()
+  }
+}
+
+/**
+ * Opens Android's installer for the downloaded APK. The first time, Android
+ * asks whether termterm may install apps; that opens settings instead and
+ * returns true, and the installer is opened on the next try.
+ */
+export async function installApk(): Promise<boolean> {
+  return (await AppUpdate.install()).needsPermission
 }

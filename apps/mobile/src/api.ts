@@ -17,7 +17,7 @@ import {
 import { BiometricCancelled, biometricKeyStore } from './device-key'
 import { createSsh, nativeKeyTools, setTerminalFocus } from './ssh'
 import { vaultStorage } from './storage'
-import { checkForUpdate } from './updates'
+import { checkForUpdate, downloadApk, installApk } from './updates'
 
 declare const __APP_VERSION__: string
 
@@ -130,11 +130,29 @@ export function createApi(): TermtermApi {
     updateState = state
     updateChanged.emit(state)
   }
+  let apkUrl: string | undefined
   const checkUpdates = async () => {
-    if (updateState.status === 'checking') return updateState
+    if (['checking', 'downloading', 'ready'].includes(updateState.status)) return updateState
     setUpdateState({ status: 'checking' })
-    setUpdateState(await checkForUpdate(__APP_VERSION__))
+    const result = await checkForUpdate(__APP_VERSION__)
+    apkUrl = result.apkUrl
+    // The installed app downloads the APK itself; elsewhere it stays a link.
+    const state = result.state
+    setUpdateState(NATIVE && apkUrl && state.status === 'available' ? { ...state, downloadUrl: undefined } : state)
     return updateState
+  }
+  const downloadUpdate = async () => {
+    if (updateState.status !== 'available' || !NATIVE || !apkUrl) return
+    const version = updateState.version
+    setUpdateState({ status: 'downloading', version, percent: 0 })
+    try {
+      await downloadApk(apkUrl, (percent) => {
+        if (updateState.status === 'downloading') setUpdateState({ status: 'downloading', version, percent })
+      })
+      setUpdateState({ status: 'ready', version, install: true })
+    } catch (e) {
+      setUpdateState({ status: 'error', message: `The update could not be downloaded: ${(e as Error).message}` })
+    }
   }
   if (settings.autoCheckUpdates) void checkUpdates()
 
@@ -216,8 +234,10 @@ export function createApi(): TermtermApi {
     updateState: async () => updateState,
     onUpdateState: updateChanged.on,
     updateCheck: checkUpdates,
-    updateDownload: async () => undefined,
-    updateInstall: async () => undefined,
+    updateDownload: downloadUpdate,
+    updateInstall: async () => {
+      if (updateState.status === 'ready' && NATIVE) await installApk()
+    },
 
     clipboardWrite: (text) => void navigator.clipboard?.writeText(text).catch(() => undefined),
     clipboardRead: async () => (await navigator.clipboard?.readText().catch(() => '')) ?? '',
