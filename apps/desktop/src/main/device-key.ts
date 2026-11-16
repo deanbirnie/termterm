@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { safeStorage } from 'electron'
+import { app, safeStorage } from 'electron'
 
 /**
  * Keeps the vault key in the operating system's credential store (DPAPI on
@@ -8,11 +8,16 @@ import { safeStorage } from 'electron'
  * open at launch without the master password. The file on disk holds only
  * the OS-encrypted blob.
  */
+/**
+ * Automated tests run without a keyring; this opt-in makes Linux use a
+ * built-in key instead. Only a build run from source honours it: an
+ * installed app never stores the vault key without real protection.
+ */
+const insecureForTests = () => !app.isPackaged && process.env.TERMTERM_INSECURE_KEYSTORE === '1'
+
 export class DeviceKeyStore {
   constructor(private readonly path: string) {
-    // Automated tests run without a keyring; this opt-in makes Linux use an
-    // in-memory key instead. Never set it on a real machine.
-    if (process.env.TERMTERM_INSECURE_KEYSTORE === '1') safeStorage.setUsePlainTextEncryption(true)
+    if (insecureForTests()) safeStorage.setUsePlainTextEncryption(true)
   }
 
   /** Call after the app is ready. */
@@ -22,10 +27,7 @@ export class DeviceKeyStore {
     // Without a keyring, Linux falls back to a hard-coded key: that is not
     // protection, so refuse it unless the test override is set.
     const backend = safeStorage.getSelectedStorageBackend()
-    return (
-      (backend !== 'basic_text' && backend !== 'unknown') ||
-      process.env.TERMTERM_INSECURE_KEYSTORE === '1'
-    )
+    return (backend !== 'basic_text' && backend !== 'unknown') || insecureForTests()
   }
 
   has(): boolean {

@@ -290,5 +290,6 @@ Add a row per run, newest first.
 
 | Date | By | Upgraded | Left alone (why) | Notes |
 |---|---|---|---|---|
+| 2026-11-16 | Claude | Electron 45.3.0 → 45.3.2 (audit F01: drops trust in revoked eMudhra intermediates). `TERMTERM_INSECURE_KEYSTORE` now ignored by installed builds (audit F10). | Electron 45.3.3 (published the same day; next run). Other audit findings unchanged. | Typecheck, 57 unit tests and the desktop e2e (Linux, Electron 45.3.2) pass; Windows packaging in CI. Released as a patch to exercise the in-app updater. |
 | 2026-11-12 | Codex | Policy only; no dependency upgrades | Runtime code and workflows unchanged | Added platform, compatibility and release verification; security deferral records; runtime distinctions; update grouping and automation backlog. Documentation reviewed; no maintenance suite run. |
 | 2026-11-11 | initial | n/a | n/a | Policy written; baseline recorded above. |
