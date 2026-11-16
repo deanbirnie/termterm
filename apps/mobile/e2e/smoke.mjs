@@ -35,16 +35,19 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH 
 const step = (msg) => console.log(`  ✓ ${msg}`)
 const nav = (page, name) => page.getByRole('navigation').getByRole('button', { name, exact: true })
 
-async function device() {
+async function device({ newerRelease = false } = {}) {
   const context = await browser.newContext({ ...devices['Pixel 7'] })
-  // The update check asks GitHub for the latest release; answer with a newer one.
+  // The update check asks GitHub for the releases; answer with a newer one, or none.
   await context.route('https://api.github.com/**', (route) =>
     route.fulfill({
-      json: {
-        tag_name: 'v99.0.0',
-        html_url: 'https://github.com/deanbirnie/termterm/releases/tag/v99.0.0',
-        assets: [{ name: 'termterm-99.0.0.apk', browser_download_url: 'https://example.test/termterm-99.0.0.apk' }],
-      },
+      json: !newerRelease ? [] : [
+        {
+          tag_name: 'v99.0.0',
+          html_url: 'https://github.com/deanbirnie/termterm/releases/tag/v99.0.0',
+          body: "## What's Changed\n* Split panes on desktop by @dean in https://github.com/x/pull/21",
+          assets: [{ name: 'termterm-99.0.0.apk', browser_download_url: 'https://example.test/termterm-99.0.0.apk' }],
+        },
+      ],
     }),
   )
   const page = await context.newPage()
@@ -57,7 +60,7 @@ async function device() {
 
 try {
   // ---- first device ---------------------------------------------------------------
-  const a = await device()
+  const a = await device({ newerRelease: true })
   await a.getByLabel('Master password', { exact: true }).fill(MASTER)
   await a.getByLabel('Confirm master password').fill(MASTER)
   const field = a.getByLabel('Master password', { exact: true })
@@ -71,6 +74,17 @@ try {
   await a.getByRole('button', { name: 'Create vault' }).click()
   await a.getByText('No hosts yet').waitFor()
   step('vault created in the browser engine')
+
+  // The New update card appears after unlocking; in a browser its Download is the APK link.
+  const card = a.getByRole('dialog', { name: 'New update: version 99.0.0' })
+  await card.getByText('Split panes on desktop', { exact: true }).waitFor()
+  assert.equal(
+    await card.getByRole('link', { name: 'Download' }).getAttribute('href'),
+    'https://example.test/termterm-99.0.0.apk',
+  )
+  await card.getByRole('button', { name: 'Not now' }).click()
+  assert.equal(await card.count(), 0)
+  step('a New update card shows what changed, with Not now and Download')
 
   // Nothing that needs SSH is offered yet.
   assert.equal(await a.getByRole('button', { name: 'Connect', exact: true }).count(), 0)

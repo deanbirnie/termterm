@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import type { UpdateState } from '@termterm/app'
+import { fetchReleases, notesBetween, RELEASES_API, type ReleaseNotes, type UpdateState } from '@termterm/app'
 
 /**
  * In-app updates from GitHub releases. electron-updater reads the release's
@@ -11,6 +11,7 @@ import type { UpdateState } from '@termterm/app'
  */
 export class Updater {
   private state: UpdateState
+  private releasesUrl: string | undefined
 
   constructor(private readonly onState: (state: UpdateState) => void) {
     const reason = this.unsupportedReason()
@@ -38,7 +39,13 @@ export class Updater {
       autoUpdater.updateConfigPath = config
     }
 
-    autoUpdater.on('update-available', (info) => this.set({ status: 'available', version: info.version }))
+    // Tests serve their own releases list; a packaged app always asks GitHub.
+    this.releasesUrl = app.isPackaged ? RELEASES_API : process.env.TERMTERM_RELEASES_API
+    autoUpdater.on('update-available', (info) => {
+      void this.notes(info.version).then((notes) => {
+        if (this.state.status === 'checking') this.set({ status: 'available', version: info.version, notes })
+      })
+    })
     autoUpdater.on('update-not-available', () => this.set({ status: 'current', checkedAt: Date.now() }))
     autoUpdater.on('download-progress', (p) => {
       if (this.state.status === 'downloading') {
@@ -61,6 +68,18 @@ export class Updater {
       return process.env.APPIMAGE ? undefined : 'Only the AppImage build can update itself.'
     }
     return 'Automatic updates are not available on this platform yet.'
+  }
+
+  /** What changed since this version, for the "New update" card. Empty if it cannot be fetched in time. */
+  private async notes(latest: string): Promise<ReleaseNotes[]> {
+    if (!this.releasesUrl) return []
+    try {
+      const timeout = AbortSignal.timeout(10_000)
+      const releases = await fetchReleases(this.releasesUrl, (input, init) => fetch(input, { ...init, signal: timeout }))
+      return notesBetween(releases, app.getVersion(), latest)
+    } catch {
+      return []
+    }
   }
 
   get(): UpdateState {

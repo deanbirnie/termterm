@@ -33,7 +33,7 @@ import {
 } from './layout'
 import { PromptDialog } from './Prompts'
 import { TerminalTab } from './TerminalTab'
-import { UpdatePill, useAppInfo } from './Update'
+import { UpdateCard, UpdatePill, useAppInfo } from './Update'
 import { VaultView } from './VaultView'
 
 /** One terminal session: an SSH connection or a shell on this computer. */
@@ -619,6 +619,8 @@ export function Workspace({ locked }: { locked: boolean }) {
             </div>
           )}
         </main>
+
+        {ready && !prompt && <UpdateCard />}
 
         {prompt && (
           <PromptDialog

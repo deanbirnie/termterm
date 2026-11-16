@@ -100,6 +100,20 @@ const feedFiles = {
     '',
   ].join('\n'),
   '/termterm-9.9.9-x86_64.AppImage': fakeInstaller,
+  // The GitHub releases list the "New update" card reads its changelog from.
+  '/releases': JSON.stringify([
+    {
+      tag_name: 'v9.9.9',
+      html_url: 'https://github.com/deanbirnie/termterm/releases/tag/v9.9.9',
+      body: "**Desktop app**\n- Windows: run the installer\n\n## What's Changed\n* Panes can be swapped by @dean in https://github.com/x/pull/9\n\n**Full Changelog**: https://x",
+    },
+    { tag_name: 'v9.9.10-beta.1', prerelease: true, body: "## What's Changed\n* Not released yet" },
+    {
+      tag_name: 'v9.8.0',
+      html_url: 'https://github.com/deanbirnie/termterm/releases/tag/v9.8.0',
+      body: "## What's Changed\n* Faster sync by @dean in https://github.com/x/pull/8",
+    },
+  ]),
 }
 const feed = createServer((req, res) => {
   const body = feedFiles[new URL(req.url, 'http://x').pathname]
@@ -560,7 +574,8 @@ try {
   // On Linux the updater replaces the AppImage it runs from, so give it one.
   const fakeAppImage = join(tmp, 'termterm-current.AppImage')
   writeFileSync(fakeAppImage, 'current version')
-  const u = await launch('device-a', { TERMTERM_UPDATE_FEED: feedUrl, APPIMAGE: fakeAppImage })
+  const updateEnv = { TERMTERM_UPDATE_FEED: feedUrl, TERMTERM_RELEASES_API: `${feedUrl}/releases`, APPIMAGE: fakeAppImage }
+  const u = await launch('device-a', updateEnv)
   await u.page.getByText(`v${appVersion}`, { exact: true }).waitFor()
   await nav(u.page, 'Settings').click()
   await u.page.getByText(`${appVersion} (development build)`).waitFor()
@@ -568,14 +583,34 @@ try {
     await u.page.getByRole('link', { name: 'Release notes' }).getAttribute('href'),
     `https://github.com/deanbirnie/termterm/releases/tag/v${appVersion}`,
   )
-  await u.page.getByRole('button', { name: 'Check for updates' }).click()
+  // The check runs by itself shortly after launch; the card lists every version since this one.
+  const card = u.page.getByRole('dialog', { name: 'New update: version 9.9.9' })
+  await card.waitFor({ timeout: 20_000 })
+  await card.getByText('Panes can be swapped', { exact: true }).waitFor()
+  await card.getByText('Faster sync', { exact: true }).waitFor()
+  await card.getByRole('heading', { name: '9.8.0' }).waitFor()
+  assert.equal(await card.getByText('Not released yet').count(), 0)
   await u.page.getByText('Version 9.9.9 is available.').waitFor()
   await shot(u.page, '12-update-available')
-  await u.page.getByRole('banner').getByRole('button', { name: 'Update to 9.9.9' }).click()
+  await card.getByRole('button', { name: 'Update', exact: true }).click()
   await u.page.getByText('Version 9.9.9 is downloaded.').waitFor()
   await u.page.getByRole('banner').getByRole('button', { name: 'Restart to update' }).waitFor()
+  assert.equal(await card.count(), 0)
   await u.app.close()
-  step('updater found a newer release and downloaded it, ready to install on restart')
+  step('after launch a New update card listed the changes since this version; Update downloaded it, ready to restart')
+
+  const later = await launch('device-a', updateEnv)
+  const again = later.page.getByRole('dialog', { name: 'New update: version 9.9.9' })
+  await again.waitFor({ timeout: 20_000 })
+  await again.getByRole('button', { name: 'Not now' }).click()
+  assert.equal(await again.count(), 0)
+  await later.page.getByRole('banner').getByRole('button', { name: 'Update to 9.9.9' }).waitFor()
+  await later.app.close()
+  const after = await launch('device-a', updateEnv)
+  await after.page.getByRole('banner').getByRole('button', { name: 'Update to 9.9.9' }).waitFor({ timeout: 20_000 })
+  assert.equal(await after.page.getByRole('dialog', { name: /New update/ }).count(), 0)
+  await after.app.close()
+  step('Not now hides the card for that version; the title bar still offers it')
 
   const noFeed = await launch('device-a')
   await nav(noFeed.page, 'Settings').click()
