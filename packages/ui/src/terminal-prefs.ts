@@ -9,6 +9,8 @@ export interface TerminalPrefs {
   fontSize: number | null
   /** Row height as a multiple of the text height. 1 is rows touching. */
   lineHeight: number
+  /** Suggest commands from this host's history and from snippets while typing. */
+  suggestions: boolean
 }
 
 export const FONT_MIN = 7
@@ -24,6 +26,7 @@ export const LINE_HEIGHTS = [
 
 const FONT_KEY = 'termterm.terminalFontSize'
 const LINE_KEY = 'termterm.terminalLineHeight'
+const SUGGEST_KEY = 'termterm.commandSuggestions'
 const EVENT = 'termterm:terminal-prefs'
 
 function stored(key: string, min: number, max: number): number | null {
@@ -41,6 +44,7 @@ export function getTerminalPrefs(): TerminalPrefs {
   return {
     fontSize: stored(FONT_KEY, FONT_MIN, FONT_MAX),
     lineHeight: stored(LINE_KEY, 1, 2) ?? DEFAULT_LINE_HEIGHT,
+    suggestions: stored(SUGGEST_KEY, 0, 1) !== 0,
   }
 }
 
@@ -51,6 +55,7 @@ export function setTerminalPrefs(patch: Partial<TerminalPrefs>): TerminalPrefs {
       else localStorage.setItem(FONT_KEY, String(Math.min(FONT_MAX, Math.max(FONT_MIN, patch.fontSize))))
     }
     if (patch.lineHeight !== undefined) localStorage.setItem(LINE_KEY, String(patch.lineHeight))
+    if (patch.suggestions !== undefined) localStorage.setItem(SUGGEST_KEY, patch.suggestions ? '1' : '0')
   } catch {
     // Not remembered (storage unavailable), but still applied to open terminals below.
   }

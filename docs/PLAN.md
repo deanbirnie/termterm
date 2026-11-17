@@ -106,13 +106,43 @@ Known gaps inside phase 1 scope:
 - `ssh2` occasionally generates an Ed25519 key its own parser rejects;
   `apps/desktop/src/main/keys.ts` retries until the key parses.
 
-## Suggested order from here
+## Work queue
 
-1. Try Android SSH on a device and fix what that turns up.
-2. Add the Android signing key secrets and cut a release, to get the first
-   signed APK; confirm the Windows update button at the same time.
-3. Account deletion from the app.
-4. More desktop terminal features (phase 3): reconnect and keep-alive, port forwarding.
+Agreed with the owner on 2026-11-17: four batches, done in this order, **one
+pull request per batch**. Whether a batch's PR becomes a release is the
+owner's call (see "Releasing" in the README).
+
+### Batch 1 — Everyday terminal (done; this is the PR that added this queue)
+
+- [x] Reconnect after a dropped connection (keep-alive was already on: 20 s, 3 missed)
+- [x] Search in the scrollback
+- [x] Import hosts from `~/.ssh/config`, their keys, and `known_hosts`
+- [x] Sync as soon as the app comes back to the foreground or the network returns
+- [x] Predictive typing: suggestions from this host's command history and snippets
+
+### Batch 2 — Connections (next)
+
+- [ ] Jump hosts (ProxyJump), saved on the host; the ~/.ssh import should then
+      bring `ProxyJump` across instead of noting it
+- [ ] Port forwarding (local, remote, dynamic), saved in the vault and synced
+- [ ] SFTP browser: two panes, drag and drop, on desktop first
+
+### Batch 3 — Reliability and housekeeping
+
+- [ ] Sync: items deleted while sync was off come back after signing in again
+      (keep tombstones when sync is off, or reconcile on rejoin)
+- [ ] Password change: a retry journal for the crash window between the server
+      accepting the new password and the vault file being rewritten
+- [ ] Maintenance audit (2026-11-12) leftovers: releases wait for every test,
+      including the mobile and SSH ones (F05); a server image without npm and with
+      fixed base packages (F02); GitHub Actions upgrades and pinning (F04);
+      stricter release version checks (F06); automatic dependency-update PRs (F09)
+
+### Batch 4 — Vault extras
+
+- [ ] Encrypted export and import of the whole vault
+- [ ] Identities (one login shared by several hosts) and host groups
+- [ ] Account deletion from the app
 
 ## Phase 2 — Vault hardening and account management
 
@@ -148,7 +178,13 @@ Known gaps inside phase 1 scope:
 - [x] Device list and remote sign-out (`/v1/sessions*`); device names are sealed with the vault key so the server cannot read them
 - [ ] Rollback protection: sign a per-device view of the highest seen `seq`
       so a malicious server cannot silently serve stale data
-- [ ] Encrypted export / import (and import from `~/.ssh/config`, `known_hosts`)
+- [x] Import from `~/.ssh/config` (with `Host *` defaults; patterns and `Match`
+      skipped), the keys its hosts name (or ssh's default key), and `known_hosts`
+      (plain entries; hashed ones are counted and skipped). A trusted key is never
+      replaced by an imported one. Desktop reads `~/.ssh`; phones take pasted text.
+      Passphrase-protected keys are listed to add by hand (`packages/app/src/ssh-import.ts`,
+      `VaultService.scanSshImport` / `applySshImport`, `apps/desktop/src/main/ssh-files.ts`)
+- [ ] Encrypted export / import of the vault
 - [ ] Identities (reusable username + credential shared across hosts), host groups
 - [ ] SSH certificates, FIDO2 / security-key keys, agent forwarding
 - [ ] Account deletion from the app (today it takes a database command on the server; see the README), server-side storage quota reporting, server backups doc
@@ -173,12 +209,24 @@ Known gaps inside phase 1 scope:
       Not on Android, where apps only reach a restricted built-in shell. CI starts
       every detected shell on Windows and checks it runs a command
       (`scripts/check-local-shells.mjs`); **not yet used on a Windows desktop by hand.**
-- [ ] Reconnect, keep-alive settings, per-host startup snippet, env vars
+- [x] Reconnect: a session that was connected and drops (keep-alive timeout,
+      reset, or the shell's channel closing without an exit status) retries after
+      1, 2, 5, 10, 20 and 30 s, at once when the network returns or the app comes
+      back; never after a refused host key or failed login, nor after `exit`.
+      Desktop (`ssh.ts`) and Android (`SshSession.java`) report "Connection lost"
+      for a drop; `TerminalTab` does the retrying
+- [ ] Keep-alive settings, per-host startup snippet, env vars
 - [ ] Host chaining (jump hosts / ProxyJump), SOCKS/HTTP proxy
 - [ ] Port forwarding (local, remote, dynamic) as vault items
 - [ ] SFTP browser (dual pane, drag and drop)
-- [ ] Terminal themes, fonts, per-host colour; search in scrollback; session logs
-- [ ] Predictive typing / autocomplete (command history + snippets), broadcast input
+- [x] Search in scrollback (`@xterm/addon-search`; Ctrl+Shift+F, Cmd+F, or the magnifier)
+- [ ] Terminal themes, fonts, per-host colour; session logs
+- [x] Predictive typing: command history per host (a `history` vault item,
+      encrypted and synced, 500 commands) plus single-line snippets, shown beside
+      the cursor. The line is followed from keystrokes (`packages/ui/src/suggest.ts`)
+      and given up on after Tab, arrows or history keys until Enter; a command is
+      kept only if the terminal echoed it, so passwords at prompts are not
+- [ ] Broadcast input to several sessions
 - [ ] Mosh, Telnet, serial
 
 ## Phase 4 — Distribution and more devices
@@ -188,7 +236,7 @@ Known gaps inside phase 1 scope:
 - [x] In-app updates with electron-updater from GitHub releases (Settings → About, plus an Update button in the top bar); version shown in the sidebar and About
 - [x] Storage cleanup (`cleanup.yml` + `.github/scripts/cleanup.sh`): prunes artifacts, run logs, caches, old releases and old image versions, keeping the newest 3. Has run for real after a release.
 - [x] First real releases made; the Release workflow works end to end
-- [ ] Confirm on Windows that an installed older version updates itself from the Update button (the updater is otherwise tested only against a fake feed on Linux)
+- [x] Confirmed by the owner on real devices (0.6.0 → 0.6.1): the desktop app updates itself from the New update card, and the Android app downloads and installs its APK
 - [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
 - [ ] Android app (`apps/mobile`, Capacitor) reusing `packages/core`, `packages/app` and `packages/ui`:
   - [x] Step 1: shared UI and vault logic moved out of the desktop app into `packages/ui` and `packages/app`

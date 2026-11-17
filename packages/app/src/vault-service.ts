@@ -19,10 +19,14 @@ import type {
   DeviceView,
   HostInput,
   KeyImportInput,
+  SshImportFiles,
+  SshImportPreview,
+  SshImportResult,
   SyncStatus,
   VaultSnapshot,
 } from './contract.ts'
 import { fingerprintOfPublicLine } from './fingerprint.ts'
+import { parseKnownHosts, parseSshConfig, type ConfigHost, type KnownHostEntry } from './ssh-import.ts'
 import type { Platform } from './platform.ts'
 
 const SYNC_DEBOUNCE_MS = 1500
@@ -435,6 +439,143 @@ export class VaultService {
     this.v.delete(id)
   }
 
+  // ---- importing from OpenSSH's files ------------------------------------------
+
+  private sshImport: { files: SshImportFiles; hosts: ConfigHost[]; known: KnownHostEntry[] } | null = null
+
+  /** Parses OpenSSH's files and says what an import would do; remembered for applySshImport. */
+  scanSshImport(files: SshImportFiles): SshImportPreview {
+    const v = this.v
+    const hosts = files.config ? parseSshConfig(files.config) : []
+    const parsed = files.knownHosts ? parseKnownHosts(files.knownHosts) : { entries: [], skipped: 0 }
+    this.sshImport = { files, hosts, known: parsed.entries }
+    const existing = v.list<HostData>('host').map((h) => h.data)
+    const sameHost = (h: ConfigHost) =>
+      existing.some(
+        (e) =>
+          e.address.toLowerCase() === h.address.toLowerCase() && e.port === h.port && e.username === h.username,
+      )
+    const counts = { add: 0, already: 0, conflicting: 0, skipped: parsed.skipped }
+    for (const entry of parsed.entries) counts[this.knownHostStatus(entry)]++
+    const notes: string[] = []
+    const jumps = hosts.filter((h) => h.proxyJump).map((h) => h.alias)
+    if (jumps.length) notes.push(`ProxyJump is not supported yet, so these connect directly: ${jumps.join(', ')}.`)
+    if (counts.conflicting) {
+      notes.push(`${counts.conflicting} known host key(s) differ from the key termterm already trusts for that host and are left out.`)
+    }
+    if (parsed.skipped) notes.push(`${parsed.skipped} known_hosts entries are hashed or not plain keys and cannot be imported.`)
+    return {
+      source: files.source,
+      hosts: hosts.map((h) => ({
+        alias: h.alias,
+        address: h.address,
+        port: h.port,
+        username: h.username,
+        key: this.keyFileFor(h),
+        exists: sameHost(h),
+      })),
+      knownHosts: counts,
+      notes,
+    }
+  }
+
+  async applySshImport(aliases: string[], includeKnownHosts: boolean): Promise<SshImportResult> {
+    const pending = this.sshImport
+    if (!pending) throw new Error('Scan for hosts first')
+    const v = this.v
+    const result: SshImportResult = { hosts: 0, knownHosts: 0, keys: 0, keysNeedingPassphrase: [] }
+    const keyIds = new Map<string, string | null>()
+    const keyIdFor = async (path: string | undefined): Promise<string | null> => {
+      if (!path) return null
+      if (keyIds.has(path)) return keyIds.get(path)!
+      const text = pending.files.keys?.[path]
+      let id: string | null = null
+      if (text) {
+        try {
+          const key = await this.platform.keys.import(path.split('/').pop() || path, text)
+          // The same key may already be in the vault: use that one.
+          const same = v.list<KeyData>('key').find((k) => k.data.publicKey.split(' ')[1] === key.publicKey.split(' ')[1])
+          id = same ? same.id : v.put('key', key).id
+          if (!same) result.keys++
+        } catch {
+          result.keysNeedingPassphrase.push(path)
+        }
+      }
+      keyIds.set(path, id)
+      return id
+    }
+    const preview = this.scanSshImport(pending.files) // what is in the vault may have changed
+    for (const h of pending.hosts) {
+      const row = preview.hosts.find((p) => p.alias === h.alias)
+      if (!aliases.includes(h.alias) || !row || row.exists) continue
+      this.saveHost(null, {
+        label: h.alias,
+        address: h.address,
+        port: h.port,
+        username: h.username,
+        tags: [],
+        keyId: await keyIdFor(this.keyFileFor(h)),
+      })
+      result.hosts++
+    }
+    if (includeKnownHosts) {
+      for (const entry of pending.known) {
+        if (this.knownHostStatus(entry) !== 'add') continue
+        v.put<KnownHostData>('knownHost', entry)
+        result.knownHosts++
+      }
+    }
+    this.sshImport = null
+    return result
+  }
+
+  private keyFileFor(h: ConfigHost): string | undefined {
+    const files = this.sshImport?.files
+    if (h.identityFile) return files?.keys?.[h.identityFile] !== undefined ? h.identityFile : undefined
+    return files?.defaultKey
+  }
+
+  private knownHostStatus(entry: KnownHostEntry): 'add' | 'already' | 'conflicting' {
+    const known = this.knownHostsFor(entry.host, entry.port)
+    if (known.some((k) => k.data.publicKey === entry.publicKey)) return 'already'
+    // A different key of the same type is a conflict; another type is just another key.
+    return known.some((k) => k.data.keyType === entry.keyType) ? 'conflicting' : 'add'
+  }
+
+  // ---- command history (for suggestions while typing) --------------------------
+
+  /** Commands typed in sessions to one host or shell, oldest first, without repeats. */
+  commandHistory(key: string): string[] {
+    const merged: string[] = []
+    // Two devices can each start a history for the same host before they sync: read both.
+    for (const item of this.historyItems(key)) merged.push(...item.data.commands)
+    return dedupeKeepLast(merged).slice(-HISTORY_LIMIT)
+  }
+
+  recordCommands(key: string, commands: string[]): void {
+    const historyKey = required(key, 'History', 256)
+    const add = commands
+      .filter((c): c is string => typeof c === 'string')
+      .map((c) => c.trim())
+      .filter((c) => c.length > 0 && c.length <= 1000)
+    if (add.length === 0) return
+    const items = this.historyItems(historyKey)
+    const merged = dedupeKeepLast([...items.flatMap((i) => i.data.commands), ...add]).slice(-HISTORY_LIMIT)
+    const [keep, ...extra] = items
+    this.v.put<HistoryData>('history', { key: historyKey, commands: merged }, keep?.id)
+    for (const item of extra) this.v.delete(item.id)
+  }
+
+  clearCommandHistory(): void {
+    for (const item of this.v.list<HistoryData>('history')) this.v.delete(item.id)
+  }
+
+  private historyItems(key: string) {
+    return this.v
+      .list<HistoryData>('history')
+      .filter((i) => i.data?.key === key && Array.isArray(i.data.commands))
+  }
+
   // ---- sync ------------------------------------------------------------------
 
   async syncRegister(input: AccountInput): Promise<void> {
@@ -588,4 +729,28 @@ export class VaultService {
       }
     }
   }
+}
+
+/** Commands typed in sessions to one host or shell, kept to suggest them again. */
+interface HistoryData {
+  /** Which host or shell: see `historyKey` in the interface. */
+  key: string
+  /** Oldest first, no repeats. */
+  commands: string[]
+}
+
+const HISTORY_LIMIT = 500
+
+/** Removes repeats, keeping each command's latest position. */
+function dedupeKeepLast(list: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (let i = list.length - 1; i >= 0; i--) {
+    const c = list[i]!
+    if (typeof c === 'string' && !seen.has(c)) {
+      seen.add(c)
+      out.push(c)
+    }
+  }
+  return out.reverse()
 }

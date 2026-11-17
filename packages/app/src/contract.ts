@@ -89,6 +89,8 @@ export interface AppInfo {
     biometricName?: string
     /** Can open a terminal running a shell on this computer. */
     localTerminal?: boolean
+    /** Can read ~/.ssh on this device to import hosts. */
+    sshFiles?: boolean
   }
 }
 
@@ -116,6 +118,43 @@ export interface DeviceView {
 }
 
 export type AppPhase = 'new' | 'locked' | 'unlocked'
+
+/** Files from OpenSSH to import: text of ~/.ssh/config and known_hosts, and private keys. */
+export interface SshImportFiles {
+  /** Where they came from, to show ("~/.ssh on this computer", "pasted text"). */
+  source: string
+  config?: string
+  knownHosts?: string
+  /** Private keys by the IdentityFile path as written in the config. */
+  keys?: Record<string, string>
+  /** For hosts that name no IdentityFile: the default key ssh would use, if found. */
+  defaultKey?: string
+}
+
+export interface SshImportPreview {
+  source: string
+  hosts: {
+    alias: string
+    address: string
+    port: number
+    username: string
+    /** The key file it will use, if any. */
+    key?: string
+    /** Already in the vault (same address, port and user): not imported again. */
+    exists: boolean
+  }[]
+  knownHosts: { add: number; already: number; conflicting: number; skipped: number }
+  /** Things that are not imported, to say so rather than drop them silently. */
+  notes: string[]
+}
+
+export interface SshImportResult {
+  hosts: number
+  knownHosts: number
+  keys: number
+  /** Key files that are protected by a passphrase: add them under Keychain. */
+  keysNeedingPassphrase: string[]
+}
 
 export interface HostInput {
   label: string
@@ -202,6 +241,17 @@ export interface TermtermApi {
   importKey(input: KeyImportInput): Promise<string>
   renameKey(id: string, label: string): Promise<void>
   saveSnippet(id: string | null, input: { label: string; script: string }): Promise<string>
+  /**
+   * Reads OpenSSH's files for import: this computer's ~/.ssh when nothing is
+   * given (desktop only), or pasted text. Remembers the result for sshImportApply.
+   */
+  sshImportScan(paste?: { config?: string; knownHosts?: string }): Promise<SshImportPreview>
+  /** Imports the chosen hosts (by alias) from the last scan, and optionally its known host keys. */
+  sshImportApply(aliases: string[], knownHosts: boolean): Promise<SshImportResult>
+  /** Commands typed in sessions to one host or shell, oldest first, for suggestions. Kept in the vault. */
+  commandHistory(key: string): Promise<string[]>
+  recordCommands(key: string, commands: string[]): Promise<void>
+  clearCommandHistory(): Promise<void>
   deleteItem(id: string): Promise<void>
 
   syncRegister(input: AccountInput): Promise<void>

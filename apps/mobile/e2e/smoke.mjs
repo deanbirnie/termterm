@@ -176,6 +176,19 @@ try {
   await a.locator('.card', { hasText: 'Renamed on phone' }).waitFor()
   step('an edit on one device reached the other')
 
+  // Coming back to the app syncs at once, without Sync now or the minute's wait.
+  await nav(b, 'Hosts').click()
+  await b.locator('.card', { hasText: 'Renamed on phone' }).click()
+  await b.getByLabel('Label').fill('Renamed again')
+  await b.getByRole('button', { name: 'Save changes' }).click()
+  await b.getByRole('button', { name: 'Close' }).click()
+  await nav(b, 'Sync').click()
+  await b.getByText('Up to date').waitFor()
+  await a.waitForTimeout(16_000) // past the 15 s pause after the last catch-up sync
+  await a.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await a.locator('.card', { hasText: 'Renamed again' }).waitFor({ timeout: 5000 })
+  step('returning to the app synced straight away')
+
   await nav(a, 'Settings').click()
   await a.getByText('Version 99.0.0 is available.', { exact: false }).waitFor()
   const download = a.getByRole('link', { name: 'Download 99.0.0' })
@@ -193,6 +206,19 @@ try {
   await a.getByText('Not checked yet.').waitFor()
   assert.equal(await a.getByRole('checkbox', { name: 'Check for updates when the app starts' }).isChecked(), false)
   step('turning off the start-up check sticks')
+
+  // A phone has no ~/.ssh: hosts come from pasted text.
+  await nav(a, 'Hosts').click()
+  await a.getByRole('button', { name: 'Import', exact: true }).click()
+  const importDialog = a.getByRole('dialog', { name: 'Import from SSH config' })
+  await importDialog.getByLabel('~/.ssh/config').fill('Host pasted-pi\n  HostName 198.51.100.7\n  User pi\n  Port 2200')
+  await importDialog.getByRole('button', { name: 'Continue' }).click()
+  await importDialog.getByText('pi@198.51.100.7:2200').waitFor()
+  await importDialog.getByRole('button', { name: 'Import 1 host' }).click()
+  await a.getByText('1 host, 0 keys and 0 known host keys added to your vault.').waitFor()
+  await a.getByRole('button', { name: 'Done' }).click()
+  await a.locator('.card', { hasText: 'pasted-pi' }).waitFor()
+  step('hosts can be imported from a pasted ~/.ssh/config')
   await a.screenshot({ path: join(shots, '03-settings.png') })
   console.log('\nMobile E2E smoke test passed')
 } finally {

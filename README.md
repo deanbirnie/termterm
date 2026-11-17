@@ -5,14 +5,30 @@ encrypted vault and syncs it between your devices through a small server you
 host yourself.
 
 - **Vault** — hosts, SSH keys (generate or import), snippets and known host
-  keys, encrypted on disk with your master password.
+  keys, encrypted on disk with your master password. **Import** on the Hosts
+  page brings in your existing `~/.ssh/config` hosts, the keys they use and
+  the host keys in `known_hosts` (on a phone, from pasted text).
 - **Sync** — every device holds a full copy; changes merge through a sync
-  server that only ever stores ciphertext.
+  server that only ever stores ciphertext. It syncs when anything changes,
+  every minute, and as soon as you come back to the app.
 - **Terminal** — SSH sessions in tabs (xterm.js), password / key /
   keyboard-interactive login, host key verification, run snippets in a session.
-  On desktop, a **Terminal** button (or Ctrl+Shift+T) also opens a shell on your
-  own computer, with a choice of the shells installed: PowerShell, Command
-  Prompt, WSL and Git Bash on Windows; zsh, Bash, fish and others elsewhere.
+  - A dropped connection (network gone, laptop asleep, server restarted)
+    reconnects by itself, a few times over about a minute, and straight away
+    when the network comes back. A refused host key or a failed login never
+    retries, and leaving the shell (`exit`) does not reconnect.
+  - **Search** the scrollback with Ctrl+Shift+F (Cmd+F on a Mac) or the
+    magnifier at the top right of a terminal.
+  - **Suggestions** while typing: commands you used before on the same host,
+    and your snippets. → takes the highlighted one, ↑ ↓ choose, Esc hides
+    them; on a phone, tap one. The history is kept encrypted in the vault and
+    syncs with it; passwords typed at prompts (which the terminal does not
+    show) are never kept, nor are commands starting with a space. Turn it off
+    or clear the history under Settings → Terminal.
+  - On desktop, a **Terminal** button (or Ctrl+Shift+T) also opens a shell on
+    your own computer, with a choice of the shells installed: PowerShell,
+    Command Prompt, WSL and Git Bash on Windows; zsh, Bash, fish and others
+    elsewhere.
 - **Panes** (desktop) — split a tab into as many terminals as fit, side by side
   or stacked, like tmux. Drag a tab onto a terminal to put it beside it, drag a
   pane's title bar to move it, drag the lines between panes to resize them.

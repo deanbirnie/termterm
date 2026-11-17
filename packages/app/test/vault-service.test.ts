@@ -48,7 +48,7 @@ function device(kind: 'presence' | 'silent' | 'none') {
     rememberDevice: () => state.remember,
   }
   const open = () => new VaultService(platform, () => undefined, () => undefined)
-  return { open, state, log, hasKey: () => stored !== null }
+  return { open, state, log, hasKey: () => stored !== null, file: () => file }
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 20))
@@ -175,5 +175,79 @@ describe('device key used silently at launch (desktop)', () => {
     const again = d.open()
     await again.tryDeviceUnlock()
     expect(await again.phase()).toBe('locked')
+  })
+})
+
+describe('command history', () => {
+  it('keeps commands per host, newest last, without repeats, and survives a restart', async () => {
+    const d = device('none')
+    const service = d.open()
+    await service.create('master-password')
+    service.recordCommands('host:a', ['ls -la', 'cd /srv', '  ', 'ls -la'])
+    service.recordCommands('host:b', ['uptime'])
+    expect(service.commandHistory('host:a')).toEqual(['cd /srv', 'ls -la'])
+    expect(service.commandHistory('host:b')).toEqual(['uptime'])
+    expect(service.commandHistory('host:none')).toEqual([])
+    await settle()
+    const again = d.open()
+    await again.unlock('master-password')
+    expect(again.commandHistory('host:a')).toEqual(['cd /srv', 'ls -la'])
+    // Kept in the vault: the file on disk holds no command in plain text.
+    expect(d.file()).not.toContain('cd /srv')
+    expect(d.file()).not.toContain('host:a')
+    again.clearCommandHistory()
+    expect(again.commandHistory('host:a')).toEqual([])
+  })
+
+  it('keeps the latest 500 and ignores very long lines', async () => {
+    const service = device('none').open()
+    await service.create('master-password')
+    service.recordCommands('local:bash', Array.from({ length: 600 }, (_, i) => `echo ${i}`))
+    service.recordCommands('local:bash', ['x'.repeat(1001)])
+    const history = service.commandHistory('local:bash')
+    expect(history).toHaveLength(500)
+    expect(history[0]).toBe('echo 100')
+    expect(history.at(-1)).toBe('echo 599')
+  })
+})
+
+describe('importing from OpenSSH files', () => {
+  const ed = (fill: number) => {
+    const name = new TextEncoder().encode('ssh-ed25519')
+    const out = new Uint8Array(4 + name.length + 4 + 32)
+    new DataView(out.buffer).setUint32(0, name.length)
+    out.set(name, 4)
+    new DataView(out.buffer).setUint32(4 + name.length, 32)
+    out.fill(fill, 8 + name.length)
+    return btoa(String.fromCharCode(...out))
+  }
+
+  it('previews, then imports the chosen hosts and new known host keys, never replacing a trusted key', async () => {
+    const service = device('none').open()
+    await service.create('master-password')
+    service.saveHost(null, { label: 'mine', address: 'db.internal', port: 22, username: 'ops', tags: [], keyId: null })
+    service.trustHostKey(
+      { host: 'db.internal', port: 22, keyType: 'ssh-ed25519', publicKey: ed(9), fingerprint: 'SHA256:x' },
+      false,
+    )
+    const preview = service.scanSshImport({
+      source: 'test',
+      config: 'Host web\n  HostName web.example.com\n  User deploy\nHost db\n  HostName db.internal\n  User ops\nHost other\n  HostName other.example.com\n  ProxyJump web',
+      knownHosts: `web.example.com ssh-ed25519 ${ed(1)}\ndb.internal ssh-ed25519 ${ed(2)}\n|1|x=|y= ssh-ed25519 ${ed(3)}`,
+    })
+    expect(preview.hosts.map((h) => [h.alias, h.exists])).toEqual([
+      ['web', false],
+      ['db', true],
+      ['other', false],
+    ])
+    expect(preview.knownHosts).toEqual({ add: 1, already: 0, conflicting: 1, skipped: 1 })
+    expect(preview.notes.join(' ')).toMatch(/ProxyJump .*other/)
+
+    const result = await service.applySshImport(['web', 'db'], true)
+    expect(result).toEqual({ hosts: 1, knownHosts: 1, keys: 0, keysNeedingPassphrase: [] })
+    expect(service.snapshot().hosts.map((h) => h.label).sort()).toEqual(['mine', 'web'])
+    expect(service.knownHostsFor('db.internal', 22).map((k) => k.data.publicKey)).toEqual([ed(9)])
+    expect(service.knownHostsFor('web.example.com', 22)).toHaveLength(1)
+    await expect(service.applySshImport(['web'], true)).rejects.toThrow('Scan for hosts first')
   })
 })

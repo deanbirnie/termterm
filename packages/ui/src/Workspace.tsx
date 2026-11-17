@@ -100,6 +100,28 @@ export function Workspace({ locked }: { locked: boolean }) {
 
   useEffect(() => api.onSshPrompt((p) => setPrompts((q) => [...q, p])), [])
 
+  // Coming back to the app (switching to it, unlocking the phone, the network
+  // returning) syncs straight away instead of waiting for the next minute.
+  const syncConfigured = snapshot?.sync.configured ?? false
+  useEffect(() => {
+    if (locked || !syncConfigured) return
+    let last = 0
+    const syncNow = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < 15_000) return
+      last = Date.now()
+      void api.syncNow().catch(() => undefined) // shown on the Sync page
+    }
+    const onVisible = () => document.visibilityState === 'visible' && syncNow()
+    window.addEventListener('focus', syncNow)
+    window.addEventListener('online', syncNow)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', syncNow)
+      window.removeEventListener('online', syncNow)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [locked, syncConfigured])
+
   const activeTab = tabs.find((t) => t.id === active)
   const tabOf = useCallback((sessionId: string) => tabs.find((t) => panes(t.layout).includes(sessionId)), [tabs])
 

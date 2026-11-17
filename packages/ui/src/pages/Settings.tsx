@@ -135,6 +135,42 @@ function TerminalAppearance() {
           ))}
         </select>
       </Field>
+      <CommandSuggestions
+        on={prefs.suggestions}
+        onChange={(suggestions) => setPrefs(setTerminalPrefs({ suggestions }))}
+      />
+    </div>
+  )
+}
+
+function CommandSuggestions({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const [cleared, setCleared] = useState(false)
+  const { error, run } = useAction()
+  return (
+    <div className="spaced-card">
+      <label className="check">
+        <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
+        <span>Suggest commands while typing</span>
+      </label>
+      <p className="field-hint">
+        Offers commands you typed before on the same host, and your snippets. Press → to use one. The
+        history is kept encrypted in your vault and syncs with it; passwords typed at prompts, which the
+        terminal does not show, are never kept, nor are commands that start with a space.
+      </p>
+      <div className="panel-actions">
+        <Button
+          disabled={cleared}
+          onClick={() =>
+            void run(async () => {
+              await api.clearCommandHistory()
+              setCleared(true)
+            })
+          }
+        >
+          {cleared ? 'History cleared' : 'Clear command history'}
+        </Button>
+      </div>
+      <ErrorText error={error} />
     </div>
   )
 }
