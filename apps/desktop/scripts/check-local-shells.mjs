@@ -39,17 +39,35 @@ for (const shell of shells) {
   }
   const ok = await new Promise((resolve) => {
     let out = ''
+    let passed = false
+    let exited = false
     const pty = spawn(shell.file, shell.args, { name: 'xterm-256color', cols: 120, rows: 30, env: process.env })
+    // The probe ends with `exit`, so the shell closes by itself. Killing it as
+    // well races with that on Windows: node-pty's console helper then fails to
+    // attach to a console that is already gone ("AttachConsole failed") and
+    // can take this script down. So wait for the exit, and only kill a shell
+    // that has not gone after a while.
+    const finish = (result) => {
+      clearTimeout(timer)
+      resolve(result)
+    }
     const timer = setTimeout(() => {
-      pty.kill()
-      resolve(false)
+      if (!exited) pty.kill()
+      resolve(passed)
     }, 30_000)
+    pty.onExit(() => {
+      exited = true
+      finish(passed)
+    })
     pty.onData((data) => {
       out += data
-      if (out.includes('termterm-42')) {
-        clearTimeout(timer)
-        pty.kill()
-        resolve(true)
+      if (!passed && out.includes('termterm-42')) {
+        passed = true
+        setTimeout(() => {
+          if (exited) return
+          pty.kill()
+          finish(true)
+        }, 5_000)
       }
     })
     setTimeout(() => pty.write(`${probe[shell.id] ?? posix}\r`), 1500)
