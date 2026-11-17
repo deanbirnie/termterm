@@ -16,14 +16,14 @@
     "screenshots": "vite build && node e2e/screenshots.mjs"
   },
   "dependencies": {
-    "@capacitor/android": "^8.6.0",
-    "@capacitor/core": "^8.6.0",
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
     "@capacitor/filesystem": "^8.1.5"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.6.0",
+    "@capacitor/cli": "^8.6.2",
     "@vitejs/plugin-react": "^6.3.0",
-    "playwright": "^1.63.0",
+    "playwright": "^1.65.1",
     "vite": "^8.3.8"
   }
 }
