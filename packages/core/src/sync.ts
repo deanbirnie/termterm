@@ -163,7 +163,8 @@ export class SyncApi {
     return this.call('POST', '/logout')
   }
 
-  pull(since: number): Promise<{ items: RemoteItem[]; cursor: number; more: boolean }> {
+  /** `head` (servers from 0.10 on): the account's newest sequence number. */
+  pull(since: number): Promise<{ items: RemoteItem[]; cursor: number; more: boolean; head?: number }> {
     return this.call('GET', `/sync?since=${since}`)
   }
 
@@ -175,6 +176,14 @@ export class SyncApi {
 export interface SyncSummary {
   pulled: number
   pushed: number
+  /**
+   * Server copies refused for being older than what this device had already
+   * seen (each answered with this device's copy). Not zero means the server
+   * was rolled back: restored from an old backup, or tampered with.
+   */
+  rolledBack: number
+  /** The server had less history than this device had seen, so everything was sent again. */
+  serverBehind: boolean
 }
 
 const PUSH_BATCH = 200
@@ -188,11 +197,19 @@ export async function syncVault(vault: Vault, fetchImpl?: typeof fetch): Promise
   const state = vault.sync
   if (!state) throw new Error('Sync is not configured')
   const api = new SyncApi(state.serverUrl, vault.syncToken(), fetchImpl)
-  const summary: SyncSummary = { pulled: 0, pushed: 0 }
+  const summary: SyncSummary = { pulled: 0, pushed: 0, rolledBack: 0, serverBehind: false }
 
   let cursor = state.cursor
   for (;;) {
     const page = await api.pull(cursor)
+    if (typeof page.head === 'number' && page.head < vault.seenSeq && !summary.serverBehind) {
+      // The server's history ends before what this device has seen: read it
+      // all again (older copies are refused item by item) and send ours back.
+      summary.serverBehind = true
+      vault.resyncAll()
+      cursor = 0
+      continue
+    }
     for (const item of page.items) {
       if (vault.applyRemote(item)) summary.pulled++
     }
@@ -223,5 +240,6 @@ export async function syncVault(vault: Vault, fetchImpl?: typeof fetch): Promise
     }
   }
   vault.setCursor(cursor)
+  summary.rolledBack = vault.takeRollbacks()
   return summary
 }

@@ -19,7 +19,9 @@ host yourself.
     replaces nothing.
 - **Sync** — every device holds a full copy; changes merge through a sync
   server that only ever stores ciphertext. It syncs when anything changes,
-  every minute, and as soon as you come back to the app.
+  every minute, and as soon as you come back to the app. A device refuses
+  anything older than what it has already seen, so a server that is rolled
+  back (or restored from an old backup) cannot quietly undo your changes.
 - **Terminal** — SSH sessions in tabs (xterm.js), password / key /
   keyboard-interactive login, host key verification, run snippets in a session.
   - A dropped connection (network gone, laptop asleep, server restarted)
@@ -63,6 +65,9 @@ host yourself.
   | Alt+Shift+Z | zoom: show the current pane alone, and back |
   | Ctrl+Shift+W | close the current pane |
   | Ctrl+Shift+T | open a terminal on this computer in a new tab |
+
+**How to use it:** the [user guide](docs/USER-GUIDE.md) walks through every
+feature, on desktop and Android.
 
 What comes next is tracked in [docs/PLAN.md](docs/PLAN.md). Keeping
 dependencies current and safe is covered by [docs/MAINTENANCE.md](docs/MAINTENANCE.md).

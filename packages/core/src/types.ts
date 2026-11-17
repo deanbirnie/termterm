@@ -28,6 +28,11 @@ export interface SyncState {
   /** session token, sealed with the vault key */
   tokenBlob: string
   cursor: number
+  /**
+   * The highest sequence number this device has seen from the server, read
+   * or written. A server whose newest is lower has lost history.
+   */
+  seenSeq?: number
   lastSyncAt?: number
 }
 
@@ -45,6 +50,13 @@ export interface VaultFile {
    * dropped) once the server says which it holds.
    */
   pendingRekey?: { kdf: KdfParams; wrappedVaultKey: string }
+  /**
+   * When each item this device has seen deleted was deleted (id -> the
+   * tombstone's `updatedAt`), sealed with the vault key. With the live items'
+   * own timestamps it is how far this device has seen the vault get, so an
+   * older copy served later (a rollback) is recognised and refused.
+   */
+  deletedLog?: string
 }
 
 // ---- Item payloads used by the apps -------------------------------------

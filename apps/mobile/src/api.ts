@@ -249,6 +249,7 @@ export function createApi(): TermtermApi {
     syncNow: () => vault.syncNow(),
     syncDisconnect: () => vault.syncDisconnect(),
     syncDeleteAccount: (password) => vault.syncDeleteAccount(password),
+    syncDismissRollback: async () => vault.syncDismissRollback(),
     syncDevices: () => vault.syncDevices(),
     syncRevokeDevice: (id) => vault.syncRevokeDevice(id),
 

@@ -383,7 +383,9 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
       }>
       const more = rows.length > LIMITS.pullPage
       const items = more ? rows.slice(0, LIMITS.pullPage) : rows
-      return { items, more, cursor: items.at(-1)?.seq ?? since }
+      // head: the newest sequence number this account has. A device that has
+      // already seen further than that knows the server lost history.
+      return { items, more, cursor: items.at(-1)?.seq ?? since, head: user.seq }
     },
 
     'POST /v1/sync': async (req) => {

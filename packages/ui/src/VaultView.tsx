@@ -34,7 +34,7 @@ export function VaultView({
   const [page, setPage] = useState<PageId>('hosts')
   const { sync } = snapshot
   const info = useAppInfo()
-  const syncDot = !sync.configured ? 'off' : sync.state === 'error' ? 'error' : sync.state === 'syncing' ? 'busy' : 'ok'
+  const syncDot = !sync.configured ? 'off' : sync.state === 'error' || sync.rollback ? 'error' : sync.state === 'syncing' ? 'busy' : 'ok'
 
   return (
     <div className="vault">

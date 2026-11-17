@@ -21,6 +21,9 @@ export class WrongPasswordError extends Error {
 
 const KEY_CHECK = 'termterm'
 const KEY_CHECK_AAD = 'termterm:keycheck'
+const DELETED_LOG_AAD = 'termterm:deleted-log'
+/** Deletions remembered for rollback checks; the oldest are forgotten beyond this. */
+const DELETED_LOG_MAX = 20_000
 
 interface Payload {
   type: string
@@ -35,6 +38,10 @@ interface Payload {
  */
 export class Vault {
   private cache = new Map<string, Item>()
+  /** id -> updatedAt of its tombstone, for items this device has seen deleted. */
+  private deletedAt = new Map<string, number>()
+  /** Server copies refused since the last `takeRollbacks()` because they were older than ours. */
+  private rollbacks = 0
   private listeners = new Set<() => void>()
 
   private constructor(
@@ -43,9 +50,18 @@ export class Vault {
   ) {
     file.keyCheck ??= seal(vaultKey, utf8(KEY_CHECK), KEY_CHECK_AAD)
     for (const [id, stored] of Object.entries(file.items)) {
-      if (stored.deleted) continue
       const p = this.openPayload(id, stored.blob)
+      if (stored.deleted) {
+        this.deletedAt.set(id, p.updatedAt)
+        continue
+      }
       this.cache.set(id, { id, type: p.type, updatedAt: p.updatedAt, data: p.data })
+    }
+    if (file.deletedLog) {
+      const log = JSON.parse(fromUtf8(open(vaultKey, file.deletedLog, DELETED_LOG_AAD))) as Record<string, number>
+      for (const [id, at] of Object.entries(log)) {
+        if (typeof at === 'number' && at > (this.deletedAt.get(id) ?? 0)) this.deletedAt.set(id, at)
+      }
     }
   }
 
@@ -251,7 +267,54 @@ export class Vault {
   }
 
   toFile(): VaultFile {
+    if (this.deletedAt.size) {
+      let entries = [...this.deletedAt]
+      if (entries.length > DELETED_LOG_MAX) {
+        entries = entries.sort((a, b) => b[1] - a[1]).slice(0, DELETED_LOG_MAX)
+        this.deletedAt = new Map(entries)
+      }
+      this.file.deletedLog = seal(this.vaultKey, utf8(JSON.stringify(Object.fromEntries(entries))), DELETED_LOG_AAD)
+    } else {
+      delete this.file.deletedLog
+    }
     return structuredClone(this.file)
+  }
+
+  /**
+   * How many server copies were refused, since the last call, for being older
+   * than what this device had already seen. Each was answered by sending this
+   * device's copy back.
+   */
+  takeRollbacks(): number {
+    const n = this.rollbacks
+    this.rollbacks = 0
+    return n
+  }
+
+  /**
+   * The server has lost history this device has seen (restored from a
+   * backup, or rolled back on purpose): send everything again from the start,
+   * including deletions, so it catches up, and read it all again.
+   */
+  resyncAll(): void {
+    for (const [id, stored] of Object.entries(this.file.items)) {
+      stored.seq = 0
+      stored.dirty = true
+      if (stored.deleted) this.deletedAt.delete(id)
+    }
+    for (const [id, at] of this.deletedAt) {
+      this.file.items[id] = {
+        blob: this.sealPayload(id, { type: TOMBSTONE, updatedAt: at, data: null }),
+        seq: 0,
+        dirty: true,
+        deleted: true,
+      }
+    }
+    if (this.file.sync) {
+      this.file.sync.cursor = 0
+      this.file.sync.seenSeq = 0
+    }
+    this.emit()
   }
 
   /** Wipes key material; the instance is unusable afterwards. */
@@ -300,14 +363,16 @@ export class Vault {
   delete(id: string): void {
     const stored = this.file.items[id]
     if (!stored || stored.deleted) return
+    const at = this.nextTimestamp(id)
     this.cache.delete(id)
+    this.deletedAt.set(id, at)
     if (stored.seq === 0 && !this.file.sync) {
       // Never reached an account and nothing to sync with: no tombstone needed.
       // (An item that did keeps its seq when sync is turned off, so it gets one.)
       delete this.file.items[id]
     } else {
       this.file.items[id] = {
-        blob: this.sealPayload(id, { type: TOMBSTONE, updatedAt: this.nextTimestamp(id), data: null }),
+        blob: this.sealPayload(id, { type: TOMBSTONE, updatedAt: at, data: null }),
         seq: stored.seq,
         dirty: true,
         deleted: true,
@@ -318,7 +383,7 @@ export class Vault {
 
   /** Strictly increasing per item so a later local edit always wins over the one it replaced. */
   private nextTimestamp(id: string): number {
-    const prev = this.cache.get(id)?.updatedAt ?? 0
+    const prev = this.cache.get(id)?.updatedAt ?? this.deletedAt.get(id) ?? 0
     return Math.max(Date.now(), prev + 1)
   }
 
@@ -387,7 +452,17 @@ export class Vault {
     return fromUtf8(open(this.vaultKey, this.file.sync.tokenBlob, 'termterm:token'))
   }
 
+  /** The highest sequence number seen from the server, read or written. */
+  get seenSeq(): number {
+    return Math.max(this.file.sync?.seenSeq ?? 0, this.file.sync?.cursor ?? 0)
+  }
+
+  private noteSeq(seq: number): void {
+    if (this.file.sync && seq > (this.file.sync.seenSeq ?? 0)) this.file.sync.seenSeq = seq
+  }
+
   setCursor(cursor: number): void {
+    this.noteSeq(cursor)
     if (this.file.sync) {
       this.file.sync.cursor = cursor
       this.file.sync.lastSyncAt = Date.now()
@@ -402,6 +477,7 @@ export class Vault {
 
   /** The server accepted our copy of `id` (identified by `blob`) at `seq`. */
   markSynced(id: string, blob: string, seq: number): void {
+    this.noteSeq(seq)
     const stored = this.file.items[id]
     if (!stored) return
     stored.seq = seq
@@ -422,6 +498,11 @@ export class Vault {
     const local = this.file.items[id]
     if (local && local.blob === blob) {
       local.seq = seq
+      // The server already has exactly this copy (after a resync): nothing to send.
+      if (local.dirty) {
+        if (local.deleted) delete this.file.items[id]
+        else local.dirty = false
+      }
       return false
     }
     // Throws DecryptError if the server tampered with or misrouted the blob.
@@ -435,12 +516,36 @@ export class Vault {
       }
     } else if (local && seq <= local.seq) {
       return false // stale replay of something we already have
+    } else {
+      // Rollback protection: never take a copy older than one this device has
+      // already seen, whether it still has the item or saw it deleted. Keep
+      // ours and send it back, which also repairs a server restored from an
+      // old backup.
+      const seenAt = this.cache.get(id)?.updatedAt ?? this.deletedAt.get(id)
+      if (seenAt !== undefined && incoming.updatedAt < seenAt) {
+        this.rollbacks++
+        if (local) {
+          local.seq = seq
+          local.dirty = true
+        } else {
+          this.file.items[id] = {
+            blob: this.sealPayload(id, { type: TOMBSTONE, updatedAt: seenAt, data: null }),
+            seq,
+            dirty: true,
+            deleted: true,
+          }
+        }
+        this.emit()
+        return false
+      }
     }
 
     if (incoming.type === TOMBSTONE) {
       delete this.file.items[id]
       this.cache.delete(id)
+      this.deletedAt.set(id, Math.max(incoming.updatedAt, this.deletedAt.get(id) ?? 0))
     } else {
+      this.deletedAt.delete(id)
       this.file.items[id] = { blob, seq, dirty: false, deleted: false }
       this.cache.set(id, {
         id,

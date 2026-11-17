@@ -276,6 +276,7 @@ if (!app.requestSingleInstanceLock()) {
   handle('sync:reauth', (password: string) => vault.syncReauth(password))
   handle('sync:now', () => vault.syncNow())
   handle('sync:disconnect', () => vault.syncDisconnect())
+  handle('sync:dismissRollback', () => vault.syncDismissRollback())
   handle('sync:deleteAccount', (password: string) => vault.syncDeleteAccount(password))
   handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) => {
     if (target && 'local' in target) {

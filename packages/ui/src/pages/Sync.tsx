@@ -112,6 +112,23 @@ function Connected({ sync }: { sync: SyncStatus }) {
           </span>
         </p>
       )}
+      {sync.rollback && (
+        <div className="warning" role="alert">
+          <TriangleAlert size={16} />
+          <span>
+            {sync.rollback.serverBehind
+              ? 'The sync server had lost changes this device had already seen. '
+              : `The sync server sent older copies of ${sync.rollback.items} item${sync.rollback.items === 1 ? '' : 's'} than this device already had. `}
+            This device kept its own, newer copies and sent them back, so nothing here was lost.
+            If the server was not restored from a backup on{' '}
+            {new Date(sync.rollback.at).toLocaleDateString()} or shortly before, it may have been
+            tampered with: check it, and consider changing your master password.{' '}
+            <button type="button" className="link" onClick={() => void api.syncDismissRollback()}>
+              Dismiss
+            </button>
+          </span>
+        </div>
+      )}
       {sync.state === 'error' && !error && <ErrorText error={sync.error ?? 'Sync failed'} />}
       {sync.needsSignIn && (
         <form
