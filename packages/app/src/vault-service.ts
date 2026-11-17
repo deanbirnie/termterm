@@ -155,6 +155,10 @@ export class VaultService {
   }
 
   private async readFile(): Promise<VaultFile> {
+    // A save still on its way to storage (say, a change made just before
+    // locking) must land first, or the vault would reopen from the older file
+    // and that older copy would later overwrite the change.
+    await this.writes
     const data = await this.platform.storage.read()
     if (data === null) throw new Error('There is no vault on this device')
     return JSON.parse(data) as VaultFile
