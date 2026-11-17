@@ -1,8 +1,9 @@
-import { KeyRound, Plus, Server, X } from 'lucide-react'
+import { FileInput, KeyRound, Plus, Server, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { LocalTerminalButton } from '../LocalTerminalButton'
+import { SshImportDialog } from '../SshImport'
 import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
 
@@ -34,6 +35,7 @@ export function HostsPage({
 }) {
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
+  const [importing, setImporting] = useState(false)
   // Assume full capability until told otherwise, so nothing flickers on desktop.
   const info = useAppInfo()
   const canConnect = info?.capabilities.ssh ?? true
@@ -59,6 +61,7 @@ export function HostsPage({
 
   return (
     <div className="split">
+      {importing && <SshImportDialog onClose={() => setImporting(false)} />}
       <div className="split-main">
         <form
           className="searchbar"
@@ -86,6 +89,9 @@ export function HostsPage({
         <div className="toolbar">
           <Button onClick={() => setEditing({ id: null })}>
             <Plus size={15} /> New host
+          </Button>
+          <Button onClick={() => setImporting(true)} title="Import hosts from ~/.ssh/config and known_hosts">
+            <FileInput size={15} /> Import
           </Button>
           {localTerminal && (
             <LocalTerminalButton onOpen={(shell, title) => onConnect({ local: shell?.id ?? null }, title)} />

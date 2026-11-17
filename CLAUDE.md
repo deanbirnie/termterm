@@ -2,6 +2,9 @@
 
 - Plan and status: `docs/PLAN.md`. Dependency and security upkeep: `docs/MAINTENANCE.md`.
 - Work on a branch and open a pull request into `main` when a change is done.
+- **What to work on next:** the agreed queue is "Work queue" in `docs/PLAN.md`:
+  batches in order, **one pull request per batch**. Tick items off there as
+  part of that batch's PR.
 - **Releases are made by label.** When the owner says a pull request "will be a
   release" (or similar), add the label `release: minor` to it, or
   `release: patch` if it only fixes things (`release: major` only when asked).

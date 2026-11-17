@@ -198,6 +198,15 @@ export function createApi(): TermtermApi {
     importKey: (input) => vault.importKey(input),
     renameKey: async (id, label) => vault.renameKey(id, label),
     saveSnippet: async (id, input) => vault.saveSnippet(id, input),
+    // A phone has no ~/.ssh: only pasted text.
+    sshImportScan: async (paste) => {
+      if (!paste) throw new Error('Paste the contents of ~/.ssh/config to import from it')
+      return vault.scanSshImport({ source: 'pasted text', config: paste.config, knownHosts: paste.knownHosts })
+    },
+    sshImportApply: (aliases, knownHosts) => vault.applySshImport(aliases, knownHosts),
+    commandHistory: async (key) => vault.commandHistory(key),
+    recordCommands: async (key, commands) => vault.recordCommands(key, commands),
+    clearCommandHistory: async () => vault.clearCommandHistory(),
     deleteItem: async (id) => vault.deleteItem(id),
 
     syncRegister: (input) => vault.syncRegister(input),

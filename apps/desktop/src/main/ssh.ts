@@ -18,6 +18,8 @@ interface Session {
   stream?: ClientChannel
   prompts: Set<string>
   closed: boolean
+  /** The remote shell reported its exit status: it ended rather than being cut off. */
+  exited?: boolean
 }
 
 export interface SshEvents {
@@ -28,7 +30,11 @@ export interface SshEvents {
 
 const MAX_PASSWORD_PROMPTS = 3
 
+/** A connection that was working and stopped without the shell ending. */
+const LOST = 'Connection lost'
+
 function friendlyError(err: Error & { level?: string; code?: string }): string {
+  if (/keepalive timeout/i.test(err.message) || err.code === 'ECONNRESET' || err.code === 'EPIPE') return LOST
   if (err.level === 'client-authentication') return 'Authentication failed'
   if (err.code === 'ENOTFOUND') return 'Host not found'
   if (err.code === 'ECONNREFUSED') return 'Connection refused'
@@ -198,11 +204,14 @@ export class SshManager {
           const forward = (chunk: Buffer) => this.events.data(sessionId, chunk)
           stream.on('data', forward)
           stream.stderr.on('data', forward)
-          stream.on('close', () => finish())
+          // A shell the user left (exit, logout) reports its exit status first;
+          // one that just stops was cut off, and the interface reconnects it.
+          stream.on('exit', () => (session.exited = true))
+          stream.on('close', () => finish(session.exited ? undefined : LOST))
         })
       })
       .on('error', (err) => finish(friendlyError(err)))
-      .on('close', () => finish())
+      .on('close', () => finish(session.stream && !session.exited ? LOST : undefined))
 
     this.events.status(sessionId, { state: 'connecting' })
     client.connect({

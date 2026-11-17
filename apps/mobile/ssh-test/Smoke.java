@@ -42,6 +42,11 @@ public class Smoke {
     r.session.resize(120, 40); r.session.write("x\r".getBytes()); check("resize is applied", r.waitFor("size:120x40"), r.out.toString());
     r.session.write("exit\r".getBytes()); check("remote exit ends the session cleanly", r.ended() && r.error == null, String.valueOf(r.error));
 
+    r = new Run().start("dean", "pw-ok", null, null);
+    check("logs in again", r.connected.await(15, TimeUnit.SECONDS), String.valueOf(r.error));
+    r.session.write("drop\r".getBytes());
+    check("a connection cut off without the shell ending reports Connection lost", r.ended() && "Connection lost".equals(r.error), String.valueOf(r.error));
+
     final Run early = new Run();
     early.onHostKey = () -> early.session.resize(132, 50); // e.g. the keyboard opened during a prompt
     early.start("dean", "pw-ok", null, null);

@@ -1,4 +1,4 @@
-import { hostname } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, Menu, app, clipboard, ipcMain, powerMonitor, shell } from 'electron'
 import type { ConnectTarget, Settings } from '@termterm/app'
@@ -10,6 +10,7 @@ import { SettingsStore } from './settings'
 import { LocalTerminals } from './local-terminal'
 import { pickShell } from './local-shells'
 import { SshManager } from './ssh'
+import { readSshFiles } from './ssh-files'
 import { FileVaultStorage } from './storage'
 import { Updater } from './updater'
 import { fakeHelloSigner } from './fake-hello'
@@ -187,6 +188,21 @@ if (!app.requestSingleInstanceLock()) {
   handle('key:import', (input) => vault.importKey(input))
   handle('key:rename', (id: string, label: string) => vault.renameKey(id, label))
   handle('snippet:save', (id: string | null, input) => vault.saveSnippet(id, input))
+  // Tests point this at a folder of their own; an installed app always reads ~/.ssh.
+  const sshDir = (!app.isPackaged && process.env.TERMTERM_SSH_DIR) || join(homedir(), '.ssh')
+  handle('ssh-import:scan', async (paste?: { config?: string; knownHosts?: string }) =>
+    vault.scanSshImport(
+      paste
+        ? { source: 'pasted text', config: paste.config, knownHosts: paste.knownHosts }
+        : await readSshFiles(sshDir),
+    ),
+  )
+  handle('ssh-import:apply', (aliases: string[], knownHosts: boolean) =>
+    vault.applySshImport(Array.isArray(aliases) ? aliases.map(String) : [], knownHosts === true),
+  )
+  handle('history:get', (key: string) => vault.commandHistory(key))
+  handle('history:record', (key: string, commands: string[]) => vault.recordCommands(key, commands))
+  handle('history:clear', () => vault.clearCommandHistory())
   handle('item:delete', (id: string) => vault.deleteItem(id))
   handle('sync:register', (input) => vault.syncRegister(input))
   handle('sync:signIn', (input) => vault.syncSignIn(input))
@@ -220,6 +236,7 @@ if (!app.requestSingleInstanceLock()) {
         biometricUnlock: useHello,
         biometricName: useHello ? 'Windows Hello' : undefined,
         localTerminal: true,
+        sshFiles: true,
       },
     }
   })

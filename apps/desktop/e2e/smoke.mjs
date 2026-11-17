@@ -34,7 +34,8 @@ function hostKey() {
 }
 const logins = []
 let authorizedKey = null // public key line the server accepts, set once the app generates one
-const sshServer = new Server({ hostKeys: [hostKey()] }, (client) => {
+const sshHostKey = hostKey()
+const sshServer = new Server({ hostKeys: [sshHostKey] }, (client) => {
   client
     .on('authentication', (ctx) => {
       if (ctx.method === 'password' && ctx.username === 'tester' && ctx.password === SSH_PASSWORD) {
@@ -64,6 +65,12 @@ const sshServer = new Server({ hostKeys: [hostKey()] }, (client) => {
             for (const ch of chunk.toString()) {
               if (ch === '\r') {
                 stream.write(`\r\nyou ran: ${line}\r\n$ `)
+                // Like a real server: exit reports a status; drop cuts the connection.
+                if (line === 'exit') {
+                  stream.exit(0)
+                  stream.end()
+                }
+                if (line === 'drop') client.end()
                 line = ''
               } else {
                 line += ch
@@ -225,6 +232,54 @@ try {
   await shot(a.page, '06-terminal')
   step('terminal session works (stored password, host key trusted, snippet run)')
 
+  // Suggestions: what was typed before (and echoed) comes back while typing.
+  const suggestions = a.page.getByRole('listbox', { name: 'Suggested commands' })
+  await a.page.keyboard.type('ec')
+  await suggestions.getByRole('option', { name: /echo hello/ }).waitFor()
+  await shot(a.page, '06b-suggestions')
+  await a.page.keyboard.press('ArrowRight')
+  assert.equal(await suggestions.count(), 0)
+  await a.page.keyboard.press('Enter')
+  await assertCount(termA.getByText('you ran: echo hello'), 2)
+  await a.page.keyboard.type('zz')
+  assert.equal(await suggestions.count(), 0)
+  await a.page.keyboard.press('Enter') // (the test server does not handle Backspace)
+  await a.page.waitForTimeout(3500) // history is saved a few seconds after typing
+  assert.ok(!readFileSync(join(a.dataDir, 'vault.json'), 'utf8').includes('echo hello'), 'history is encrypted')
+  step('earlier commands are suggested while typing; → completes one; history is kept encrypted')
+
+  await a.page.keyboard.press('Control+Shift+F')
+  const searchBox = a.page.getByRole('textbox', { name: 'Search the terminal' })
+  await searchBox.fill('you ran')
+  await a.page.locator('.search-count', { hasText: / of / }).waitFor()
+  assert.match(await a.page.locator('.search-count').innerText(), /^\d+ of [3-9]$/)
+  await searchBox.fill('nowhere-to-be-found')
+  await a.page.locator('.search-count', { hasText: 'No matches' }).waitFor()
+  await searchBox.press('Escape')
+  assert.equal(await searchBox.count(), 0)
+  step('Ctrl+Shift+F searches the scrollback and counts matches')
+
+  // The server cuts the connection: the session comes back by itself.
+  await a.page.keyboard.type('drop')
+  await a.page.keyboard.press('Enter')
+  await a.page.getByText(/Connection lost\. Reconnecting in [01]s \(attempt 1 of 6\)/).waitFor()
+  await shot(a.page, '06c-reconnecting')
+  await termA.getByText('[reconnected]').waitFor({ timeout: 15_000 })
+  await a.page.keyboard.type('echo back again')
+  await a.page.keyboard.press('Enter')
+  await termA.getByText('you ran: echo back again').waitFor()
+  step('a dropped connection reconnected by itself')
+
+  // Leaving the shell is not a dropped connection: no reconnect, until asked.
+  await a.page.keyboard.type('exit')
+  await a.page.keyboard.press('Enter')
+  await a.page.getByText('Session ended').waitFor()
+  await a.page.waitForTimeout(2000)
+  assert.equal(await a.page.getByText(/Reconnecting/).count(), 0)
+  await a.page.getByRole('button', { name: 'Reconnect', exact: true }).click()
+  await assertCount(termA.getByText('Welcome to the test box'), 3)
+  step('exiting the shell ends the session without reconnecting; Reconnect brings it back')
+
   await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
   await a.page.locator('.card', { hasText: 'Test box' }).click()
   await a.page.getByLabel('Key', { exact: true }).selectOption({ label: 'deploy key' })
@@ -373,6 +428,81 @@ try {
 
     await page.getByRole('button', { name: /^Close Bash$/ }).click()
     await assertCount(page.getByRole('tab', { name: /^Bash/ }), 0)
+  }
+
+  // ---- importing from ~/.ssh -------------------------------------------------------
+  {
+    const sshDir = join(tmp, 'dot-ssh')
+    mkdirSync(sshDir)
+    const usable = utils.generateKeyPairSync('ed25519')
+    const locked = utils.generateKeyPairSync('ed25519', { passphrase: 'secret', cipher: 'aes256-ctr', rounds: 16 })
+    writeFileSync(join(sshDir, 'deploy_key'), usable.private)
+    writeFileSync(join(sshDir, 'locked_key'), locked.private)
+    writeFileSync(
+      join(sshDir, 'config'),
+      [
+        'Host imported-box',
+        '  HostName 127.0.0.1',
+        `  Port ${sshPort}`,
+        '  User tester',
+        '  IdentityFile deploy_key',
+        'Host behind-bastion',
+        '  HostName 10.9.9.9',
+        '  ProxyJump imported-box',
+        'Host locked-box',
+        '  HostName 10.9.9.10',
+        '  IdentityFile locked_key',
+        'Host *',
+        '  User fallback',
+      ].join('\n'),
+    )
+    const serverKey = utils.parseKey(sshHostKey).getPublicSSH().toString('base64')
+    writeFileSync(join(sshDir, 'known_hosts'), `[127.0.0.1]:${sshPort} ssh-ed25519 ${serverKey}\n|1|hashed=|x= ssh-ed25519 ${serverKey}\n`)
+
+    const c = await launch('device-c', { TERMTERM_SSH_DIR: sshDir })
+    await c.page.getByLabel('Master password', { exact: true }).fill(MASTER)
+    await c.page.getByLabel('Confirm master password').fill(MASTER)
+    await c.page.getByRole('button', { name: 'Create vault' }).click()
+    await c.page.getByText('No hosts yet').waitFor()
+    await c.page.getByRole('button', { name: 'Import', exact: true }).click()
+    const dialog = c.page.getByRole('dialog', { name: 'Import from SSH config' })
+    const found = dialog.getByRole('list', { name: 'Hosts found' })
+    await found.getByText('imported-box', { exact: true }).waitFor()
+    assert.equal(await found.getByRole('checkbox').count(), 3)
+    await found.getByText(`tester@127.0.0.1:${sshPort} · key deploy_key`).waitFor()
+    await found.getByText('fallback@10.9.9.9').waitFor() // User from "Host *"
+    await dialog.getByText(/ProxyJump is not supported yet, so these connect directly: behind-bastion/).waitFor()
+    await dialog.getByText(/1 known_hosts entries are hashed/).waitFor()
+    await shot(c.page, '10-import-preview')
+    await dialog.getByRole('button', { name: 'Import 3 hosts' }).click()
+    const done = c.page.getByRole('dialog', { name: 'Imported' })
+    await done.getByText('3 hosts, 1 key and 1 known host key added to your vault.').waitFor()
+    await done.getByText(/locked_key$/).waitFor()
+    await done.getByRole('button', { name: 'Done' }).click()
+    for (const label of ['imported-box', 'behind-bastion', 'locked-box']) {
+      await c.page.locator('.card', { hasText: label }).waitFor()
+    }
+    step('Import read ~/.ssh: hosts (with Host * defaults), their key, and known_hosts; passphrase keys are listed')
+
+    // The imported host logs in with the imported key, and its host key is already trusted.
+    const before = authorizedKey
+    authorizedKey = usable.public
+    await c.page.locator('.card', { hasText: 'imported-box' }).click()
+    await c.page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+    await c.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
+    assert.equal(await c.page.getByRole('dialog').count(), 0) // no "Trust this host?"
+    assert.equal(logins.pop(), 'publickey') // (taken off: later checks count device A's and B's logins)
+    authorizedKey = before
+
+    // Importing again finds them already there.
+    await c.page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await c.page.getByRole('button', { name: 'Import', exact: true }).click()
+    await dialog.getByText(/already in your vault/).first().waitFor()
+    assert.equal(await dialog.getByText(/already in your vault/).count(), 3)
+    assert.equal(await dialog.getByRole('checkbox', { checked: true }).count(), 0)
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await c.app.close()
+    step('the imported host connected with its key and no trust prompt; importing again adds nothing')
   }
 
   // ---- device B: sign in, everything arrives, no trust prompt --------------------

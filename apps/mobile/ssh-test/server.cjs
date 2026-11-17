@@ -22,7 +22,7 @@ const server = new Server({ hostKeys: [hostKey()] }, (client) => {
       s.on('pty', (a, r, info) => { size = `${info.cols}x${info.rows}`; a() })
       s.on('window-change', (a, r, info) => { size = `${info.cols}x${info.rows}`; a && a() })
       s.on('shell', (a) => { const st = a(); st.write(`welcome ${size}\r\n$ `); let line = ''
-        st.on('data', (c) => { for (const ch of c.toString()) { if (ch === '\r') { st.write(`\r\nran:${line} size:${size}\r\n$ `); if (line === 'exit') st.end(); line = '' } else { line += ch } } }) })
+        st.on('data', (c) => { for (const ch of c.toString()) { if (ch === '\r') { st.write(`\r\nran:${line} size:${size}\r\n$ `); if (line === 'exit') { st.exit(0); st.end() } if (line === 'drop') client.end(); line = '' } else { line += ch } } }) })
     })
   }).on('error', () => {})
 })

@@ -261,11 +261,36 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .session-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: var(--bg-raised); border-top: 1px solid var(--border); color: var(--text-muted); }
 .session-bar.failed span:first-child { color: var(--danger); }
 .session-actions { display: flex; gap: 6px; }
-.snippet-menu { position: absolute; top: 8px; right: 18px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; }
-.snippet-menu .icon-btn { background: var(--bg-card); border: 1px solid var(--border); }
-.snippet-menu ul { margin-top: 4px; min-width: 180px; max-height: 300px; overflow-y: auto; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 8px; padding: 4px; }
+.terminal-tools { position: absolute; top: 8px; right: 18px; z-index: 5; display: flex; gap: 4px; align-items: flex-start; }
+.terminal-tools .icon-btn { background: var(--bg-card); border: 1px solid var(--border); opacity: 0.75; }
+.terminal-tools .icon-btn:hover, .terminal-tools .icon-btn[aria-expanded='true'] { opacity: 1; }
+.snippet-menu { position: relative; }
+.snippet-menu ul { position: absolute; right: 0; top: 34px; min-width: 180px; max-height: 300px; overflow-y: auto; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 8px; padding: 4px; }
 .snippet-menu li button { width: 100%; text-align: left; padding: 7px 10px; border-radius: 5px; }
 .snippet-menu li button:hover { background: var(--bg-hover); }
+
+/* ---- search in the terminal ---- */
+.terminal-search {
+  position: absolute; top: 8px; right: 18px; z-index: 6; display: flex; align-items: center; gap: 2px;
+  background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 8px; padding: 3px 4px 3px 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.terminal-search input { width: 200px; padding: 5px 8px; }
+.search-count { font-size: 12px; color: var(--text-muted); min-width: 64px; text-align: center; white-space: nowrap; }
+.terminal-search .icon-btn { width: 28px; height: 28px; }
+
+/* ---- command suggestions beside the cursor ---- */
+.suggestions {
+  position: absolute; z-index: 7; max-width: min(520px, 80%); min-width: 200px;
+  background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font-family: var(--mono); font-size: 12.5px;
+}
+.suggestions button { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; padding: 4px 8px; border-radius: 4px; color: var(--text-muted); }
+.suggestions button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggestions button b { color: var(--text); font-weight: 600; }
+.suggestions button svg { flex: none; opacity: 0.7; }
+.suggestions button.selected, .suggestions button:hover { background: var(--bg-hover); color: var(--text); }
+.suggestions-hint { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 11px; color: var(--text-muted); padding: 3px 8px 2px; border-top: 1px solid var(--border); margin-top: 2px; }
 
 @media (max-width: 900px) {
   .sidebar { width: 52px; }
@@ -344,3 +369,11 @@ a.btn, a.update-pill { text-decoration: none; }
   /* Above the navigation bar along the bottom. */
   .update-card { left: 10px; right: 10px; bottom: calc(68px + env(safe-area-inset-bottom)); width: auto; }
 }
+
+/* ---- importing from ~/.ssh ---- */
+.import-list { max-height: min(320px, 45vh); overflow-y: auto; margin: 4px 0 8px; border: 1px solid var(--border); border-radius: 8px; padding: 2px 10px; }
+.import-list .check { font-weight: 400; margin: 6px 0; align-items: flex-start; }
+.import-list .check input { margin-top: 2px; }
+.import-list .muted { font-size: 12.5px; }
+.import-notes { font-size: 12.5px; color: var(--text-muted); margin: 6px 0; padding-left: 18px; list-style: disc; }
+.hint-box { font-size: 13px; color: var(--text-muted); background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }

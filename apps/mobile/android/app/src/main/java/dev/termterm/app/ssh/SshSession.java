@@ -143,6 +143,10 @@ public final class SshSession {
       while ((read = fromRemote.read(buffer)) != -1) {
         if (read > 0) events.data(buffer, read);
       }
+      // A shell the user left (exit, logout) reports its exit status; one that
+      // just stops was cut off (the server stopped answering keep-alives, the
+      // network went away), and the app reconnects it.
+      if (!closing && ch.getExitStatus() == -1) error = LOST;
     } catch (Exception e) {
       if (!closing) error = failure != null ? failure : describe(e);
     } finally {
@@ -207,6 +211,9 @@ public final class SshSession {
     }
     events.closed(error);
   }
+
+  /** A connection that was working and stopped without the shell ending. */
+  public static final String LOST = "Connection lost";
 
   private static String describe(Exception e) {
     for (Throwable t = e; t != null; t = t.getCause()) {
