@@ -147,17 +147,17 @@ already been agreed as one.
 - [x] Identities (one login shared by several hosts) and host groups
 - [x] Account deletion from the app (Sync → Delete account, with the master password)
 
-### Batch 5 — Housekeeping, rollback protection, user guide (next; **release**)
+### Batch 5 — Housekeeping, rollback protection, user guide (done; **release**)
 
-- [ ] Bring this plan up to date (items shipped in batches 1–4, things since
-      confirmed on devices) and a maintenance run (Electron 45.3.3 and whatever
-      else is due; see `docs/MAINTENANCE.md`)
-- [ ] Rollback protection: each device remembers how far the vault has got, so
+- [x] Bring this plan up to date (items shipped in batches 1–4, things since
+      confirmed on devices) and a maintenance run (Electron 45.3.4; see the run
+      log in `docs/MAINTENANCE.md`)
+- [x] Rollback protection: each device remembers how far the vault has got, so
       a malicious or broken server cannot quietly serve an older copy
-- [ ] User documentation: how to use the app, every feature, what it does and
-      where to find it (desktop and Android)
+- [x] User documentation: [docs/USER-GUIDE.md](USER-GUIDE.md), every feature on
+      desktop and Android
 
-### Batch 6 — Safer releases and data
+### Batch 6 — Safer releases and data (next)
 
 - [ ] Release checks: every expected file attached and signed, update metadata
       correct; tests for the version step; actionlint and shellcheck
@@ -248,8 +248,15 @@ queue above, which names the batch each open item belongs to.
 - [x] Auto-lock after system idle time and on sleep / screen lock (device-local `settings.json`, default 15 minutes). The idle timer itself has no automated test.
 - [x] Locking keeps established SSH sessions running (hidden until unlock)
 - [x] Device list and remote sign-out (`/v1/sessions*`); device names are sealed with the vault key so the server cannot read them
-- [ ] Rollback protection: sign a per-device view of the highest seen `seq`
-      so a malicious server cannot silently serve stale data
+- [x] Rollback protection (Batch 5): a device refuses a server copy older than
+      one it has seen (live items by their encrypted `updatedAt`; deleted ones
+      from a sealed log in the vault file, `Vault.deletedAt`), keeps its own
+      and sends it back. The server reports its newest sequence (`head`); if
+      that is behind the highest this device has read or written, the device
+      re-sends everything (`Vault.resyncAll`). Either way the Sync page warns
+      until dismissed. Limits: a brand-new device has nothing to compare
+      with, and a server can still withhold new changes (not roll back, but
+      not deliver) without being noticed.
 - [x] Import from `~/.ssh/config` (with `Host *` defaults; patterns and `Match`
       skipped), the keys its hosts name (or ssh's default key), and `known_hosts`
       (plain entries; hashed ones are counted and skipped). A trusted key is never
