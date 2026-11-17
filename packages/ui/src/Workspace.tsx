@@ -6,6 +6,7 @@ import {
   Maximize2,
   Minimize2,
   Plus,
+  Radio,
   Rows2,
   Server,
   SquareArrowOutUpRight,
@@ -55,6 +56,8 @@ interface Tab {
   focus: string
   /** A pane shown alone, filling the tab, until zoomed out. */
   zoomed?: string
+  /** What is typed in any of its terminal panes goes to all of them. */
+  broadcast?: boolean
 }
 
 /** Panes are not split smaller than this, in pixels. */
@@ -242,6 +245,8 @@ export function Workspace({ locked }: { locked: boolean }) {
     [tabOf],
   )
 
+  const toggleBroadcast = (tabId: string) => updateTab(tabId, (t) => ({ ...t, broadcast: !t.broadcast }))
+
   const toggleZoom = (sessionId: string) => {
     const tab = tabOf(sessionId)
     if (!tab || panes(tab.layout).length < 2) return
@@ -309,7 +314,7 @@ export function Workspace({ locked }: { locked: boolean }) {
     (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && !e.altKey && (e.code === 'KeyT' || e.code === 'KeyW')) return true
       if (!canSplit || !e.altKey || e.ctrlKey || e.metaKey) return false
-      if (e.shiftKey && ['Equal', 'Minus', 'KeyZ'].includes(e.code)) return true
+      if (e.shiftKey && ['Equal', 'Minus', 'KeyZ', 'KeyB'].includes(e.code)) return true
       // Alt+arrows only once there are panes to move between; otherwise the shell gets them.
       const multi = activeTab ? panes(activeTab.layout).length > 1 && !activeTab.zoomed : false
       return multi && !e.shiftKey && e.code.startsWith('Arrow')
@@ -332,6 +337,7 @@ export function Workspace({ locked }: { locked: boolean }) {
       else if (e.code === 'Equal') split(focus, 'right')
       else if (e.code === 'Minus') split(focus, 'bottom')
       else if (e.code === 'KeyZ') toggleZoom(focus)
+      else if (e.code === 'KeyB') toggleBroadcast(activeTab.id)
       else {
         const side = ({ ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'top', ArrowDown: 'bottom' } as const)[
           e.code as 'ArrowLeft'
@@ -421,6 +427,16 @@ export function Workspace({ locked }: { locked: boolean }) {
   const ready = !locked && snapshot !== null
   const prompt = ready ? prompts[0] : undefined
   const tabTitle = (tab: Tab) => sessions[tab.focus]?.title ?? ''
+  /** The terminal panes in a tab that broadcasting reaches (not file browsers). */
+  const terminalsIn = (tab: Tab) => panes(tab.layout).filter((id) => sessions[id] && sessions[id]!.kind !== 'files')
+  /** The saved host a session is for, if any: its colour and startup snippet. */
+  const hostOf = (session?: SessionTab) =>
+    session && 'hostId' in session.target ? snapshot?.hosts.find((h) => h.id === (session.target as { hostId: string }).hostId) : undefined
+  const colorOf = (session?: SessionTab) => hostOf(session)?.color
+  const startupScriptOf = (session: SessionTab) => {
+    const id = hostOf(session)?.startupSnippetId
+    return id ? snapshot?.snippets.find((s) => s.id === id)?.script : undefined
+  }
   const dropTarget = drop && placed.get(drop.sessionId)
 
   return (
@@ -466,7 +482,9 @@ export function Workspace({ locked }: { locked: boolean }) {
                   ) : (
                     <TerminalIcon size={14} />
                   )}
+                  {colorOf(focused) && <i className={`host-dot host-${colorOf(focused)}`} aria-hidden="true" />}
                   <span className="tab-title">{title}</span>
+                  {tab.broadcast && count > 1 && <Radio size={13} className="tab-broadcast" aria-label="Broadcasting" />}
                   {count > 1 && (
                     <span className="tab-count" aria-label={`${count} panes`}>
                       {count}
@@ -493,6 +511,17 @@ export function Workspace({ locked }: { locked: boolean }) {
           </div>
           {canSplit && activeTab && (
             <div className="split-actions">
+              {terminalsIn(activeTab).length > 1 && (
+                <button
+                  className={`icon-btn ${activeTab.broadcast ? 'broadcasting' : ''}`}
+                  title={activeTab.broadcast ? 'Stop sending typing to every pane (Alt+Shift+B)' : 'Send what you type to every pane in this tab (Alt+Shift+B)'}
+                  aria-label="Broadcast input to all panes"
+                  aria-pressed={!!activeTab.broadcast}
+                  onClick={() => toggleBroadcast(activeTab.id)}
+                >
+                  <Radio size={16} />
+                </button>
+              )}
               <button
                 className="icon-btn"
                 title="Split right (Alt+Shift+=)"
@@ -533,10 +562,11 @@ export function Workspace({ locked }: { locked: boolean }) {
             const visible = active === tab.id && shown
             const multi = panes(tab.layout).length > 1
             const focused = tab.focus === session.id
+            const broadcasting = !!tab.broadcast && multi && session.kind !== 'files' && terminalsIn(tab).length > 1
             return (
               <div
                 key={session.id}
-                className={`pane terminal-pane ${multi ? 'tiled' : ''} ${multi && focused ? 'focused' : ''}`}
+                className={`pane terminal-pane ${multi ? 'tiled' : ''} ${multi && focused ? 'focused' : ''} ${colorOf(session) ? `host-${colorOf(session)}` : ''} ${broadcasting ? 'broadcast' : ''}`}
                 hidden={!visible}
                 style={pct(rect)}
                 data-session={session.id}
@@ -559,6 +589,11 @@ export function Workspace({ locked }: { locked: boolean }) {
                       <TerminalIcon size={13} />
                     )}
                     <span className="pane-title">{session.title}</span>
+                    {broadcasting && (
+                      <span className="pane-broadcast" title="Typing in any pane of this tab goes to this one too">
+                        <Radio size={11} /> Broadcast
+                      </span>
+                    )}
                     <span className="pane-actions">
                       <button
                         className="icon-btn"
@@ -622,6 +657,8 @@ export function Workspace({ locked }: { locked: boolean }) {
                         ? () => connect(session.target, session.title, 'files')
                         : undefined
                     }
+                    startupScript={startupScriptOf(session)}
+                    broadcastTo={broadcasting ? terminalsIn(tab).filter((id) => id !== session.id) : undefined}
                   />
                 )}
               </div>

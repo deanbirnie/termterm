@@ -12,6 +12,7 @@ import {
   setTerminalPrefs,
 } from '../terminal-prefs'
 import { notePasswordUsed, REMINDER_DAYS } from '../password-reminder'
+import { FONT_CHOICES, fontStack, TERMINAL_THEMES, themeById } from '../terminal-themes'
 import { AboutCard, useAppInfo } from '../Update'
 import { Button, ErrorText, Field, PasswordInput, useAction } from '../ui'
 
@@ -103,6 +104,21 @@ function DefaultShell() {
   )
 }
 
+/** A few lines in the chosen colours and font, so a choice can be judged before opening a session. */
+function ThemePreview({ theme, font }: { theme: string; font: string | null }) {
+  const t = themeById(theme).theme
+  const c = (color: string | undefined, text: string) => <span style={{ color }}>{text}</span>
+  return (
+    <pre className="theme-preview" aria-label="Preview" style={{ background: t.background, color: t.foreground, fontFamily: fontStack(font) }}>
+      {c(t.green, 'dean@web')}:{c(t.blue, '~/app')}$ ls{'\n'}
+      {c(t.blue, 'src')}  {c(t.green, 'run.sh')}  README.md  {c(t.red, 'error.log')}{'\n'}
+      {c(t.yellow, 'warning:')} disk 81% full{'\n'}
+      {c(t.brightBlack, '# ')}
+      <span style={{ background: t.cursor, color: t.background }}> </span>
+    </pre>
+  )
+}
+
 function TerminalAppearance() {
   const [prefs, setPrefs] = useState(getTerminalPrefs)
   // Stay in step with the size buttons in an open terminal.
@@ -123,6 +139,29 @@ function TerminalAppearance() {
           ))}
         </select>
       </Field>
+      <Field label="Colours" hint="Applies to open sessions straight away.">
+        <select value={prefs.theme} onChange={(e) => setPrefs(setTerminalPrefs({ theme: e.target.value }))}>
+          {TERMINAL_THEMES.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <ThemePreview theme={prefs.theme} font={prefs.fontFamily} />
+      <Field label="Font" hint="A font that is not installed on this device falls back to the default.">
+        <input
+          list="terminal-fonts"
+          placeholder="Default"
+          value={prefs.fontFamily ?? ''}
+          onChange={(e) => setPrefs(setTerminalPrefs({ fontFamily: e.target.value || null }))}
+        />
+      </Field>
+      <datalist id="terminal-fonts">
+        {FONT_CHOICES.map((f) => (
+          <option key={f} value={f} />
+        ))}
+      </datalist>
       <Field label="Text size">
         <select
           value={prefs.fontSize ?? ''}

@@ -1,4 +1,6 @@
 import type { ReleaseNotes } from './release-notes.ts'
+/** The colours a host can be given (`HostView.color`). */
+export { HOST_COLORS } from '@termterm/core'
 /**
  * The contract between the sandboxed renderer and the main process.
  * Nothing here ever carries a stored password, private key or passphrase
@@ -19,6 +21,12 @@ export interface HostView {
   /** Logs in with this identity's username, password and key instead of its own. */
   identityId?: string
   group?: string
+  /** Seconds between keep-alives; 0 = off; unset = the default. */
+  keepAlive?: number
+  /** A snippet run each time a session to this host connects. */
+  startupSnippetId?: string
+  env?: Record<string, string>
+  color?: string
 }
 
 export interface IdentityView {
@@ -255,6 +263,14 @@ export interface HostInput {
   identityId?: string | null
   /** undefined = leave as is; empty = no group */
   group?: string
+  /** undefined = leave as is, null = the default, number = seconds (0 = off) */
+  keepAlive?: number | null
+  /** undefined = leave as is, null = none */
+  startupSnippetId?: string | null
+  /** undefined = leave as is; replaces all of them otherwise */
+  env?: Record<string, string>
+  /** undefined = leave as is, null or '' = none */
+  color?: string | null
 }
 
 /** What importing an export file did. */
@@ -387,6 +403,8 @@ export interface TermtermApi {
    * a file the user picks. Resolves false if they cancel the file picker.
    */
   vaultExport(password: string): Promise<boolean>
+  /** Saves text to a file the user picks (a session log). Resolves false if they cancel. */
+  saveTextFile(suggestedName: string, text: string): Promise<boolean>
   /** Lets the user pick an export file. Its text, or null if they cancel. */
   pickExportFile(): Promise<{ name: string; text: string } | null>
   /** Adds the items in an export file to this vault. */

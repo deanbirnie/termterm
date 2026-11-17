@@ -30,6 +30,12 @@ host yourself.
     retries, and leaving the shell (`exit`) does not reconnect.
   - **Search** the scrollback with Ctrl+Shift+F (Cmd+F on a Mac) or the
     magnifier at the top right of a terminal.
+  - **Session logs**: save a session's output so far, or record from now on,
+    as plain text.
+  - **Per host**: a colour for its tabs and panes, a snippet to run on
+    connecting, keep-alive interval and environment variables.
+  - **Themes and fonts**: six colour themes and any installed monospaced font
+    (Settings → Terminal).
   - **Suggestions** while typing: commands you used before on the same host,
     and your snippets. → takes the highlighted one, ↑ ↓ choose, Esc hides
     them; on a phone, tap one. The history is kept encrypted in the vault and
@@ -63,6 +69,7 @@ host yourself.
   | Alt+Shift+- | split it downwards |
   | Alt+arrow keys | move between panes |
   | Alt+Shift+Z | zoom: show the current pane alone, and back |
+  | Alt+Shift+B | broadcast: what you type goes to every pane in the tab |
   | Ctrl+Shift+W | close the current pane |
   | Ctrl+Shift+T | open a terminal on this computer in a new tab |
 

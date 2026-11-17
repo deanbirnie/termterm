@@ -94,6 +94,10 @@ The **Hosts** page lists the servers you have saved.
 | Key | One of the keys in your [Keychain](#keychain-keys-and-identities), if the server uses key login. |
 | Jump host | Another saved host to go through first, for servers you can only reach from there. See [Jump hosts](#jump-hosts). |
 | Password | Saved encrypted in the vault, or left empty to be asked each time you connect. |
+| Colour | Marks the host's card, its tabs and its panes, to tell them apart at a glance (red for production, for example). |
+| Startup snippet | A [snippet](#snippets) typed into the session each time it connects. |
+| Keep-alive | How often termterm checks the connection is still there (every 20 seconds unless you change it, or off). More often helps through firewalls that drop quiet connections. |
+| Environment variables | One `NAME=value` per line, set when the shell starts. The server only applies the ones its `AcceptEnv` setting allows; others are quietly ignored. |
 
 **Finding and connecting.**
 
@@ -154,6 +158,13 @@ connection.
   previous one.
 - **Snippets:** the **Run snippet** button types one of your saved
   [snippets](#snippets) into the session.
+- **Session log:** the scroll button at the top right saves what the session
+  shows as plain text (colours and other control codes removed):
+  - **Save output so far…** saves everything still in the scrollback;
+  - **Record from now on** keeps everything that follows until you press
+    **Recording · Stop**, then saves it.
+  On desktop you choose where the file goes; on Android the system file
+  picker opens.
 - **Suggestions:** as you type, termterm suggests commands you have used on
   this host before, plus your snippets. **→** takes the highlighted one,
   **↑ ↓** choose another, **Esc** hides them. On a phone, tap one.
@@ -188,7 +199,14 @@ Split a tab into as many terminals as will fit, like tmux.
 | Alt+Shift+- | Split it downwards |
 | Alt+arrow keys | Move between panes |
 | Alt+Shift+Z | Zoom: show the current pane alone, and back |
+| Alt+Shift+B | Broadcast: send what you type to every pane in this tab, and back |
 | Ctrl+Shift+W | Close the current pane |
+
+**Broadcast input** sends what you type in one pane to all the terminal panes
+in the same tab, to run the same commands on several servers at once. Turn it
+on with Alt+Shift+B or the broadcast button at the top right. While it is on,
+every receiving pane has an orange border and a **Broadcast** label, and the
+tab shows the broadcast sign. Turn it off the same way.
 
 You can also use the mouse:
 
@@ -365,6 +383,8 @@ keeps its newer copies and sends them back, so nothing is lost.
 |---|---|
 | Lock the vault automatically | Minutes without use before the vault locks (also on sleep and screen lock). |
 | Open unlocked on this device, or Unlock with Windows Hello / fingerprint | See [Unlocking and locking](#unlocking-and-locking). |
+| Terminal: colours | A colour theme for the terminal: Midnight (the default), Daylight, Solarized dark or light, Gruvbox dark, High contrast. A preview shows each one. |
+| Terminal: font | Any monospaced font installed on this device; pick one from the list or type a name. One that is not installed falls back to the default. |
 | Terminal: line spacing and text size | How the terminal looks, on this device only. |
 | Terminal: suggest commands while typing | Turn suggestions on or off, and **Clear command history**. |
 | Terminal on this computer (desktop) | The shell that Ctrl+Shift+T and the Terminal button open. |

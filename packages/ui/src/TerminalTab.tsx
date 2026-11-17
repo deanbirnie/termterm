@@ -1,37 +1,16 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
-import { Braces, ChevronDown, ChevronUp, FolderOpen, History, RotateCw, Search, X } from 'lucide-react'
+import { Braces, ChevronDown, ChevronUp, Circle, FolderOpen, History, RotateCw, ScrollText, Search, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectTarget, SessionStatus, SnippetView } from '@termterm/app'
 import { api, errorMessage } from './api'
 import { LineTracker, suggest, wasEchoed, type Suggestion } from './suggest'
+import { logFileName, SessionRecorder } from './session-log'
 import type { SessionTab } from './Workspace'
 import { defaultFontSize, getTerminalPrefs, onTerminalPrefs, setTerminalPrefs } from './terminal-prefs'
+import { fontStack, themeById } from './terminal-themes'
 import { Button } from './ui'
-
-const THEME = {
-  background: '#0d1117',
-  foreground: '#d6deeb',
-  cursor: '#5eead4',
-  selectionBackground: '#2b4a66',
-  black: '#1b2230',
-  red: '#f47067',
-  green: '#6bd68a',
-  yellow: '#e3b341',
-  blue: '#6cb6ff',
-  magenta: '#d2a8ff',
-  cyan: '#56d4dd',
-  white: '#c9d1d9',
-  brightBlack: '#6e7681',
-  brightRed: '#ff938a',
-  brightGreen: '#8ddb8c',
-  brightYellow: '#f0c674',
-  brightBlue: '#96d0ff',
-  brightMagenta: '#e2c5ff',
-  brightCyan: '#76e3ea',
-  brightWhite: '#f0f6fc',
-}
 
 const SEARCH_DECORATIONS = {
   matchBackground: '#2b4a66',
@@ -77,6 +56,8 @@ export function TerminalTab({
   isShortcut,
   refocus = 0,
   onOpenFiles,
+  startupScript,
+  broadcastTo,
 }: {
   tab: SessionTab
   active: boolean
@@ -89,12 +70,33 @@ export function TerminalTab({
   refocus?: number
   /** Opens this host's files in a new tab, where there is a file browser. */
   onOpenFiles?: () => void
+  /** The host's startup snippet, typed in each time the session connects. */
+  startupScript?: string
+  /** Other sessions that get everything typed here too (broadcast input). */
+  broadcastTo?: string[]
 }) {
+  const broadcastRef = useRef(broadcastTo)
+  broadcastRef.current = broadcastTo
+  /** What the user types or sends: to this session, and to the others while broadcasting. */
+  const send = (data: string) => {
+    api.sshWrite(tab.id, data)
+    for (const id of broadcastRef.current ?? []) api.sshWrite(id, data)
+  }
+  const sendRef = useRef(send)
+  sendRef.current = send
+  const recorder = useRef<SessionRecorder | null>(null)
+  const [recording, setRecording] = useState(false)
+  const [logMenu, setLogMenu] = useState(false)
+  const [logNote, setLogNote] = useState<string | null>(null)
+  const startupRef = useRef(startupScript)
+  startupRef.current = startupScript
   const shortcutRef = useRef(isShortcut)
   shortcutRef.current = isShortcut
   const snippetsRef = useRef(snippets)
   snippetsRef.current = snippets
   const rootRef = useRef<HTMLDivElement>(null)
+  // The area around the text takes the theme's background too.
+  const [background, setBackground] = useState(() => themeById(getTerminalPrefs().theme).theme.background)
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -124,6 +126,38 @@ export function TerminalTab({
   const retries = useRef(0)
   const [reconnect, setReconnect] = useState<{ attempt: number; at: number } | null>(null)
   const [now, setNow] = useState(() => Date.now())
+
+  // ---- session logs ----
+  const saveLog = async (text: string, kind: 'output' | 'recording') => {
+    setLogMenu(false)
+    try {
+      const saved = await api.saveTextFile(logFileName(tab.title, kind), text)
+      setLogNote(saved ? `${kind === 'output' ? 'Output' : 'Recording'} saved.` : null)
+    } catch (e) {
+      setLogNote(`Could not save: ${errorMessage(e)}`)
+    }
+    setTimeout(() => setLogNote(null), 4000)
+  }
+  /** Everything in the scrollback (the last 10,000 lines), as plain text. */
+  const saveOutput = () => {
+    const buffer = termRef.current?.buffer.active
+    if (!buffer) return
+    const lines: string[] = []
+    for (let i = 0; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? '')
+    while (lines.length && !lines.at(-1)) lines.pop()
+    void saveLog(lines.join('\n') + '\n', 'output')
+  }
+  const startRecording = () => {
+    recorder.current = new SessionRecorder()
+    setRecording(true)
+    setLogMenu(false)
+  }
+  const stopRecording = () => {
+    const r = recorder.current
+    recorder.current = null
+    setRecording(false)
+    if (r) void saveLog(r.text(), 'recording')
+  }
 
   // ---- search ----
   const [searchOpen, setSearchOpen] = useState(false)
@@ -187,7 +221,7 @@ export function TerminalTab({
     if (!s) return
     const rest = s.text.slice(tracker.current.line.length)
     if (rest) {
-      api.sshWrite(tab.id, rest)
+      sendRef.current(rest)
       tracker.current.input(rest)
     }
     setSuggestions([])
@@ -233,11 +267,11 @@ export function TerminalTab({
     const prefs = getTerminalPrefs()
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: '"Cascadia Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
+      fontFamily: fontStack(prefs.fontFamily),
       fontSize: prefs.fontSize ?? defaultFontSize(touch),
       lineHeight: prefs.lineHeight,
       scrollback: 10_000,
-      theme: THEME,
+      theme: themeById(prefs.theme).theme,
       allowProposedApi: true, // search highlights use decorations
     })
     const fit = new FitAddon()
@@ -317,7 +351,7 @@ export function TerminalTab({
           armCtrl(false)
         }
         typed(data)
-        api.sshWrite(tab.id, data)
+        sendRef.current(data)
       }),
       term.onResize(({ cols, rows }) => api.sshResize(tab.id, cols, rows)),
       // The echo moves the cursor after a key: keep the suggestions beside it.
@@ -331,10 +365,17 @@ export function TerminalTab({
       onTerminalPrefs((next) => {
         term.options.fontSize = next.fontSize ?? defaultFontSize(touch)
         term.options.lineHeight = next.lineHeight
+        term.options.fontFamily = fontStack(next.fontFamily)
+        term.options.theme = themeById(next.theme).theme
+        setBackground(themeById(next.theme).theme.background)
         if (hostRef.current?.offsetParent) fit.fit()
         if (!next.suggestions) setSuggestions([])
       }),
-      api.onSshData((id, data) => id === tab.id && term.write(data)),
+      api.onSshData((id, data) => {
+        if (id !== tab.id) return
+        term.write(data)
+        recorder.current?.add(data)
+      }),
       api.onSshStatus((id, s) => id === tab.id && setStatus(s)),
     ]
     const observer = new ResizeObserver(() => {
@@ -375,6 +416,8 @@ export function TerminalTab({
       wasConnected.current = true
       retries.current = 0
       setReconnect(null)
+      const startup = startupRef.current
+      if (startup) api.sshWrite(tab.id, startup.replace(/\r?\n/g, '\r').replace(/\r?$/, '\r'))
       void api.commandHistory(key).then(
         (h) => (history.current = h),
         () => undefined,
@@ -457,14 +500,14 @@ export function TerminalTab({
   }
 
   const runSnippet = (script: string) => {
-    api.sshWrite(tab.id, script.replace(/\r?\n/g, '\r').replace(/\r?$/, '\r'))
+    send(script.replace(/\r?\n/g, '\r').replace(/\r?$/, '\r'))
     setSnippetsOpen(false)
     termRef.current?.focus()
   }
 
   const sendKey = (sequence: string) => {
     typed(sequence)
-    api.sshWrite(tab.id, sequence)
+    send(sequence)
     termRef.current?.focus()
   }
 
@@ -472,7 +515,7 @@ export function TerminalTab({
   const lostBecause = status.state === 'closed' && status.error && status.error !== 'Connection lost' ? `Connection lost (${status.error})` : 'Connection lost'
 
   return (
-    <div className="terminal-tab" ref={rootRef}>
+    <div className="terminal-tab" ref={rootRef} style={{ background }}>
       <div className="terminal-host" ref={hostRef} />
       {touch && status.state === 'connected' && (
         // preventDefault on pointer down keeps focus in the terminal, so the
@@ -568,6 +611,41 @@ export function TerminalTab({
           >
             <Search size={15} />
           </button>
+          {recording && (
+            <button className="recording" onClick={stopRecording} title="Stop recording and save the log">
+              <Circle size={9} fill="currentColor" /> Recording · Stop
+            </button>
+          )}
+          <div className="snippet-menu">
+            <button
+              className="icon-btn"
+              title="Session log"
+              aria-label="Session log"
+              aria-expanded={logMenu}
+              onClick={() => setLogMenu((o) => !o)}
+            >
+              <ScrollText size={15} />
+            </button>
+            {logMenu && (
+              <ul>
+                <li>
+                  <button onClick={saveOutput}>Save output so far…</button>
+                </li>
+                <li>
+                  {recording ? (
+                    <button onClick={stopRecording}>Stop recording and save…</button>
+                  ) : (
+                    <button onClick={startRecording}>Record from now on</button>
+                  )}
+                </li>
+              </ul>
+            )}
+          </div>
+          {logNote && (
+            <span className="log-note" role="status">
+              {logNote}
+            </span>
+          )}
           {status.state === 'connected' && snippets.length > 0 && (
             <div className="snippet-menu">
               <button

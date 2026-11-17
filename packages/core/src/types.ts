@@ -79,7 +79,19 @@ export interface HostData {
   identityId?: string
   /** The group the host is listed under. Hosts with the same group name form a group. */
   group?: string
+  /** Seconds between keep-alive messages; 0 turns them off. Unset: the default (20). */
+  keepAlive?: number
+  /** id of a `snippet` item run in the session each time it connects */
+  startupSnippetId?: string
+  /** Environment variables asked for when the shell starts (the server must allow them: AcceptEnv). */
+  env?: Record<string, string>
+  /** A colour to tell the host's tabs and panes apart (one of HOST_COLORS). */
+  color?: string
 }
+
+/** The colours a host can be given. */
+export const HOST_COLORS = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink'] as const
+export const DEFAULT_KEEPALIVE_SECONDS = 20
 
 /** A login (username with a password and/or key) that several hosts can share. */
 export interface IdentityData {

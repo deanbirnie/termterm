@@ -208,6 +208,7 @@ export function createApi(): TermtermApi {
       return saveExportFile(`termterm-export-${new Date().toISOString().slice(0, 10)}.termterm`, text)
     },
     pickExportFile: () => openExportFile(),
+    saveTextFile: (name, text) => saveExportFile(name, text),
     vaultImport: (text, password) => vault.importVault(text, password),
     renameGroup: async (from, to) => vault.renameGroup(from, to),
     // Port forwards are saved (and sync) here, but run only in the desktop app.

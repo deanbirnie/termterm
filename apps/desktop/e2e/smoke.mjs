@@ -4,7 +4,7 @@
 //
 //   npm run e2e            (Linux without a display: xvfb-run -a npm run e2e)
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
@@ -144,9 +144,14 @@ const sshServer = new Server({ hostKeys: [sshHostKey] }, (client) => {
         session.on('sftp', (accept) => serveSftp(accept()))
         session.on('pty', (accept) => accept())
         session.on('window-change', (accept) => accept?.())
+        const env = []
+        session.on('env', (accept, _reject, info) => {
+          env.push(`${info.key}=${info.val}`)
+          accept?.()
+        })
         session.on('shell', (accept) => {
           const stream = accept()
-          stream.write('Welcome to the test box\r\n$ ')
+          stream.write(`Welcome to the test box${env.length ? ` (env: ${env.join(' ')})` : ''}\r\n$ `)
           let line = ''
           stream.on('data', (chunk) => {
             for (const ch of chunk.toString()) {
@@ -928,7 +933,7 @@ try {
 
   // ---- identities, groups, export and import, deleting the account ------------------------
   {
-    const d = await launch('device-d', { TERMTERM_TEST_FILE: join(tmp, 'backup.termterm') })
+    const d = await launch('device-d', { TERMTERM_TEST_FILE: join(tmp, 'backup.termterm'), TERMTERM_TEST_SAVE_DIR: join(tmp, 'logs') })
     const navD = (name) => d.page.getByRole('navigation').getByRole('button', { name, exact: true })
     await d.page.getByLabel('Master password', { exact: true }).fill(MASTER)
     await d.page.getByLabel('Confirm master password').fill(MASTER)
@@ -972,6 +977,92 @@ try {
     await d.page.getByRole('button', { name: 'Rename', exact: true }).click()
     await assertCount(d.page.getByRole('region', { name: 'Workshop' }).locator('.card'), 2)
     step('an identity logged two grouped hosts in with its password; the group renamed across its hosts')
+
+    // ---- per-host session settings, logs, broadcast, themes ----
+    const saveDir = join(tmp, 'logs')
+    mkdirSync(saveDir, { recursive: true })
+    await navD('Snippets').click()
+    await d.page.getByRole('button', { name: 'New snippet' }).click()
+    await d.page.getByLabel('Label').fill('whoami')
+    await d.page.getByLabel('Script').fill('whoami')
+    await d.page.getByRole('button', { name: 'Save', exact: true }).click()
+    await navD('Hosts').click()
+    await d.page.locator('.card', { hasText: 'Second box' }).click()
+    await d.page.getByRole('radio', { name: 'Red' }).click()
+    await d.page.getByLabel('Startup snippet').selectOption({ label: 'whoami' })
+    await d.page.getByLabel('Keep-alive').selectOption('0')
+    await d.page.getByLabel('Environment variables').fill('LANG=en_GB.UTF-8\nAPP_ENV=staging')
+    await d.page.getByRole('button', { name: 'Save changes' }).click()
+    await d.page.locator('.card.host-red', { hasText: 'Second box' }).waitFor()
+    await d.page.locator('.card', { hasText: 'Second box' }).dblclick()
+    const second = d.page.locator('.pane:not([hidden]) .xterm-rows')
+    await second.getByText('(env: LANG=en_GB.UTF-8 APP_ENV=staging)').waitFor()
+    await second.getByText('you ran: whoami').waitFor()
+    assert.equal(await d.page.locator('.tab.active .host-dot.host-red').count(), 1)
+    step('a host’s colour marks its card and tab; its startup snippet ran and its environment variables reached the server')
+
+    // Session logs: the output so far, and a recording of what follows.
+    await d.page.getByRole('button', { name: 'Session log' }).click()
+    await d.page.getByRole('button', { name: 'Save output so far…' }).click()
+    await d.page.getByText('Output saved.').waitFor()
+    await d.page.getByRole('button', { name: 'Session log' }).click()
+    await d.page.getByRole('button', { name: 'Record from now on' }).click()
+    await d.page.locator('.pane:not([hidden]) .xterm-helper-textarea').focus()
+    await d.page.keyboard.type('echo recorded')
+    await d.page.keyboard.press('Enter')
+    await second.getByText('you ran: echo recorded').waitFor()
+    await d.page.getByRole('button', { name: /Recording · Stop/ }).click()
+    await d.page.getByText('Recording saved.').waitFor()
+    const logFiles = readdirSync(saveDir)
+    assert.equal(logFiles.length, 2)
+    const logOf = (kind) => readFileSync(join(saveDir, logFiles.find((f) => f.includes(`-${kind}-`))), 'utf8')
+    const outputLog = logOf('output')
+    const recordLog = logOf('recording')
+    assert.match(outputLog, /Welcome to the test box/)
+    assert.match(outputLog, /you ran: whoami/)
+    assert.match(recordLog, /you ran: echo recorded/)
+    assert.doesNotMatch(recordLog, /Welcome/)
+    assert.doesNotMatch(recordLog + outputLog, /\x1b/)
+    step('a session’s output so far, and a recording of what followed, saved as plain text')
+
+    // Broadcast: a second pane on the same tab, then type once into both.
+    await d.page.keyboard.press('Alt+Shift+Equal')
+    await assertCount(d.page.locator('.terminal-pane:not([hidden])'), 2)
+    for (const pane of await d.page.locator('.terminal-pane:not([hidden]) .xterm-rows').all()) {
+      await pane.getByText('you ran: whoami').waitFor()
+    }
+    await d.page.getByRole('button', { name: 'Broadcast input to all panes' }).click()
+    await assertCount(d.page.locator('.pane-broadcast'), 2)
+    await d.page.locator('.terminal-pane.focused .xterm-helper-textarea').focus()
+    await d.page.keyboard.type('echo to both')
+    await d.page.keyboard.press('Enter')
+    for (const pane of await d.page.locator('.terminal-pane:not([hidden]) .xterm-rows').all()) {
+      await pane.getByText('you ran: echo to both').waitFor()
+    }
+    await d.page.keyboard.press('Alt+Shift+KeyB')
+    await assertCount(d.page.locator('.pane-broadcast'), 0)
+    await d.page.keyboard.type('echo only here')
+    await d.page.keyboard.press('Enter')
+    await d.page.locator('.terminal-pane.focused .xterm-rows').getByText('you ran: echo only here').waitFor()
+    assert.equal(await d.page.locator('.terminal-pane:not(.focused):not([hidden]) .xterm-rows').getByText('you ran: echo only here').count(), 0)
+    await shot(d.page, '21-broadcast')
+    step('broadcast sent one line to both panes of a tab; turned off, typing reached only the focused pane')
+
+    // A colour theme applies to open terminals at once.
+    await d.page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await navD('Settings').click()
+    await d.page.getByLabel('Colours').selectOption({ label: 'Daylight' })
+    await d.page.getByLabel('Preview').waitFor()
+    await d.page.locator('.tab', { hasText: 'Second box' }).click()
+    const bg = await d.page.locator('.terminal-pane:not([hidden]) .terminal-tab').first().evaluate((el) => getComputedStyle(el).backgroundColor)
+    assert.equal(bg, 'rgb(251, 251, 248)')
+    await shot(d.page, '22-daylight-theme')
+    // Close both of Second box's panes; the Grouped box tab from earlier stays.
+    for (let i = 0; i < 2; i++) await d.page.keyboard.press('Control+Shift+KeyW')
+    await assertCount(d.page.locator('.terminal-pane'), 1)
+    await d.page.getByRole('button', { name: 'Vault', exact: true }).click()
+    logins.splice(loginsBefore)
+    step('the Daylight theme applied to an open terminal straight away')
 
     await navD('Settings').click()
     const exportForm = d.page.getByRole('form', { name: 'Export' })
@@ -1027,7 +1118,7 @@ try {
     await importForm.getByText('Incorrect password for this export file').waitFor()
     await importForm.getByLabel('Password for the file').fill('backup-password')
     await importForm.getByRole('button', { name: 'Import', exact: true }).click()
-    await importForm.getByText('5 items added.').waitFor()
+    await importForm.getByText('6 items added.').waitFor()
     await e.page.getByRole('navigation').getByRole('button', { name: 'Hosts', exact: true }).click()
     await assertCount(e.page.getByRole('region', { name: 'Workshop' }).locator('.card'), 2)
     // The host key came in the file too, so there is nothing to confirm.

@@ -8,6 +8,7 @@ import {
   normalizeServerUrl,
   syncVault,
   type ForwardData,
+  HOST_COLORS,
   type HostData,
   type IdentityData,
   type Item,
@@ -44,6 +45,46 @@ const SYNC_INTERVAL_MS = 60_000
 const EXPORTED_TYPES = ['host', 'key', 'identity', 'snippet', 'knownHost', 'forward'] as const
 
 const byLabel = <T extends { label: string }>(a: T, b: T) => a.label.localeCompare(b.label)
+
+/** null = the default (stored as unset); otherwise whole seconds, 0 (off) to an hour. */
+function checkKeepAlive(value: number | null): number | undefined {
+  if (value === null) return undefined
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 0 || n > 3600) throw new Error('Keep-alive must be 0 (off) to 3600 seconds')
+  return n
+}
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+
+function checkEnv(env: Record<string, string>): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const [rawName, rawValue] of Object.entries(env ?? {})) {
+    const name = String(rawName).trim()
+    if (!name) continue
+    if (!ENV_NAME.test(name)) throw new Error(`"${name}" is not a valid environment variable name`)
+    const value = String(rawValue ?? '')
+    if (value.length > 1024 || /[\0\r\n]/.test(value)) throw new Error(`The value of ${name} is too long or has a line break`)
+    out[name] = value
+  }
+  if (Object.keys(out).length > 32) throw new Error('At most 32 environment variables')
+  return Object.keys(out).length ? out : undefined
+}
+
+function checkColor(color: string | null): string | undefined {
+  if (!color) return undefined
+  if (!(HOST_COLORS as readonly string[]).includes(color)) throw new Error('Unknown colour')
+  return color
+}
+
+/** Environment variables from an export file: kept if valid, dropped (not fatal) if not. */
+function importEnv(env: unknown): Record<string, string> | undefined {
+  if (!env || typeof env !== 'object') return undefined
+  try {
+    return checkEnv(env as Record<string, string>)
+  } catch {
+    return undefined
+  }
+}
 
 function required(value: unknown, name: string, max = 512): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`)
@@ -372,6 +413,10 @@ export class VaultService {
           jumpHostId: data.jumpHostId,
           identityId: data.identityId,
           group: data.group,
+          keepAlive: data.keepAlive,
+          startupSnippetId: data.startupSnippetId,
+          env: data.env,
+          color: data.color,
         }))
         .sort(byLabel),
       identities: v
@@ -478,6 +523,12 @@ export class VaultService {
     const identityId = input.identityId === undefined ? existing?.data.identityId : input.identityId || undefined
     if (identityId && this.v.get(identityId)?.type !== 'identity') throw new Error('Identity not found')
     const group = (input.group === undefined ? (existing?.data.group ?? '') : String(input.group)).trim().slice(0, 64)
+    const keepAlive = input.keepAlive === undefined ? existing?.data.keepAlive : checkKeepAlive(input.keepAlive)
+    const startupSnippetId =
+      input.startupSnippetId === undefined ? existing?.data.startupSnippetId : input.startupSnippetId || undefined
+    if (startupSnippetId && this.v.get(startupSnippetId)?.type !== 'snippet') throw new Error('Snippet not found')
+    const env = input.env === undefined ? existing?.data.env : checkEnv(input.env)
+    const color = input.color === undefined ? existing?.data.color : checkColor(input.color)
     const data: HostData = {
       label: (input.label ?? '').trim().slice(0, 128) || address,
       address,
@@ -489,6 +540,10 @@ export class VaultService {
       ...(jumpHostId ? { jumpHostId } : {}),
       ...(identityId ? { identityId } : {}),
       ...(group ? { group } : {}),
+      ...(keepAlive !== undefined ? { keepAlive } : {}),
+      ...(startupSnippetId ? { startupSnippetId } : {}),
+      ...(env && Object.keys(env).length ? { env } : {}),
+      ...(color ? { color } : {}),
     }
     return this.v.put('host', data, id ?? undefined).id
   }
@@ -611,6 +666,13 @@ export class VaultService {
         }
       }
     }
+    if (item.type === 'snippet') {
+      for (const host of this.v.list<HostData>('host')) {
+        if (host.data.startupSnippetId !== id) continue
+        const { startupSnippetId: _removed, ...rest } = host.data
+        this.v.put('host', rest, host.id)
+      }
+    }
     if (item.type === 'identity') {
       // Hosts that used it keep working: they get its login as their own.
       const { username, password, keyId } = (item as Item<IdentityData>).data
@@ -703,6 +765,13 @@ export class VaultService {
       add(id, 'identity', identity, (i) =>
         i.data.label === identity.label && i.data.username === username && i.data.keyId === identity.keyId)
     }
+    // Snippets before hosts, which can name one to run when they connect.
+    for (const { id, data } of of<SnippetData>('snippet')) {
+      const script = str(data.script)
+      if (!script) { result.skipped++; continue }
+      const snippet: SnippetData = { label: str(data.label, 128) || 'Snippet', script }
+      add(id, 'snippet', snippet, (x) => x.data.label === snippet.label && x.data.script === script)
+    }
     // Hosts in two passes: a jump host may come after the host that uses it.
     const hosts = of<HostData>('host')
     const added: Array<[string, string]> = []
@@ -722,6 +791,10 @@ export class VaultService {
         ...(keyId ? { keyId } : {}),
         ...(identityId ? { identityId } : {}),
         ...(str(data.group, 64) ? { group: data.group } : {}),
+        ...(Number.isInteger(data.keepAlive) && data.keepAlive! >= 0 && data.keepAlive! <= 3600 ? { keepAlive: data.keepAlive } : {}),
+        ...(ref(data.startupSnippetId) ? { startupSnippetId: ref(data.startupSnippetId) } : {}),
+        ...(importEnv(data.env) ? { env: importEnv(data.env) } : {}),
+        ...(typeof data.color === 'string' && (HOST_COLORS as readonly string[]).includes(data.color) ? { color: data.color } : {}),
       }
       const before = result.added
       // Several hosts can share an address (different users, identities or
@@ -752,12 +825,6 @@ export class VaultService {
       }
       if (kind !== 'dynamic' && !forward.destHost) { result.skipped++; continue }
       add(id, 'forward', forward, (f) => f.data.hostId === hostId && f.data.kind === kind && f.data.bindPort === bindPort)
-    }
-    for (const { id, data } of of<SnippetData>('snippet')) {
-      const script = str(data.script)
-      if (!script) { result.skipped++; continue }
-      const snippet: SnippetData = { label: str(data.label, 128) || 'Snippet', script }
-      add(id, 'snippet', snippet, (x) => x.data.label === snippet.label && x.data.script === script)
     }
     for (const { id, data } of of<KnownHostData>('knownHost')) {
       const host = str(data.host, 255)
