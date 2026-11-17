@@ -14,8 +14,8 @@ const PAGES = [
   { id: 'hosts', label: 'Hosts', icon: Server },
   { id: 'keychain', label: 'Keychain', icon: KeyRound },
   { id: 'snippets', label: 'Snippets', icon: Braces },
-  { id: 'known', label: 'Known Hosts', icon: Fingerprint },
-  { id: 'forwarding', label: 'Forwarding', icon: ArrowLeftRight },
+  { id: 'known', label: 'Known Hosts', short: 'Known', icon: Fingerprint },
+  { id: 'forwarding', label: 'Forwarding', short: 'Ports', icon: ArrowLeftRight },
   { id: 'sync', label: 'Sync', icon: RefreshCw },
   { id: 'settings', label: 'Settings', icon: Settings },
 ] as const
@@ -39,19 +39,26 @@ export function VaultView({
   return (
     <div className="vault">
       <nav className="sidebar" aria-label="Vault">
-        {PAGES.map(({ id, label, icon: Icon }) => (
+        {PAGES.map((p) => {
+          const { id, label, icon: Icon } = p
+          const short = 'short' in p ? p.short : undefined
+          return (
           <button
             key={id}
+            aria-label={label}
             className={`nav-item ${page === id ? 'active' : ''}`}
             aria-current={page === id ? 'page' : undefined}
             title={id === 'sync' ? `Sync: ${SYNC_LABEL[syncDot]}` : undefined}
             onClick={() => setPage(id)}
           >
             <Icon size={16} />
-            <span>{label}</span>
+            {/* The phone's bottom bar has room for short names only. */}
+            <span className={short ? 'nav-long' : undefined}>{label}</span>
+            {short && <span className="nav-short">{short}</span>}
             {id === 'sync' && <i className={`dot dot-${syncDot}`} aria-hidden="true" />}
           </button>
-        ))}
+          )
+        })}
         {info && <span className="sidebar-version">v{info.version}</span>}
       </nav>
       <section className="page">

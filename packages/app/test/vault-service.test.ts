@@ -494,3 +494,22 @@ describe('per-host session settings', () => {
     expect(host.startupSnippetId).toBe(b.snapshot().snippets[0]!.id)
   })
 })
+
+describe('forwards that start by themselves', () => {
+  it('keeps the auto-start choice, and carries it through export and import', async () => {
+    const a = device('none').open()
+    await a.create('master-password')
+    const host = a.saveHost(null, { label: 'h', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null })
+    const base = { label: '', hostId: host, kind: 'local' as const, bindHost: '', bindPort: 8080, destHost: 'db', destPort: 5432 }
+    const id = a.saveForward(null, { ...base, autoStart: true })
+    expect(a.snapshot().forwards[0]).toMatchObject({ id, autoStart: true })
+    a.saveForward(id, { ...base, autoStart: false })
+    expect(a.snapshot().forwards[0]?.autoStart).toBeUndefined()
+    a.saveForward(id, { ...base, autoStart: true })
+    const { text } = await a.exportVault('export-password')
+    const b = device('none').open()
+    await b.create('master-password')
+    await b.importVault(text, 'export-password')
+    expect(b.snapshot().forwards[0]).toMatchObject({ autoStart: true, bindPort: 8080 })
+  })
+})

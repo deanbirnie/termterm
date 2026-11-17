@@ -473,10 +473,30 @@ try {
     await page.getByText(`Port ${localPort} is already in use on this computer`).waitFor()
     squatter.close()
     for (const label of [socks, remote]) await page.getByRole('button', { name: `Stop ${label}` }).click()
+
+    // Marked to start by itself: opening the vault starts it.
+    const setAutoStart = async (on) => {
+      await page.locator('.forward-row', { hasText: socks }).locator('.card').click()
+      const panel = page.getByRole('complementary', { name: 'Port forward' })
+      await panel.getByLabel('Start automatically when the vault is opened').setChecked(on)
+      await panel.getByRole('button', { name: 'Save' }).click()
+      await panel.getByRole('button', { name: 'Close' }).click()
+    }
+    await setAutoStart(true)
+    await page.locator('.forward-row', { hasText: socks }).getByText('Starts automatically').waitFor()
+    await page.getByRole('button', { name: `Start ${socks}` }).waitFor()
+    await page.getByRole('button', { name: 'Lock vault' }).click()
+    await page.getByLabel('Master password').fill(MASTER)
+    await page.getByRole('button', { name: 'Unlock' }).click()
+    await page.getByRole('navigation').getByRole('button', { name: 'Forwarding', exact: true }).click()
+    await page.locator('.forward-row', { hasText: socks }).getByText(/^Running/).waitFor()
+    assert.match(await ping(socksPort, { host: 'localhost', port: echoPort }), /echo:ping/)
+    await page.getByRole('button', { name: `Stop ${socks}` }).click()
+    await setAutoStart(false)
     echo.close()
     logins.splice(loginsBefore)
     await page.getByRole('navigation').getByRole('button', { name: 'Hosts', exact: true }).click()
-    step('forwards show their connections, stop cleanly, and report a port already in use')
+    step('forwards show their connections, stop cleanly, and report a port already in use; one marked to start automatically started when the vault was opened')
   }
 
   // ---- browsing files over SFTP -------------------------------------------------------
