@@ -79,6 +79,7 @@ const api: TermtermApi = {
   syncDeleteAccount: invoke('sync:deleteAccount'),
   syncDismissRollback: invoke('sync:dismissRollback'),
   syncDevices: invoke('sync:devices'),
+  syncUsage: invoke('sync:usage'),
   syncRevokeDevice: invoke('sync:revokeDevice'),
   sshConnect: invoke('ssh:connect'),
   sshWrite: send('ssh:write'),

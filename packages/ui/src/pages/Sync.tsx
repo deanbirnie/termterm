@@ -102,6 +102,7 @@ function Connected({ sync }: { sync: SyncStatus }) {
         </dd>
         <dt>Last synced</dt>
         <dd>{last}</dd>
+        <Usage lastSyncAt={sync.lastSyncAt} />
       </dl>
       {sync.insecure && (
         <p className="warning">
@@ -269,6 +270,30 @@ function DeleteAccount({ username }: { username: string }) {
           </div>
         </form>
       )}
+    </>
+  )
+}
+
+const formatBytes = (n: number) =>
+  n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/** What the account stores on the server, refreshed after each sync. Hidden if the server does not say. */
+function Usage({ lastSyncAt }: { lastSyncAt?: number }) {
+  const [usage, setUsage] = useState<{ items: number; bytes: number; maxItems: number } | null>(null)
+  useEffect(() => {
+    let live = true
+    api.syncUsage().then((u) => live && setUsage(u), () => undefined)
+    return () => {
+      live = false
+    }
+  }, [lastSyncAt])
+  if (!usage) return null
+  return (
+    <>
+      <dt>Stored on server</dt>
+      <dd title="Encrypted items, including deletions still being passed on to your devices">
+        {usage.items.toLocaleString()} of {usage.maxItems.toLocaleString()} items, {formatBytes(usage.bytes)}
+      </dd>
     </>
   )
 }

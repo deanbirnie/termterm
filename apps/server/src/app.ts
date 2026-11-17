@@ -114,6 +114,7 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     ),
     item: db.prepare('SELECT id, seq, blob FROM items WHERE user_id = ? AND id = ?'),
     itemCount: db.prepare('SELECT COUNT(*) AS n FROM items WHERE user_id = ?'),
+    usage: db.prepare('SELECT COUNT(*) AS items, COALESCE(SUM(LENGTH(blob)), 0) AS bytes FROM items WHERE user_id = ?'),
     upsertItem: db.prepare(
       `INSERT INTO items (user_id, id, seq, blob) VALUES (?, ?, ?, ?)
        ON CONFLICT (user_id, id) DO UPDATE SET seq = excluded.seq, blob = excluded.blob`,
@@ -322,6 +323,14 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
       }
       q.deleteUser.run(user.id)
       return { ok: true }
+    },
+
+    // How much this account stores: items (deletions included, as they are
+    // kept to reach every device) and the size of their ciphertext.
+    'GET /v1/usage': (req) => {
+      const { user } = authenticate(req)
+      const { items, bytes } = q.usage.get(user.id) as { items: number; bytes: number }
+      return { items, bytes, maxItems: LIMITS.itemsPerUser }
     },
 
     // Devices signed in to this account. A session's public id is its token

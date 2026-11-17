@@ -409,6 +409,8 @@ export interface TermtermApi {
    */
   syncDeleteAccount(password: string): Promise<void>
   syncDevices(): Promise<DeviceView[]>
+  /** What the account stores on the sync server; null if the server does not report it. */
+  syncUsage(): Promise<{ items: number; bytes: number; maxItems: number } | null>
   /** Signs another device out of sync. Its local vault copy is not erased. */
   syncRevokeDevice(id: string): Promise<void>
 

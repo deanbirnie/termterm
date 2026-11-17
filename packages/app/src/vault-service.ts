@@ -1012,6 +1012,18 @@ export class VaultService {
       .catch(() => undefined) // cosmetic; the device list shows "Unnamed device"
   }
 
+  /** How much the account stores on the sync server. Null from servers that do not say (before 0.11). */
+  async syncUsage(): Promise<{ items: number; bytes: number; maxItems: number } | null> {
+    const v = this.v
+    if (!v.sync) return null
+    try {
+      return await new SyncApi(v.sync.serverUrl, v.syncToken()).usage()
+    } catch (e) {
+      if (e instanceof SyncError && e.status === 404) return null
+      throw e
+    }
+  }
+
   async syncDevices(): Promise<DeviceView[]> {
     const v = this.v
     if (!v.sync) return []
