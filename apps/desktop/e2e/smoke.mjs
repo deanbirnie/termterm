@@ -133,7 +133,10 @@ const sshServer = new Server({ hostKeys: [sshHostKey] }, (client) => {
           })
         })
         listeners.push(listener)
-        listener.listen(info.bindPort, info.bindAddr, () => accept?.(listener.address().port))
+        // Like sshd, "localhost" means the loopback address on every family; this
+        // listens on the IPv4 one, which the test connects to (Node alone may pick ::1).
+        const host = info.bindAddr === 'localhost' ? '127.0.0.1' : info.bindAddr
+        listener.listen(info.bindPort, host, () => accept?.(listener.address().port))
       })
       client.on('close', () => listeners.forEach((l) => l.close()))
       client.on('session', (accept) => {
