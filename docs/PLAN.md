@@ -169,14 +169,16 @@ already been agreed as one.
 - [x] Server: backup command and guide (README, "Backups"), an automated
       backup-and-restore check in CI, storage usage per account (Sync page)
 
-### Batch 7 — Everyday sessions (next)
+### Batch 7 — Everyday sessions (done)
 
-- [ ] Per-host keep-alive interval, startup snippet, environment variables
-- [ ] Terminal themes, fonts, a colour per host
-- [ ] Session logs (save a session's output to a file)
-- [ ] Broadcast input to several panes at once
+- [x] Per-host keep-alive interval, startup snippet, environment variables
+      (desktop and Android; the Java SSH test checks the variables arrive)
+- [x] Terminal themes (six), any installed font, a colour per host
+- [x] Session logs: the output so far, or a recording from now on, as plain
+      text (control codes removed)
+- [x] Broadcast input to all terminal panes in a tab (Alt+Shift+B)
 
-### Batch 8 — Android catches up
+### Batch 8 — Android catches up (next)
 
 - [ ] Port forwarding on Android
 - [ ] Start chosen forwards when the app opens
@@ -299,7 +301,7 @@ queue above, which names the batch each open item belongs to.
       back; never after a refused host key or failed login, nor after `exit`.
       Desktop (`ssh.ts`) and Android (`SshSession.java`) report "Connection lost"
       for a drop; `TerminalTab` does the retrying
-- [ ] Keep-alive settings, per-host startup snippet, env vars
+- [x] Keep-alive settings, per-host startup snippet, env vars (Batch 7)
 - [x] Jump hosts (ProxyJump): a host names another saved host to go through,
       chains up to 5 deep, no loops (`VaultService.checkJump`). Desktop opens each
       hop over the previous one's `forwardOut` (`apps/desktop/src/main/ssh-connect.ts`,
@@ -323,13 +325,13 @@ queue above, which names the batch each open item belongs to.
       overwrites (`apps/desktop/src/main/files.ts`, `packages/ui/src/FilesTab.tsx`)
 - [ ] SFTP on Android; file permissions and editing a remote file in place
 - [x] Search in scrollback (`@xterm/addon-search`; Ctrl+Shift+F, Cmd+F, or the magnifier)
-- [ ] Terminal themes, fonts, per-host colour; session logs
+- [x] Terminal themes, fonts, per-host colour; session logs (Batch 7)
 - [x] Predictive typing: command history per host (a `history` vault item,
       encrypted and synced, 500 commands) plus single-line snippets, shown beside
       the cursor. The line is followed from keystrokes (`packages/ui/src/suggest.ts`)
       and given up on after Tab, arrows or history keys until Enter; a command is
       kept only if the terminal echoed it, so passwords at prompts are not
-- [ ] Broadcast input to several sessions
+- [x] Broadcast input to several sessions (Batch 7)
 - [ ] Mosh, Telnet, serial
 
 ## Phase 4 — Distribution and more devices
