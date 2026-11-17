@@ -39,6 +39,12 @@ export interface VaultFile {
   keyCheck?: string
   items: Record<string, StoredItem>
   sync: SyncState | null
+  /**
+   * A master password change sent to the sync server whose answer has not
+   * arrived: the new KDF and wrapped key, so the change can be finished (or
+   * dropped) once the server says which it holds.
+   */
+  pendingRekey?: { kdf: KdfParams; wrappedVaultKey: string }
 }
 
 // ---- Item payloads used by the apps -------------------------------------
