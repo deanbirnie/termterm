@@ -448,3 +448,16 @@ a.btn, a.update-pill { text-decoration: none; }
 .swatch[aria-checked='true'] { border-color: var(--text); }
 .env-input { font-family: var(--mono, monospace); font-size: 12px; }
 .theme-preview { margin: -4px 0 14px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; line-height: 1.4; white-space: pre; overflow-x: auto; }
+.recording {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border-radius: 13px;
+  font-size: 12px; color: #fff; background: #b42318;
+}
+.log-note { align-self: center; font-size: 12px; color: var(--text-muted); background: var(--bg-raised); padding: 3px 8px; border-radius: 6px; }
+/* ---- broadcast input: every receiving pane is marked ---- */
+.icon-btn.broadcasting { color: #fff; background: #b45309; }
+.tab-broadcast { color: #f59e0b; flex: none; }
+.terminal-pane.broadcast { outline: 2px solid #b45309; outline-offset: -2px; }
+.pane-broadcast {
+  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 0 6px; height: 16px;
+  border-radius: 8px; font-size: 10.5px; font-weight: 600; color: #fff; background: #b45309; flex: none;
+}

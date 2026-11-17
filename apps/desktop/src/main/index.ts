@@ -227,6 +227,21 @@ if (!app.requestSingleInstanceLock()) {
     return { name: basename(path), text: await readFile(path, 'utf8') }
   })
   handle('vault:import', (text: string, password: string) => vault.importVault(text, password))
+  // Session logs. The tests name a folder to save into instead of the dialog.
+  const testSaveDir = app.isPackaged ? undefined : process.env.TERMTERM_TEST_SAVE_DIR
+  handle('file:saveText', async (name: string, text: string) => {
+    const safeName = basename(String(name)) || 'session.log'
+    const path = testSaveDir
+      ? join(testSaveDir, safeName)
+      : (await dialog.showSaveDialog(win!, {
+          title: 'Save session log',
+          defaultPath: join(app.getPath('documents'), safeName),
+          filters: [{ name: 'Log', extensions: ['log', 'txt'] }],
+        })).filePath
+    if (!path) return false
+    await writeFile(path, String(text), { mode: 0o600 })
+    return true
+  })
   handle('identity:save', (id: string | null, input) => vault.saveIdentity(id, input))
   handle('group:rename', (from: string, to: string) => vault.renameGroup(from, to))
   // Tests point this at a folder of their own; an installed app always reads ~/.ssh.

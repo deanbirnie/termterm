@@ -1,11 +1,12 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
-import { Braces, ChevronDown, ChevronUp, FolderOpen, History, RotateCw, Search, X } from 'lucide-react'
+import { Braces, ChevronDown, ChevronUp, Circle, FolderOpen, History, RotateCw, ScrollText, Search, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectTarget, SessionStatus, SnippetView } from '@termterm/app'
 import { api, errorMessage } from './api'
 import { LineTracker, suggest, wasEchoed, type Suggestion } from './suggest'
+import { logFileName, SessionRecorder } from './session-log'
 import type { SessionTab } from './Workspace'
 import { defaultFontSize, getTerminalPrefs, onTerminalPrefs, setTerminalPrefs } from './terminal-prefs'
 import { fontStack, themeById } from './terminal-themes'
@@ -56,6 +57,7 @@ export function TerminalTab({
   refocus = 0,
   onOpenFiles,
   startupScript,
+  broadcastTo,
 }: {
   tab: SessionTab
   active: boolean
@@ -70,7 +72,22 @@ export function TerminalTab({
   onOpenFiles?: () => void
   /** The host's startup snippet, typed in each time the session connects. */
   startupScript?: string
+  /** Other sessions that get everything typed here too (broadcast input). */
+  broadcastTo?: string[]
 }) {
+  const broadcastRef = useRef(broadcastTo)
+  broadcastRef.current = broadcastTo
+  /** What the user types or sends: to this session, and to the others while broadcasting. */
+  const send = (data: string) => {
+    api.sshWrite(tab.id, data)
+    for (const id of broadcastRef.current ?? []) api.sshWrite(id, data)
+  }
+  const sendRef = useRef(send)
+  sendRef.current = send
+  const recorder = useRef<SessionRecorder | null>(null)
+  const [recording, setRecording] = useState(false)
+  const [logMenu, setLogMenu] = useState(false)
+  const [logNote, setLogNote] = useState<string | null>(null)
   const startupRef = useRef(startupScript)
   startupRef.current = startupScript
   const shortcutRef = useRef(isShortcut)
@@ -109,6 +126,38 @@ export function TerminalTab({
   const retries = useRef(0)
   const [reconnect, setReconnect] = useState<{ attempt: number; at: number } | null>(null)
   const [now, setNow] = useState(() => Date.now())
+
+  // ---- session logs ----
+  const saveLog = async (text: string, kind: 'output' | 'recording') => {
+    setLogMenu(false)
+    try {
+      const saved = await api.saveTextFile(logFileName(tab.title, kind), text)
+      setLogNote(saved ? `${kind === 'output' ? 'Output' : 'Recording'} saved.` : null)
+    } catch (e) {
+      setLogNote(`Could not save: ${errorMessage(e)}`)
+    }
+    setTimeout(() => setLogNote(null), 4000)
+  }
+  /** Everything in the scrollback (the last 10,000 lines), as plain text. */
+  const saveOutput = () => {
+    const buffer = termRef.current?.buffer.active
+    if (!buffer) return
+    const lines: string[] = []
+    for (let i = 0; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? '')
+    while (lines.length && !lines.at(-1)) lines.pop()
+    void saveLog(lines.join('\n') + '\n', 'output')
+  }
+  const startRecording = () => {
+    recorder.current = new SessionRecorder()
+    setRecording(true)
+    setLogMenu(false)
+  }
+  const stopRecording = () => {
+    const r = recorder.current
+    recorder.current = null
+    setRecording(false)
+    if (r) void saveLog(r.text(), 'recording')
+  }
 
   // ---- search ----
   const [searchOpen, setSearchOpen] = useState(false)
@@ -172,7 +221,7 @@ export function TerminalTab({
     if (!s) return
     const rest = s.text.slice(tracker.current.line.length)
     if (rest) {
-      api.sshWrite(tab.id, rest)
+      sendRef.current(rest)
       tracker.current.input(rest)
     }
     setSuggestions([])
@@ -302,7 +351,7 @@ export function TerminalTab({
           armCtrl(false)
         }
         typed(data)
-        api.sshWrite(tab.id, data)
+        sendRef.current(data)
       }),
       term.onResize(({ cols, rows }) => api.sshResize(tab.id, cols, rows)),
       // The echo moves the cursor after a key: keep the suggestions beside it.
@@ -322,7 +371,11 @@ export function TerminalTab({
         if (hostRef.current?.offsetParent) fit.fit()
         if (!next.suggestions) setSuggestions([])
       }),
-      api.onSshData((id, data) => id === tab.id && term.write(data)),
+      api.onSshData((id, data) => {
+        if (id !== tab.id) return
+        term.write(data)
+        recorder.current?.add(data)
+      }),
       api.onSshStatus((id, s) => id === tab.id && setStatus(s)),
     ]
     const observer = new ResizeObserver(() => {
@@ -447,14 +500,14 @@ export function TerminalTab({
   }
 
   const runSnippet = (script: string) => {
-    api.sshWrite(tab.id, script.replace(/\r?\n/g, '\r').replace(/\r?$/, '\r'))
+    send(script.replace(/\r?\n/g, '\r').replace(/\r?$/, '\r'))
     setSnippetsOpen(false)
     termRef.current?.focus()
   }
 
   const sendKey = (sequence: string) => {
     typed(sequence)
-    api.sshWrite(tab.id, sequence)
+    send(sequence)
     termRef.current?.focus()
   }
 
@@ -558,6 +611,41 @@ export function TerminalTab({
           >
             <Search size={15} />
           </button>
+          {recording && (
+            <button className="recording" onClick={stopRecording} title="Stop recording and save the log">
+              <Circle size={9} fill="currentColor" /> Recording · Stop
+            </button>
+          )}
+          <div className="snippet-menu">
+            <button
+              className="icon-btn"
+              title="Session log"
+              aria-label="Session log"
+              aria-expanded={logMenu}
+              onClick={() => setLogMenu((o) => !o)}
+            >
+              <ScrollText size={15} />
+            </button>
+            {logMenu && (
+              <ul>
+                <li>
+                  <button onClick={saveOutput}>Save output so far…</button>
+                </li>
+                <li>
+                  {recording ? (
+                    <button onClick={stopRecording}>Stop recording and save…</button>
+                  ) : (
+                    <button onClick={startRecording}>Record from now on</button>
+                  )}
+                </li>
+              </ul>
+            )}
+          </div>
+          {logNote && (
+            <span className="log-note" role="status">
+              {logNote}
+            </span>
+          )}
           {status.state === 'connected' && snippets.length > 0 && (
             <div className="snippet-menu">
               <button

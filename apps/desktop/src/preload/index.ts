@@ -46,6 +46,7 @@ const api: TermtermApi = {
   vaultExport: invoke('vault:export'),
   pickExportFile: invoke('vault:pickExport'),
   vaultImport: invoke('vault:import'),
+  saveTextFile: invoke('file:saveText'),
   renameGroup: invoke('group:rename'),
   saveForward: invoke('forward:save'),
   forwardStart: invoke('forward:start'),

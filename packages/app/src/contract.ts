@@ -403,6 +403,8 @@ export interface TermtermApi {
    * a file the user picks. Resolves false if they cancel the file picker.
    */
   vaultExport(password: string): Promise<boolean>
+  /** Saves text to a file the user picks (a session log). Resolves false if they cancel. */
+  saveTextFile(suggestedName: string, text: string): Promise<boolean>
   /** Lets the user pick an export file. Its text, or null if they cancel. */
   pickExportFile(): Promise<{ name: string; text: string } | null>
   /** Adds the items in an export file to this vault. */
