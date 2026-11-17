@@ -543,3 +543,100 @@ describe('deleting an account', () => {
     expect(s.snapshot().hosts).toHaveLength(1)
   })
 })
+
+describe('rollback protection', () => {
+  const rows = () => app.db.prepare('SELECT id, seq, blob FROM items ORDER BY seq').all() as Array<{ id: string; seq: number; blob: string }>
+  /** What a dishonest server does: serve an old copy of an item as if it were new. */
+  const replay = (old: { id: string; blob: string }) => {
+    const { seq } = app.db.prepare('UPDATE users SET seq = seq + 1 RETURNING seq').get() as { seq: number }
+    app.db.prepare('UPDATE items SET blob = ?, seq = ? WHERE id = ?').run(old.blob, seq, old.id)
+  }
+
+  it('refuses an older copy of an item and sends the newer one back', async () => {
+    const a = await firstDevice('dean', 'master-pw')
+    const h = a.put('host', host('v1'))
+    await syncVault(a)
+    const v1 = rows().find((r) => r.id === h.id)!
+    a.put('host', { ...host('v2') }, h.id)
+    await syncVault(a)
+    const b = await newDevice('dean', 'master-pw')
+    await syncVault(b)
+
+    replay(v1)
+    const summary = await syncVault(b)
+    expect(summary.rolledBack).toBe(1)
+    expect(b.get<HostData>(h.id)?.data.label).toBe('v2')
+    // B sent its copy back, so the server is repaired for everyone.
+    const c = await newDevice('dean', 'master-pw')
+    await syncVault(c)
+    expect(c.get<HostData>(h.id)?.data.label).toBe('v2')
+    expect((await syncVault(a)).rolledBack).toBe(0)
+    expect(a.get<HostData>(h.id)?.data.label).toBe('v2')
+  })
+
+  it('does not let a deleted item come back from an old copy, even after a restart', async () => {
+    const a = await firstDevice('dean', 'master-pw')
+    const h = a.put('host', host('gone'))
+    await syncVault(a)
+    const old = rows().find((r) => r.id === h.id)!
+    a.delete(h.id)
+    await syncVault(a)
+    // The device is reopened from its file: what it saw deleted is remembered.
+    const reopened = await Vault.unlock(a.toFile(), 'master-pw')
+    replay(old)
+    expect((await syncVault(reopened)).rolledBack).toBe(1)
+    expect(reopened.get(h.id)).toBeUndefined()
+    const fresh = await newDevice('dean', 'master-pw')
+    await syncVault(fresh)
+    expect(fresh.get(h.id)).toBeUndefined()
+  })
+
+  it('a server restored from an old backup gets the newer state back from a device', async () => {
+    const a = await firstDevice('dean', 'master-pw')
+    const kept = a.put('host', host('kept'))
+    const edited = a.put('host', host('before'))
+    await syncVault(a)
+    // The backup.
+    const backup = rows()
+    const { seq: backupSeq } = app.db.prepare('SELECT seq FROM users').get() as { seq: number }
+    a.put('host', host('after'), edited.id)
+    const added = a.put('host', host('added later'))
+    a.delete(kept.id)
+    await syncVault(a)
+
+    // The restore.
+    app.db.exec('DELETE FROM items')
+    for (const r of backup) app.db.prepare('INSERT INTO items (user_id, id, seq, blob) SELECT id, ?, ?, ? FROM users').run(r.id, r.seq, r.blob)
+    app.db.prepare('UPDATE users SET seq = ?').run(backupSeq)
+
+    const summary = await syncVault(a)
+    expect(summary.serverBehind).toBe(true)
+    expect(a.get<HostData>(edited.id)?.data.label).toBe('after')
+    expect(a.get(kept.id)).toBeUndefined()
+    const fresh = await newDevice('dean', 'master-pw')
+    await syncVault(fresh)
+    expect(fresh.get<HostData>(edited.id)?.data.label).toBe('after')
+    expect(fresh.get<HostData>(added.id)?.data.label).toBe('added later')
+    expect(fresh.get(kept.id)).toBeUndefined()
+    // Settled: the next sync finds nothing to repair.
+    expect(await syncVault(a)).toMatchObject({ rolledBack: 0, serverBehind: false })
+  })
+
+  it('the app shows a warning until it is dismissed', async () => {
+    const d = serviceDevice()
+    const s = d.open()
+    await s.create('master-pw-1')
+    await s.syncRegister({ serverUrl: url, username: 'dean', password: 'master-pw-1' })
+    const id = s.saveHost(null, { label: 'v1', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null })
+    await s.syncNow()
+    const v1 = rows().find((r) => r.id === id)!
+    s.saveHost(id, { label: 'v2', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null })
+    await s.syncNow()
+    replay(v1)
+    await s.syncNow()
+    expect(s.snapshot().sync.rollback).toMatchObject({ items: 1, serverBehind: false })
+    expect(s.snapshot().hosts[0]?.label).toBe('v2')
+    s.syncDismissRollback()
+    expect(s.snapshot().sync.rollback).toBeUndefined()
+  })
+})

@@ -66,6 +66,7 @@ function checkUsername(username: string): string {
  */
 export class VaultService {
   private vault: Vault | null = null
+  private rollback: SyncStatus['rollback'] = undefined
   private syncState: Pick<SyncStatus, 'state' | 'error' | 'needsSignIn'> = {
     state: 'idle',
     needsSignIn: false,
@@ -420,6 +421,7 @@ export class VaultService {
         insecure: sync ? isInsecureUrl(sync.serverUrl) : false,
         pending: sync ? v.dirtyItems().length : 0,
         ...this.syncState,
+        ...(this.rollback ? { rollback: this.rollback } : {}),
       },
     }
   }
@@ -1067,6 +1069,11 @@ export class VaultService {
   }
 
   /** Runs a sync; concurrent callers share the in-flight run and trigger one follow-up. */
+  syncDismissRollback(): void {
+    this.rollback = undefined
+    if (this.vault) this.onSnapshot(this.snapshot())
+  }
+
   syncNow(): Promise<void> {
     if (this.syncRunning) {
       this.syncAgain = true
@@ -1089,7 +1096,14 @@ export class VaultService {
     this.onSnapshot(this.snapshot())
     try {
       await this.finishPasswordChange(vault)
-      await syncVault(vault)
+      const summary = await syncVault(vault)
+      if (summary.rolledBack || summary.serverBehind) {
+        this.rollback = {
+          at: Date.now(),
+          items: summary.rolledBack + (this.rollback?.items ?? 0),
+          serverBehind: summary.serverBehind || !!this.rollback?.serverBehind,
+        }
+      }
       this.syncState = { state: 'idle', needsSignIn: false }
     } catch (e) {
       const needsSignIn = e instanceof SyncError && e.status === 401

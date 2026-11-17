@@ -123,6 +123,12 @@ export interface SyncStatus {
   /** plain http to a non-local server */
   insecure: boolean
   pending: number
+  /**
+   * The server sent older copies than this device had already seen (a
+   * rollback): restored from an old backup, or tampered with. This device kept
+   * its own copies and sent them back. Shown until dismissed.
+   */
+  rollback?: { at: number; items: number; serverBehind: boolean }
 }
 
 export interface VaultSnapshot {
@@ -394,6 +400,8 @@ export interface TermtermApi {
   syncSignIn(input: AccountInput): Promise<void>
   syncReauth(password: string): Promise<void>
   syncNow(): Promise<void>
+  /** Hides the rollback warning (`SyncStatus.rollback`). */
+  syncDismissRollback(): Promise<void>
   syncDisconnect(): Promise<void>
   /**
    * Deletes the account and everything stored for it on the sync server, after
