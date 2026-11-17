@@ -17,6 +17,7 @@ import {
 import { BiometricCancelled, biometricKeyStore } from './device-key'
 import { createSsh, nativeKeyTools, setTerminalFocus } from './ssh'
 import { vaultStorage } from './storage'
+import { openExportFile, saveExportFile } from './export-file'
 import { checkForUpdate, downloadApk, installApk } from './updates'
 
 declare const __APP_VERSION__: string
@@ -201,6 +202,14 @@ export function createApi(): TermtermApi {
     importKey: (input) => vault.importKey(input),
     renameKey: async (id, label) => vault.renameKey(id, label),
     saveSnippet: async (id, input) => vault.saveSnippet(id, input),
+    saveIdentity: async (id, input) => vault.saveIdentity(id, input),
+    vaultExport: async (password) => {
+      const { text } = await vault.exportVault(password)
+      return saveExportFile(`termterm-export-${new Date().toISOString().slice(0, 10)}.termterm`, text)
+    },
+    pickExportFile: () => openExportFile(),
+    vaultImport: (text, password) => vault.importVault(text, password),
+    renameGroup: async (from, to) => vault.renameGroup(from, to),
     // Port forwards are saved (and sync) here, but run only in the desktop app.
     saveForward: async (id, input) => vault.saveForward(id, input),
     forwardStart: async () => {
@@ -239,6 +248,7 @@ export function createApi(): TermtermApi {
     syncReauth: (password) => vault.syncReauth(password),
     syncNow: () => vault.syncNow(),
     syncDisconnect: () => vault.syncDisconnect(),
+    syncDeleteAccount: (password) => vault.syncDeleteAccount(password),
     syncDevices: () => vault.syncDevices(),
     syncRevokeDevice: (id) => vault.syncRevokeDevice(id),
 

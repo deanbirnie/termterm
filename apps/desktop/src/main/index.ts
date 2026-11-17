@@ -1,6 +1,7 @@
 import { homedir, hostname } from 'node:os'
-import { join } from 'node:path'
-import { BrowserWindow, Menu, app, clipboard, ipcMain, powerMonitor, shell } from 'electron'
+import { readFile, stat, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, powerMonitor, shell } from 'electron'
 import type { ConnectTarget, Settings } from '@termterm/app'
 import type { DeviceKeyStore as DeviceKeyStorage } from '@termterm/app'
 import { DeviceKeyStore } from './device-key'
@@ -194,6 +195,39 @@ if (!app.requestSingleInstanceLock()) {
   handle('key:import', (input) => vault.importKey(input))
   handle('key:rename', (id: string, label: string) => vault.renameKey(id, label))
   handle('snippet:save', (id: string | null, input) => vault.saveSnippet(id, input))
+  // Export files. The tests stand in a fixed path for the file pickers, which
+  // they cannot click; installed builds ignore it.
+  const testFile = app.isPackaged ? undefined : process.env.TERMTERM_TEST_FILE
+  const exportFilters = [{ name: 'termterm export', extensions: ['termterm'] }]
+  handle('vault:export', async (password: string) => {
+    const { text } = await vault.exportVault(password)
+    const day = new Date().toISOString().slice(0, 10)
+    const path =
+      testFile ??
+      (await dialog.showSaveDialog(win!, {
+        title: 'Save encrypted export',
+        defaultPath: join(app.getPath('documents'), `termterm-export-${day}.termterm`),
+        filters: exportFilters,
+      })).filePath
+    if (!path) return false
+    await writeFile(path, text, { mode: 0o600 })
+    return true
+  })
+  handle('vault:pickExport', async () => {
+    const path =
+      testFile ??
+      (await dialog.showOpenDialog(win!, {
+        title: 'Import an export file',
+        properties: ['openFile'],
+        filters: [...exportFilters, { name: 'All files', extensions: ['*'] }],
+      })).filePaths[0]
+    if (!path) return null
+    if ((await stat(path)).size > 50 * 1024 * 1024) throw new Error('That file is too large to be a termterm export')
+    return { name: basename(path), text: await readFile(path, 'utf8') }
+  })
+  handle('vault:import', (text: string, password: string) => vault.importVault(text, password))
+  handle('identity:save', (id: string | null, input) => vault.saveIdentity(id, input))
+  handle('group:rename', (from: string, to: string) => vault.renameGroup(from, to))
   // Tests point this at a folder of their own; an installed app always reads ~/.ssh.
   const sshDir = (!app.isPackaged && process.env.TERMTERM_SSH_DIR) || join(homedir(), '.ssh')
   handle('ssh-import:scan', async (paste?: { config?: string; knownHosts?: string }) =>
@@ -242,6 +276,7 @@ if (!app.requestSingleInstanceLock()) {
   handle('sync:reauth', (password: string) => vault.syncReauth(password))
   handle('sync:now', () => vault.syncNow())
   handle('sync:disconnect', () => vault.syncDisconnect())
+  handle('sync:deleteAccount', (password: string) => vault.syncDeleteAccount(password))
   handle('ssh:connect', (id: string, target: ConnectTarget, cols: number, rows: number) => {
     if (target && 'local' in target) {
       const shell = typeof target.local === 'string' ? target.local : settings.get().defaultShell

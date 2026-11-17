@@ -33,6 +33,9 @@ export function SettingsPage({ synced }: { synced: boolean }) {
       <DefaultShell />
       <h2 className="section-title spaced">Master password</h2>
       <ChangePassword synced={synced} />
+      <h2 className="section-title spaced">Export and import</h2>
+      <ExportVault />
+      <ImportVault />
       <h2 className="section-title spaced">About</h2>
       <AboutCard />
       <UpdatePreference />
@@ -303,6 +306,103 @@ function ChangePassword({ synced }: { synced: boolean }) {
           {busy ? 'Changing…' : 'Change master password'}
         </Button>
       </div>
+    </form>
+  )
+}
+
+function ExportVault() {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [done, setDone] = useState(false)
+  const { busy, error, run, setError } = useAction()
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    setDone(false)
+    if (password !== confirm) return setError('The passwords do not match')
+    void run(async () => {
+      if (await api.vaultExport(password)) {
+        setDone(true)
+        setPassword('')
+        setConfirm('')
+      }
+    })
+  }
+  return (
+    <form className="form-card" onSubmit={submit} aria-label="Export">
+      <p className="muted">
+        Saves your hosts, keys, identities, snippets, known hosts and port forwards to a file,
+        encrypted with a password you choose here. Keep it as a backup, or import it into another
+        vault. Command history is not included.
+      </p>
+      <Field label="Password for the file" hint="At least 8 characters. Without it the file cannot be opened.">
+        <PasswordInput autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      </Field>
+      <Field label="Confirm password">
+        <PasswordInput autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      </Field>
+      <ErrorText error={error} />
+      {done && <p className="success" role="status">Export saved.</p>}
+      <div className="panel-actions">
+        <Button type="submit" disabled={busy || !password || !confirm}>
+          {busy ? 'Encrypting…' : 'Export vault…'}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function ImportVault() {
+  const [file, setFile] = useState<{ name: string; text: string } | null>(null)
+  const [password, setPassword] = useState('')
+  const [result, setResult] = useState<string | null>(null)
+  const { busy, error, run, setError } = useAction()
+  const choose = () => {
+    setResult(null)
+    setError(null)
+    void run(async () => {
+      const picked = await api.pickExportFile()
+      if (picked) setFile(picked)
+    })
+  }
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!file) return
+    void run(async () => {
+      const r = await api.vaultImport(file.text, password)
+      const parts = [`${r.added} item${r.added === 1 ? '' : 's'} added`]
+      if (r.existing) parts.push(`${r.existing} already in this vault`)
+      if (r.skipped) parts.push(`${r.skipped} incomplete and left out`)
+      setResult(parts.join(', ') + '.')
+      setFile(null)
+      setPassword('')
+    })
+  }
+  return (
+    <form className="form-card" onSubmit={submit} aria-label="Import">
+      <p className="muted">
+        Adds everything in an export file to this vault. Nothing here is replaced or removed, and
+        anything already in the vault is not added twice.
+      </p>
+      <div className="panel-actions">
+        <Button onClick={choose} disabled={busy}>
+          {file ? 'Choose another file…' : 'Choose export file…'}
+        </Button>
+        {file && <span className="muted">{file.name}</span>}
+      </div>
+      {file && (
+        <>
+          <Field label="Password for the file">
+            <PasswordInput autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+          <div className="panel-actions">
+            <Button variant="primary" type="submit" disabled={busy || !password}>
+              {busy ? 'Importing…' : 'Import'}
+            </Button>
+          </div>
+        </>
+      )}
+      <ErrorText error={error} />
+      {result && <p className="success" role="status">{result}</p>}
     </form>
   )
 }

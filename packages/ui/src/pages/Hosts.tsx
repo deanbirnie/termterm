@@ -1,4 +1,4 @@
-import { FileInput, FolderOpen, KeyRound, Plus, Server, X } from 'lucide-react'
+import { FileInput, FolderOpen, KeyRound, Pencil, Plus, Server, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
@@ -47,9 +47,20 @@ export function HostsPage({
     const q = query.trim().toLowerCase()
     if (!q) return snapshot.hosts
     return snapshot.hosts.filter((h) =>
-      [h.label, h.address, h.username, ...h.tags].some((s) => s.toLowerCase().includes(q)),
+      [h.label, h.address, h.username, h.group ?? '', ...h.tags].some((s) => s.toLowerCase().includes(q)),
     )
   }, [snapshot.hosts, query])
+
+  // Ungrouped hosts first, then each group in name order.
+  const sections = useMemo(() => {
+    const byGroup = new Map<string, HostView[]>()
+    for (const h of hosts) {
+      const g = h.group ?? ''
+      byGroup.set(g, [...(byGroup.get(g) ?? []), h])
+    }
+    return [...byGroup.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
+  }, [hosts])
+  const identityOf = (h: HostView) => snapshot.identities.find((i) => i.id === h.identityId)
 
   const open = (h: HostView) => onConnect({ hostId: h.id }, h.label)
   const browse = (h: HostView) => onConnect({ hostId: h.id }, h.label, 'files')
@@ -113,32 +124,41 @@ export function HostsPage({
         ) : hosts.length === 0 ? (
           <p className="muted pad">No hosts match “{query}”.</p>
         ) : (
-          <>
-            <h2 className="section-title">Hosts</h2>
-            <ul className="cards">
-              {hosts.map((h) => (
-                <li key={h.id}>
-                  <button
-                    className={`card ${editing?.id === h.id ? 'selected' : ''}`}
-                    onClick={() => setEditing({ id: h.id })}
-                    onDoubleClick={canConnect ? () => open(h) : undefined}
-                    title={canConnect ? 'Double-click to connect' : undefined}
-                  >
-                    <span className="card-icon">
-                      <Server size={18} />
-                    </span>
-                    <span className="card-text">
-                      <strong>{h.label}</strong>
-                      <small>
-                        {['ssh', h.username, ...h.tags].filter(Boolean).join(', ')}
-                      </small>
-                    </span>
-                    {h.keyId && <KeyRound size={14} className="card-badge" aria-label="Uses a key" />}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
+          sections.map(([group, list]) => (
+            <section key={group || '$none'} aria-label={group || 'Hosts'}>
+              {group ? <GroupTitle name={group} /> : <h2 className="section-title">Hosts</h2>}
+              <ul className="cards">
+                {list.map((h) => {
+                  const identity = identityOf(h)
+                  return (
+                    <li key={h.id}>
+                      <button
+                        className={`card ${editing?.id === h.id ? 'selected' : ''}`}
+                        onClick={() => setEditing({ id: h.id })}
+                        onDoubleClick={canConnect ? () => open(h) : undefined}
+                        title={canConnect ? 'Double-click to connect' : undefined}
+                      >
+                        <span className="card-icon">
+                          <Server size={18} />
+                        </span>
+                        <span className="card-text">
+                          <strong>{h.label}</strong>
+                          <small>
+                            {['ssh', identity ? identity.label : h.username, ...h.tags].filter(Boolean).join(', ')}
+                          </small>
+                        </span>
+                        {identity ? (
+                          <UserRound size={14} className="card-badge" aria-label={`Logs in as ${identity.label}`} />
+                        ) : (
+                          h.keyId && <KeyRound size={14} className="card-badge" aria-label="Uses a key" />
+                        )}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          ))
         )}
       </div>
 
@@ -154,6 +174,44 @@ export function HostsPage({
         />
       )}
     </div>
+  )
+}
+
+/** A group's heading, which renames the group (on every host in it) in place. */
+function GroupTitle({ name }: { name: string }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(name)
+  const { busy, error, run } = useAction()
+  if (!editing) {
+    return (
+      <h2 className="section-title group-heading">
+        {name}
+        <button className="icon-btn" aria-label={`Rename group ${name}`} onClick={() => { setValue(name); setEditing(true) }}>
+          <Pencil size={13} />
+        </button>
+      </h2>
+    )
+  }
+  return (
+    <form
+      className="group-rename"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void run(() => api.renameGroup(name, value)).then((ok) => ok && setEditing(false))
+      }}
+    >
+      <input aria-label="Group name" autoFocus value={value} onChange={(e) => setValue(e.target.value)} />
+      <Button type="submit" disabled={busy}>
+        Rename
+      </Button>
+      <Button variant="ghost" disabled={busy} onClick={() => void run(() => api.renameGroup(name, '')).then((ok) => ok && setEditing(false))}>
+        Ungroup
+      </Button>
+      <Button variant="ghost" onClick={() => setEditing(false)}>
+        Cancel
+      </Button>
+      <ErrorText error={error} />
+    </form>
   )
 }
 
@@ -181,6 +239,10 @@ function HostPanel({
   const [tags, setTags] = useState(host?.tags.join(', ') ?? '')
   const [keyId, setKeyId] = useState(host?.keyId ?? '')
   const [jumpHostId, setJumpHostId] = useState(host?.jumpHostId ?? '')
+  const [identityId, setIdentityId] = useState(host?.identityId ?? '')
+  const [group, setGroup] = useState(host?.group ?? '')
+  const identity = snapshot.identities.find((i) => i.id === identityId)
+  const groups = [...new Set(snapshot.hosts.map((h) => h.group).filter((g): g is string => !!g))].sort()
   const [password, setPassword] = useState('')
   const [clearPassword, setClearPassword] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -193,6 +255,9 @@ function HostPanel({
   useEffect(() => {
     if (jumpHostId && !snapshot.hosts.some((h) => h.id === jumpHostId)) setJumpHostId('')
   }, [snapshot.hosts, jumpHostId])
+  useEffect(() => {
+    if (identityId && !snapshot.identities.some((i) => i.id === identityId)) setIdentityId('')
+  }, [snapshot.identities, identityId])
 
   // Hosts this one can go through: not itself, nor any that already go through it.
   const jumpChoices = snapshot.hosts.filter((h) => {
@@ -212,6 +277,8 @@ function HostPanel({
     tags: tags.split(','),
     keyId: keyId || null,
     jumpHostId: jumpHostId || null,
+    identityId: identityId || null,
+    group,
     password: password ? password : clearPassword ? null : undefined,
   })
   const dirty =
@@ -223,6 +290,8 @@ function HostPanel({
     tags !== host.tags.join(', ') ||
     keyId !== (host.keyId ?? '') ||
     jumpHostId !== (host.jumpHostId ?? '') ||
+    identityId !== (host.identityId ?? '') ||
+    group.trim() !== (host.group ?? '') ||
     !!password ||
     clearPassword
 
@@ -264,29 +333,60 @@ function HostPanel({
         <Field label="Label">
           <input placeholder={address || 'My server'} value={label} onChange={(e) => setLabel(e.target.value)} />
         </Field>
+        <Field label="Group" hint="Hosts with the same group are listed together.">
+          <input list="host-groups" placeholder="None" value={group} onChange={(e) => setGroup(e.target.value)} />
+        </Field>
+        <datalist id="host-groups">
+          {groups.map((g) => (
+            <option key={g} value={g} />
+          ))}
+        </datalist>
         <Field label="Tags" hint="Comma separated">
           <input placeholder="vps, production" value={tags} onChange={(e) => setTags(e.target.value)} />
         </Field>
 
         <h3 className="group-title">SSH</h3>
-        <div className="row">
-          <Field label="Username">
-            <input placeholder="root" value={username} onChange={(e) => setUsername(e.target.value)} />
-          </Field>
-          <Field label="Port">
-            <input inputMode="numeric" className="narrow" value={port} onChange={(e) => setPort(e.target.value)} />
-          </Field>
-        </div>
-        <Field label="Key">
-          <select value={keyId} onChange={(e) => setKeyId(e.target.value)}>
-            <option value="">No key</option>
-            {snapshot.keys.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
+        <Field
+          label="Login"
+          hint={
+            identity
+              ? `Logs in as ${identity.username}${identity.keyId ? ' with a key' : ''}${identity.hasPassword ? ' and a saved password' : ''}. Edit identities under Keychain.`
+              : snapshot.identities.length
+                ? 'Use a saved identity, or this host’s own username, key and password.'
+                : undefined
+          }
+        >
+          <select value={identityId} onChange={(e) => setIdentityId(e.target.value)}>
+            <option value="">This host’s own</option>
+            {snapshot.identities.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.label}
               </option>
             ))}
           </select>
         </Field>
+        <div className="row">
+          {!identity && (
+            <Field label="Username">
+              <input placeholder="root" value={username} onChange={(e) => setUsername(e.target.value)} />
+            </Field>
+          )}
+          <Field label="Port">
+            <input inputMode="numeric" className="narrow" value={port} onChange={(e) => setPort(e.target.value)} />
+          </Field>
+        </div>
+        {!identity && (
+          <Field label="Key">
+            <select value={keyId} onChange={(e) => setKeyId(e.target.value)}>
+              <option value="">No key</option>
+              {snapshot.keys.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Field
           label="Jump host"
           hint="Connect through another saved host first, for a server that is only reachable from there (ssh's ProxyJump)."
@@ -300,30 +400,32 @@ function HostPanel({
             ))}
           </select>
         </Field>
-        <Field
-          label="Password"
-          hint={
-            host?.hasPassword && !clearPassword ? (
-              <>
-                A password is saved.{' '}
-                <button type="button" className="link" onClick={() => { setClearPassword(true); setPassword('') }}>
-                  Remove it
-                </button>
-              </>
-            ) : clearPassword ? (
-              'The saved password will be removed when you save.'
-            ) : (
-              'Optional. Leave empty to be asked when connecting.'
-            )
-          }
-        >
-          <PasswordInput
-            autoComplete="new-password"
-            placeholder={host?.hasPassword && !clearPassword ? '•••••••• (unchanged)' : ''}
-            value={password}
-            onChange={(e) => { setPassword(e.target.value); setClearPassword(false) }}
-          />
-        </Field>
+        {!identity && (
+          <Field
+            label="Password"
+            hint={
+              host?.hasPassword && !clearPassword ? (
+                <>
+                  A password is saved.{' '}
+                  <button type="button" className="link" onClick={() => { setClearPassword(true); setPassword('') }}>
+                    Remove it
+                  </button>
+                </>
+              ) : clearPassword ? (
+                'The saved password will be removed when you save.'
+              ) : (
+                'Optional. Leave empty to be asked when connecting.'
+              )
+            }
+          >
+            <PasswordInput
+              autoComplete="new-password"
+              placeholder={host?.hasPassword && !clearPassword ? '•••••••• (unchanged)' : ''}
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setClearPassword(false) }}
+            />
+          </Field>
+        )}
         <ErrorText error={error} />
         <div className="panel-actions">
           <Button type="submit" disabled={busy || !dirty || !address.trim()}>

@@ -141,6 +141,11 @@ export class SyncApi {
     })
   }
 
+  /** Deletes the account, its stored items and every session. Needs the current auth key. */
+  deleteAccount(authKey: Uint8Array): Promise<unknown> {
+    return this.call('POST', '/account/delete', { authKey: toBase64(authKey) })
+  }
+
   async sessions(): Promise<RemoteSession[]> {
     return (await this.call<{ sessions: RemoteSession[] }>('GET', '/sessions')).sessions
   }

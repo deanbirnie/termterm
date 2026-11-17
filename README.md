@@ -8,6 +8,15 @@ host yourself.
   keys, encrypted on disk with your master password. **Import** on the Hosts
   page brings in your existing `~/.ssh/config` hosts, the keys they use and
   the host keys in `known_hosts` (on a phone, from pasted text).
+  - **Groups**: give hosts a group name in their details and they are listed
+    together; rename or ungroup a whole group with the pencil by its name.
+  - **Identities** (under Keychain): a username with a key and/or password
+    that several hosts share. Choose one under **Login** in a host's details;
+    change the identity and every host using it follows.
+  - **Export and import** (Settings): saves the whole vault (but not command
+    history) to a file encrypted with a password you choose, as a backup or to
+    bring into another vault. Importing adds what is not already there and
+    replaces nothing.
 - **Sync** — every device holds a full copy; changes merge through a sync
   server that only ever stores ciphertext. It syncs when anything changes,
   every minute, and as soon as you come back to the app.
@@ -321,7 +330,11 @@ finds the address can create accounts on it.
 
 ### Removing an account
 
-There is no account deletion in the app yet. On the server, list the accounts:
+Users can delete their own account in the app: **Sync → Delete account**, with
+the master password. It removes the account's stored items and signs out
+every device; each device keeps its copy of the vault.
+
+As the server's operator, you can also do it by hand. List the accounts:
 
 ```bash
 docker exec termterm-sync node --disable-warning=ExperimentalWarning -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('/data/termterm.db');console.table(db.prepare('SELECT u.username, (SELECT COUNT(*) FROM items i WHERE i.user_id = u.id) AS items, (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id) AS devices FROM users u ORDER BY u.id').all())"

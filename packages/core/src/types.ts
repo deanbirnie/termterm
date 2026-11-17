@@ -60,6 +60,22 @@ export interface HostData {
   keyId?: string
   /** id of another `host` item to connect through (ssh's ProxyJump) */
   jumpHostId?: string
+  /**
+   * id of an `identity` item: when set, its username, password and key are
+   * used instead of this host's own.
+   */
+  identityId?: string
+  /** The group the host is listed under. Hosts with the same group name form a group. */
+  group?: string
+}
+
+/** A login (username with a password and/or key) that several hosts can share. */
+export interface IdentityData {
+  label: string
+  username: string
+  password?: string
+  /** id of a `key` item */
+  keyId?: string
 }
 
 export interface KeyData {
@@ -111,4 +127,5 @@ export interface ItemTypes {
   snippet: SnippetData
   knownHost: KnownHostData
   forward: ForwardData
+  identity: IdentityData
 }

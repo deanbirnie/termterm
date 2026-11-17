@@ -16,6 +16,25 @@ export interface HostView {
   keyId?: string
   /** Connected through this host first (ProxyJump). */
   jumpHostId?: string
+  /** Logs in with this identity's username, password and key instead of its own. */
+  identityId?: string
+  group?: string
+}
+
+export interface IdentityView {
+  id: string
+  label: string
+  username: string
+  hasPassword: boolean
+  keyId?: string
+}
+
+export interface IdentityInput {
+  label: string
+  username: string
+  keyId: string | null
+  /** undefined = leave as is, null = remove, string = set */
+  password?: string | null
 }
 
 export interface ForwardView {
@@ -109,6 +128,7 @@ export interface SyncStatus {
 export interface VaultSnapshot {
   hosts: HostView[]
   keys: KeyView[]
+  identities: IdentityView[]
   snippets: SnippetView[]
   knownHosts: KnownHostView[]
   forwards: ForwardView[]
@@ -225,6 +245,19 @@ export interface HostInput {
   password?: string | null
   /** undefined = leave as is, null = connect directly, string = the host to go through */
   jumpHostId?: string | null
+  /** undefined = leave as is, null = its own login, string = the identity to log in with */
+  identityId?: string | null
+  /** undefined = leave as is; empty = no group */
+  group?: string
+}
+
+/** What importing an export file did. */
+export interface ImportResult {
+  added: number
+  /** Already in this vault, so not added again. */
+  existing: number
+  /** Incomplete or unknown entries that were left out. */
+  skipped: number
 }
 
 export interface KeyImportInput {
@@ -301,6 +334,9 @@ export interface TermtermApi {
   importKey(input: KeyImportInput): Promise<string>
   renameKey(id: string, label: string): Promise<void>
   saveSnippet(id: string | null, input: { label: string; script: string }): Promise<string>
+  saveIdentity(id: string | null, input: IdentityInput): Promise<string>
+  /** Renames a group of hosts, or (with an empty name) ungroups them. */
+  renameGroup(from: string, to: string): Promise<void>
   saveForward(id: string | null, input: ForwardInput): Promise<string>
   /** Runs a saved port forward on this device until stopped, the app quits or the vault locks. */
   forwardStart(id: string): Promise<void>
@@ -340,6 +376,16 @@ export interface TermtermApi {
   clearCommandHistory(): Promise<void>
   deleteItem(id: string): Promise<void>
 
+  /**
+   * Saves an encrypted copy of the vault (everything but command history) to
+   * a file the user picks. Resolves false if they cancel the file picker.
+   */
+  vaultExport(password: string): Promise<boolean>
+  /** Lets the user pick an export file. Its text, or null if they cancel. */
+  pickExportFile(): Promise<{ name: string; text: string } | null>
+  /** Adds the items in an export file to this vault. */
+  vaultImport(text: string, password: string): Promise<ImportResult>
+
   syncRegister(input: AccountInput): Promise<void>
   /**
    * Connects the open vault to an account that already exists, for example
@@ -349,6 +395,11 @@ export interface TermtermApi {
   syncReauth(password: string): Promise<void>
   syncNow(): Promise<void>
   syncDisconnect(): Promise<void>
+  /**
+   * Deletes the account and everything stored for it on the sync server, after
+   * checking the master password. This device keeps its vault, unsynced.
+   */
+  syncDeleteAccount(password: string): Promise<void>
   syncDevices(): Promise<DeviceView[]>
   /** Signs another device out of sync. Its local vault copy is not erased. */
   syncRevokeDevice(id: string): Promise<void>

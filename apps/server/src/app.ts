@@ -100,6 +100,8 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     ),
     labelSession: db.prepare('UPDATE sessions SET label = ? WHERE token_hash = ?'),
     deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?'),
+    // Sessions and items go with it (ON DELETE CASCADE).
+    deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     updateCredentials: db.prepare(
       'UPDATE users SET kdf = ?, auth_salt = ?, auth_hash = ?, wrapped_vault_key = ? WHERE id = ?',
     ),
@@ -303,6 +305,22 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
       const newHash = await scryptAsync(newAuthKey, salt)
       q.updateCredentials.run(kdf, salt, newHash, wrappedVaultKey, user.id)
       q.deleteOtherSessions.run(user.id, tokenHash)
+      return { ok: true }
+    },
+
+    // Deletes the account and everything stored for it. Like a password
+    // change, it needs the master password (as the auth key), not only a session.
+    'POST /v1/account/delete': async (req) => {
+      const { user } = authenticate(req)
+      const authKey = authKeyOf((await readJson(req)).authKey)
+      const keys = throttleKeys(clientIp(req), user.username)
+      checkThrottle(keys)
+      const hash = await scryptAsync(authKey, Buffer.from(user.auth_salt))
+      if (!timingSafeEqual(hash, Buffer.from(user.auth_hash))) {
+        recordFailure(keys)
+        throw new HttpError(401, 'Incorrect master password')
+      }
+      q.deleteUser.run(user.id)
       return { ok: true }
     },
 

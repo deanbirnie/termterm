@@ -62,7 +62,7 @@ Decisions worth knowing before changing things:
 
 Automated, on every relevant change (see `.github/workflows/build.yml`):
 
-- `npm test`: 81 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
+- `npm test`: 89 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
 - `npm run e2e`: two desktop app instances against a throwaway SSH server and
   sync server (vault, keys, hosts, sync, password and key logins, password
   change, remote sign-out, turning sync off and signing back in, lock with
@@ -96,14 +96,18 @@ Not yet confirmed anywhere:
 
 Known gaps inside phase 1 scope:
 
+- A host edited and saved in a version before 0.9.0 loses its identity and
+  group (older versions do not know those fields). Update every device.
+
 - `ssh2` occasionally generates an Ed25519 key its own parser rejects;
   `apps/desktop/src/main/keys.ts` retries until the key parses.
 
 ## Work queue
 
 Agreed with the owner on 2026-11-17: four batches, done in this order, **one
-pull request per batch**. Whether a batch's PR becomes a release is the
-owner's call (see "Releasing" in the README).
+pull request per batch**. All four are done; new work gets queued here.
+Whether a batch's PR becomes a release is the owner's call (see "Releasing" in
+the README).
 
 ### Batch 1 — Everyday terminal (done)
 
@@ -136,11 +140,13 @@ owner's call (see "Releasing" in the README).
       fixed base packages (F02); GitHub Actions upgrades and pinning (F04);
       stricter release version checks (F06); automatic dependency-update PRs (F09)
 
-### Batch 4 — Vault extras (next)
+### Batch 4 — Vault extras (done)
 
-- [ ] Encrypted export and import of the whole vault
-- [ ] Identities (one login shared by several hosts) and host groups
-- [ ] Account deletion from the app
+- [x] Encrypted export and import of the whole vault (Settings): Argon2id and
+      XChaCha20-Poly1305 under a password chosen for the file; import adds
+      what is missing, keeps references between items, and replaces nothing
+- [x] Identities (one login shared by several hosts) and host groups
+- [x] Account deletion from the app (Sync → Delete account, with the master password)
 
 ## Phase 2 — Vault hardening and account management
 

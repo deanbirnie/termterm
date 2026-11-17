@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(DeviceKeyPlugin.class);
     registerPlugin(TerminalInputPlugin.class);
     registerPlugin(AppUpdatePlugin.class);
+    registerPlugin(ExportFilePlugin.class);
     super.onCreate(savedInstanceState);
   }
 }

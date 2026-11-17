@@ -315,3 +315,134 @@ describe('jump hosts and port forwards', () => {
     expect(service.host(inner)?.data.jumpHostId).toBeUndefined()
   })
 })
+
+describe('identities and groups', () => {
+  const hostInput = { label: '', port: 22, username: 'own', tags: [], keyId: null }
+
+  it('a host logs in with its identity, and keeps the login when the identity is deleted', async () => {
+    const d = device('none')
+    const s = d.open()
+    await s.create('master-password')
+    const identity = s.saveIdentity(null, { label: 'Ops', username: 'deploy', keyId: null, password: 'shared-pw' })
+    const a = s.saveHost(null, { ...hostInput, address: 'a.test', identityId: identity, password: 'own-pw' })
+    const b = s.saveHost(null, { ...hostInput, address: 'b.test' })
+
+    expect(s.host(a)?.data).toMatchObject({ username: 'deploy', password: 'shared-pw' })
+    expect(s.host(b)?.data).toMatchObject({ username: 'own' })
+    expect(s.snapshot().hosts.find((h) => h.id === a)?.identityId).toBe(identity)
+    expect(s.snapshot().identities).toMatchObject([{ id: identity, label: 'Ops', username: 'deploy', hasPassword: true }])
+
+    // A change to the identity reaches every host that uses it.
+    s.saveIdentity(identity, { label: 'Ops', username: 'deploy2', keyId: null })
+    expect(s.host(a)?.data).toMatchObject({ username: 'deploy2', password: 'shared-pw' })
+
+    s.deleteItem(identity)
+    expect(s.host(a)?.data).toMatchObject({ username: 'deploy2', password: 'shared-pw' })
+    expect(s.host(a)?.data.identityId).toBeUndefined()
+    expect(() => s.saveHost(null, { ...hostInput, address: 'c.test', identityId: identity })).toThrow('Identity not found')
+  })
+
+  it('deleting a key removes it from identities too', async () => {
+    const d = device('none')
+    const s = d.open()
+    await s.create('master-password')
+    const key = (s as unknown as { v: { put(t: string, d: unknown): { id: string } } }).v.put('key', {
+      label: 'k', privateKey: 'x', publicKey: 'ssh-ed25519 AAAA', keyType: 'ssh-ed25519',
+    }).id
+    const identity = s.saveIdentity(null, { label: '', username: 'u', keyId: key })
+    expect(s.snapshot().identities[0]).toMatchObject({ label: 'u', keyId: key })
+    s.deleteItem(key)
+    expect(s.snapshot().identities[0]?.keyId).toBeUndefined()
+    expect(s.snapshot().identities[0]?.id).toBe(identity)
+  })
+
+  it('groups hosts by name, and renames or removes a group across its hosts', async () => {
+    const d = device('none')
+    const s = d.open()
+    await s.create('master-password')
+    const a = s.saveHost(null, { ...hostInput, address: 'a.test', group: ' Production ' })
+    const b = s.saveHost(null, { ...hostInput, address: 'b.test', group: 'Production' })
+    const c = s.saveHost(null, { ...hostInput, address: 'c.test' })
+    // Editing without mentioning the group keeps it.
+    s.saveHost(a, { ...hostInput, address: 'a.test', label: 'renamed' })
+    const groupOf = (id: string) => s.snapshot().hosts.find((h) => h.id === id)?.group
+    expect([groupOf(a), groupOf(b), groupOf(c)]).toEqual(['Production', 'Production', undefined])
+    s.renameGroup('Production', 'Prod')
+    expect([groupOf(a), groupOf(b)]).toEqual(['Prod', 'Prod'])
+    s.renameGroup('Prod', '')
+    expect([groupOf(a), groupOf(b)]).toEqual([undefined, undefined])
+  })
+})
+
+describe('export and import', () => {
+  const vaultWithStuff = async () => {
+    const d = device('none')
+    const s = d.open()
+    await s.create('master-password')
+    const v = (s as unknown as { v: { put(t: string, d: unknown): { id: string } } }).v
+    const key = v.put('key', { label: 'k', privateKey: 'PRIVATE', publicKey: 'ssh-ed25519 AAAAkey', keyType: 'ssh-ed25519' }).id
+    const identity = s.saveIdentity(null, { label: 'Ops', username: 'deploy', keyId: key, password: 'id-pw' })
+    const bastion = s.saveHost(null, { label: 'bastion', address: 'bastion.test', port: 22, username: 'b', tags: [], keyId: key })
+    const inner = s.saveHost(null, {
+      label: 'inner', address: '10.0.0.5', port: 2222, username: 'i', tags: ['x'], keyId: null,
+      jumpHostId: bastion, identityId: identity, group: 'Prod', password: 'pw',
+    })
+    s.saveForward(null, { label: 'db', hostId: inner, kind: 'local', bindHost: '127.0.0.1', bindPort: 5432, destHost: 'db', destPort: 5432 })
+    s.saveSnippet(null, { label: 'up', script: 'uptime' })
+    s.trustHostKey({ host: 'bastion.test', port: 22, keyType: 'ssh-ed25519', publicKey: 'AAAAhost', fingerprint: 'SHA256:x' }, false)
+    s.recordCommands('host:x', ['ls'])
+    return s
+  }
+
+  it('round-trips everything but command history, with references intact', async () => {
+    const a = await vaultWithStuff()
+    const { text, count } = await a.exportVault('export-password')
+    expect(count).toBe(7)
+    expect(text).not.toContain('PRIVATE')
+    expect(text).not.toContain('bastion')
+
+    const d = device('none')
+    const b = d.open()
+    await b.create('other-master')
+    await expect(b.importVault(text, 'wrong-password')).rejects.toThrow('Incorrect password for this export file')
+    await expect(b.importVault('{"hello":1}', 'export-password')).rejects.toThrow('not a termterm export')
+    expect(await b.importVault(text, 'export-password')).toEqual({ added: 7, existing: 0, skipped: 0 })
+
+    const snap = b.snapshot()
+    const inner = snap.hosts.find((h) => h.label === 'inner')!
+    const bastion = snap.hosts.find((h) => h.label === 'bastion')!
+    expect(inner).toMatchObject({ jumpHostId: bastion.id, identityId: snap.identities[0]!.id, group: 'Prod', tags: ['x'] })
+    expect(bastion.keyId).toBe(snap.keys[0]!.id)
+    expect(snap.identities[0]).toMatchObject({ keyId: snap.keys[0]!.id, hasPassword: true })
+    expect(snap.forwards[0]).toMatchObject({ hostId: inner.id, bindPort: 5432 })
+    expect(b.host(inner.id)?.data).toMatchObject({ username: 'deploy', password: 'id-pw' })
+    expect(b.key(snap.keys[0]!.id)?.data.privateKey).toBe('PRIVATE')
+    expect(snap.knownHosts).toHaveLength(1)
+    expect(snap.snippets).toHaveLength(1)
+    expect(b.commandHistory('host:x')).toEqual([])
+
+    // Importing the same file again adds nothing.
+    expect(await b.importVault(text, 'export-password')).toEqual({ added: 0, existing: 7, skipped: 0 })
+    expect(b.snapshot().hosts).toHaveLength(2)
+  })
+
+  it('needs an export password of at least 8 characters', async () => {
+    const a = await vaultWithStuff()
+    await expect(a.exportVault('short')).rejects.toThrow('at least 8')
+  })
+})
+
+describe('importing hosts that share an address', () => {
+  it('keeps them apart when their labels differ', async () => {
+    const d = device('none')
+    const a = d.open()
+    await a.create('master-password')
+    for (const label of ['one', 'two']) a.saveHost(null, { label, address: 'same.test', port: 22, username: '', tags: [], keyId: null })
+    const { text } = await a.exportVault('export-password')
+    const b = device('none').open()
+    await b.create('master-password')
+    b.saveHost(null, { label: 'one', address: 'same.test', port: 22, username: '', tags: [], keyId: null })
+    expect(await b.importVault(text, 'export-password')).toEqual({ added: 1, existing: 1, skipped: 0 })
+    expect(b.snapshot().hosts.map((h) => h.label)).toEqual(['one', 'two'])
+  })
+})

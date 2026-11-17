@@ -926,6 +926,119 @@ try {
   await a.page.getByRole('button', { name: 'Unlock' }).click()
   await a.page.locator('.card', { hasText: 'Renamed on B' }).waitFor()
 
+  // ---- identities, groups, export and import, deleting the account ------------------------
+  {
+    const d = await launch('device-d', { TERMTERM_TEST_FILE: join(tmp, 'backup.termterm') })
+    const navD = (name) => d.page.getByRole('navigation').getByRole('button', { name, exact: true })
+    await d.page.getByLabel('Master password', { exact: true }).fill(MASTER)
+    await d.page.getByLabel('Confirm master password').fill(MASTER)
+    await d.page.getByRole('button', { name: 'Create vault' }).click()
+    await d.page.getByText('No hosts yet').waitFor()
+
+    await navD('Keychain').click()
+    await d.page.getByRole('button', { name: 'New identity' }).click()
+    await d.page.getByLabel('Username').fill('tester')
+    await d.page.getByLabel('Label').fill('Test login')
+    await d.page.getByLabel('Password', { exact: true }).fill(SSH_PASSWORD)
+    await d.page.getByRole('button', { name: 'Save identity' }).click()
+    await d.page.getByText('A password is saved.').waitFor()
+
+    await navD('Hosts').click()
+    for (const [label, group] of [['Grouped box', 'Lab'], ['Second box', 'Lab'], ['Loose box', '']]) {
+      await d.page.getByRole('button', { name: 'New host' }).click()
+      await d.page.getByLabel('Address').fill('127.0.0.1')
+      await d.page.getByLabel('Label').fill(label)
+      await d.page.getByLabel('Port').fill(String(sshPort))
+      await d.page.getByLabel('Group', { exact: true }).fill(group)
+      await d.page.getByLabel('Login', { exact: true }).selectOption({ label: 'Test login' })
+      assert.equal(await d.page.getByLabel('Username').count(), 0)
+      await d.page.getByRole('button', { name: 'Save host' }).click()
+      await d.page.getByRole('button', { name: 'Save changes' }).waitFor()
+    }
+    const lab = d.page.getByRole('region', { name: 'Lab' })
+    await assertCount(lab.locator('.card'), 2)
+    await assertCount(d.page.getByRole('region', { name: 'Hosts' }).locator('.card'), 1)
+    await shot(d.page, '20-groups-identities')
+
+    const loginsBefore = logins.length
+    await lab.locator('.card', { hasText: 'Grouped box' }).dblclick()
+    await d.page.getByRole('button', { name: 'Trust and connect' }).click()
+    await d.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
+    assert.deepEqual(logins.splice(loginsBefore), ['password'])
+    await d.page.getByRole('button', { name: 'Vault', exact: true }).click()
+
+    await d.page.getByRole('button', { name: 'Rename group Lab' }).click()
+    await d.page.getByLabel('Group name').fill('Workshop')
+    await d.page.getByRole('button', { name: 'Rename', exact: true }).click()
+    await assertCount(d.page.getByRole('region', { name: 'Workshop' }).locator('.card'), 2)
+    step('an identity logged two grouped hosts in with its password; the group renamed across its hosts')
+
+    await navD('Settings').click()
+    const exportForm = d.page.getByRole('form', { name: 'Export' })
+    await exportForm.getByLabel('Password for the file').fill('backup-password')
+    await exportForm.getByLabel('Confirm password').fill('backup-password')
+    await exportForm.getByRole('button', { name: 'Export vault…' }).click()
+    await exportForm.getByText('Export saved.').waitFor()
+    const exported = readFileSync(join(tmp, 'backup.termterm'), 'utf8')
+    for (const secret of [SSH_PASSWORD, 'Grouped box', 'tester', 'Workshop']) {
+      assert.ok(!exported.includes(secret), `export file leaks "${secret}"`)
+    }
+
+    // ---- deleting the sync account ----
+    await navD('Sync').click()
+    await d.page.getByLabel('Sync server').fill(syncUrl)
+    await d.page.getByLabel('Username').fill('dean-d')
+    await d.page.getByLabel('Master password').fill(MASTER)
+    await d.page.getByRole('button', { name: 'Create account and sync' }).click()
+    await d.page.getByText('Up to date').waitFor()
+    await d.page.getByRole('button', { name: 'Delete sync account…' }).click()
+    const del = d.page.getByRole('button', { name: 'Delete account' })
+    await d.page.getByLabel('Master password').fill(MASTER)
+    assert.ok(await del.isDisabled())
+    await d.page.getByLabel(/Type the account name/).fill('dean-d')
+    await d.page.getByLabel('Master password').fill('not it')
+    await del.click()
+    await d.page.getByText('Incorrect master password').waitFor()
+    await d.page.getByLabel('Master password').fill(MASTER)
+    await del.click()
+    await d.page.getByRole('button', { name: 'Create account and sync' }).waitFor()
+    const res = await fetch(`${syncUrl}/v1/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'dean-d', authKey: Buffer.alloc(32).toString('base64') }),
+    })
+    assert.equal(res.status, 401)
+    await navD('Hosts').click()
+    await assertCount(d.page.locator('.card'), 3)
+    step('export file is encrypted; the sync account was deleted (password and name checked), the vault stays here')
+    await d.app.close()
+
+    const e = await launch('device-e', { TERMTERM_TEST_FILE: join(tmp, 'backup.termterm') })
+    await e.page.getByLabel('Master password', { exact: true }).fill(NEW_MASTER)
+    await e.page.getByLabel('Confirm master password').fill(NEW_MASTER)
+    await e.page.getByRole('button', { name: 'Create vault' }).click()
+    await e.page.getByText('No hosts yet').waitFor()
+    await e.page.getByRole('navigation').getByRole('button', { name: 'Settings', exact: true }).click()
+    const importForm = e.page.getByRole('form', { name: 'Import' })
+    await importForm.getByRole('button', { name: 'Choose export file…' }).click()
+    await importForm.getByText('backup.termterm').waitFor()
+    await importForm.getByLabel('Password for the file').fill('wrong password')
+    await importForm.getByRole('button', { name: 'Import', exact: true }).click()
+    await importForm.getByText('Incorrect password for this export file').waitFor()
+    await importForm.getByLabel('Password for the file').fill('backup-password')
+    await importForm.getByRole('button', { name: 'Import', exact: true }).click()
+    await importForm.getByText('5 items added.').waitFor()
+    await e.page.getByRole('navigation').getByRole('button', { name: 'Hosts', exact: true }).click()
+    await assertCount(e.page.getByRole('region', { name: 'Workshop' }).locator('.card'), 2)
+    // The host key came in the file too, so there is nothing to confirm.
+    await e.page.locator('.card', { hasText: 'Grouped box' }).dblclick()
+    await e.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
+    assert.deepEqual(logins.splice(loginsBefore), ['password'])
+    assert.equal(await e.page.getByRole('dialog').count(), 0)
+    await e.app.close()
+    step('another vault imported the file: hosts, group and identity arrived and logged in')
+  }
+
   // ---- a changed host key is refused --------------------------------------------
   sshServer.close()
   const impostor = new Server({ hostKeys: [hostKey()] }, (c) => {

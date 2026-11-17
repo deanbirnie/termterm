@@ -1,4 +1,4 @@
-import { CloudOff, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { CloudOff, RefreshCw, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { DeviceView, SyncStatus } from '@termterm/app'
 import { api } from '../api'
@@ -10,6 +10,7 @@ export function SyncPage({ sync }: { sync: SyncStatus }) {
       <h2 className="section-title">Sync</h2>
       {sync.configured ? <Connected sync={sync} /> : <Setup />}
       {sync.configured && !sync.needsSignIn && <Devices lastSyncAt={sync.lastSyncAt} />}
+      {sync.configured && !sync.needsSignIn && <DeleteAccount username={sync.username ?? ''} />}
       <p className="note">
         <ShieldCheck size={16} />
         <span>
@@ -200,6 +201,57 @@ function Devices({ lastSyncAt }: { lastSyncAt?: number }) {
         also change your master password if the device is lost.
       </p>
       <ErrorText error={error} />
+    </>
+  )
+}
+
+function DeleteAccount({ username }: { username: string }) {
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [typed, setTyped] = useState('')
+  const { busy, error, run } = useAction()
+  return (
+    <>
+      <h2 className="section-title spaced">Delete account</h2>
+      {!open ? (
+        <div className="panel-actions">
+          <Button variant="ghost" onClick={() => setOpen(true)}>
+            <Trash2 size={14} /> Delete sync account…
+          </Button>
+        </div>
+      ) : (
+        <form
+          className="form-card"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void run(() => api.syncDeleteAccount(password))
+          }}
+        >
+          <p className="warning">
+            <TriangleAlert size={16} />
+            <span>
+              This deletes the account <strong>{username}</strong> and everything stored for it on
+              the sync server, and signs out all your devices. Each device keeps the copy of the
+              vault it already has, but they no longer stay in step. This cannot be undone.
+            </span>
+          </p>
+          <Field label={`Type the account name (${username}) to confirm`}>
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+          </Field>
+          <Field label="Master password">
+            <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+          <ErrorText error={error} />
+          <div className="panel-actions">
+            <Button variant="danger" type="submit" disabled={busy || !password || typed.trim().toLowerCase() !== username}>
+              {busy ? 'Deleting…' : 'Delete account'}
+            </Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
     </>
   )
 }
