@@ -1,6 +1,6 @@
 import { FileInput, FolderOpen, KeyRound, Pencil, Plus, Server, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termterm/app'
+import { HOST_COLORS, type ConnectTarget, type HostInput, type HostView, type VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { LocalTerminalButton } from '../LocalTerminalButton'
 import { SshImportDialog } from '../SshImport'
@@ -25,6 +25,19 @@ export function parseQuickConnect(input: string): ConnectTarget | null {
 }
 
 type Editing = { id: string | null }
+
+/** "NAME=value" lines to variables; blank lines and # comments are skipped. */
+export function parseEnv(text: string): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq < 1) throw new Error(`"${line}" is not NAME=value`)
+    env[line.slice(0, eq).trim()] = line.slice(eq + 1)
+  }
+  return env
+}
 
 export function HostsPage({
   snapshot,
@@ -133,7 +146,7 @@ export function HostsPage({
                   return (
                     <li key={h.id}>
                       <button
-                        className={`card ${editing?.id === h.id ? 'selected' : ''}`}
+                        className={`card ${editing?.id === h.id ? 'selected' : ''} ${h.color ? `host-${h.color}` : ''}`}
                         onClick={() => setEditing({ id: h.id })}
                         onDoubleClick={canConnect ? () => open(h) : undefined}
                         title={canConnect ? 'Double-click to connect' : undefined}
@@ -241,6 +254,14 @@ function HostPanel({
   const [jumpHostId, setJumpHostId] = useState(host?.jumpHostId ?? '')
   const [identityId, setIdentityId] = useState(host?.identityId ?? '')
   const [group, setGroup] = useState(host?.group ?? '')
+  const [color, setColor] = useState(host?.color ?? '')
+  const [keepAlive, setKeepAlive] = useState(host?.keepAlive === undefined ? '' : String(host.keepAlive))
+  const [startupSnippetId, setStartupSnippetId] = useState(host?.startupSnippetId ?? '')
+  const envText = (env?: Record<string, string>) =>
+    Object.entries(env ?? {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n')
+  const [env, setEnv] = useState(envText(host?.env))
   const identity = snapshot.identities.find((i) => i.id === identityId)
   const groups = [...new Set(snapshot.hosts.map((h) => h.group).filter((g): g is string => !!g))].sort()
   const [password, setPassword] = useState('')
@@ -258,6 +279,9 @@ function HostPanel({
   useEffect(() => {
     if (identityId && !snapshot.identities.some((i) => i.id === identityId)) setIdentityId('')
   }, [snapshot.identities, identityId])
+  useEffect(() => {
+    if (startupSnippetId && !snapshot.snippets.some((sn) => sn.id === startupSnippetId)) setStartupSnippetId('')
+  }, [snapshot.snippets, startupSnippetId])
 
   // Hosts this one can go through: not itself, nor any that already go through it.
   const jumpChoices = snapshot.hosts.filter((h) => {
@@ -279,6 +303,10 @@ function HostPanel({
     jumpHostId: jumpHostId || null,
     identityId: identityId || null,
     group,
+    color: color || null,
+    keepAlive: keepAlive === '' ? null : Number(keepAlive),
+    startupSnippetId: startupSnippetId || null,
+    env: parseEnv(env),
     password: password ? password : clearPassword ? null : undefined,
   })
   const dirty =
@@ -292,6 +320,10 @@ function HostPanel({
     jumpHostId !== (host.jumpHostId ?? '') ||
     identityId !== (host.identityId ?? '') ||
     group.trim() !== (host.group ?? '') ||
+    color !== (host.color ?? '') ||
+    keepAlive !== (host.keepAlive === undefined ? '' : String(host.keepAlive)) ||
+    startupSnippetId !== (host.startupSnippetId ?? '') ||
+    env.trim() !== envText(host.env) ||
     !!password ||
     clearPassword
 
@@ -426,6 +458,71 @@ function HostPanel({
             />
           </Field>
         )}
+        <h3 className="group-title">Session</h3>
+        <div className="field">
+          <span className="field-label" id="host-colour-label">Colour</span>
+          <div className="swatches" role="radiogroup" aria-labelledby="host-colour-label">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!color}
+              aria-label="No colour"
+              className="swatch none"
+              onClick={() => setColor('')}
+            />
+            {HOST_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                role="radio"
+                aria-checked={color === c}
+                aria-label={c[0]!.toUpperCase() + c.slice(1)}
+                className={`swatch host-${c}`}
+                onClick={() => setColor(c)}
+              />
+            ))}
+          </div>
+          <span className="field-hint">Marks this host's card, tabs and panes, to tell them apart at a glance.</span>
+        </div>
+        <Field label="Startup snippet" hint="Typed into the session each time it connects.">
+          <select value={startupSnippetId} onChange={(e) => setStartupSnippetId(e.target.value)}>
+            <option value="">None</option>
+            {snapshot.snippets.map((sn) => (
+              <option key={sn.id} value={sn.id}>
+                {sn.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label="Keep-alive"
+          hint="How often to check the connection is alive. More often helps through firewalls that drop quiet connections."
+        >
+          <select value={keepAlive} onChange={(e) => setKeepAlive(e.target.value)}>
+            <option value="">Default (every 20 seconds)</option>
+            {[10, 30, 60, 120, 300].map((n) => (
+              <option key={n} value={n}>
+                Every {n < 60 ? `${n} seconds` : `${n / 60} minute${n > 60 ? 's' : ''}`}
+              </option>
+            ))}
+            <option value="0">Off</option>
+            {keepAlive && ![0, 10, 30, 60, 120, 300].includes(Number(keepAlive)) && (
+              <option value={keepAlive}>Every {keepAlive} seconds</option>
+            )}
+          </select>
+        </Field>
+        <Field
+          label="Environment variables"
+          hint="One NAME=value per line, set when the shell starts. The server only applies the ones its AcceptEnv setting allows."
+        >
+          <textarea
+            className="env-input"
+            rows={3}
+            placeholder={'LANG=en_GB.UTF-8\nAPP_ENV=staging'}
+            value={env}
+            onChange={(e) => setEnv(e.target.value)}
+          />
+        </Field>
         <ErrorText error={error} />
         <div className="panel-actions">
           <Button type="submit" disabled={busy || !dirty || !address.trim()}>

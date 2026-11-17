@@ -9,6 +9,7 @@ import { userInfo } from 'node:os'
 import { Client, utils, type ClientChannel, type NextAuthHandler } from 'ssh2'
 import type { ConnectTarget, SshPrompt, SshPromptReply } from '@termterm/app'
 import { fingerprintOf, MAX_JUMPS, type VaultService } from '@termterm/app'
+import { DEFAULT_KEEPALIVE_SECONDS } from '@termterm/core'
 import { keyTypeOfBlob } from './keys'
 
 export type PromptBody = SshPrompt extends infer P
@@ -63,7 +64,7 @@ export function friendlyError(err: Error & { level?: string; code?: string }): s
 const MAX_PASSWORD_PROMPTS = 3
 
 /** One server to log in to, with what the vault holds for it. */
-interface Hop {
+export interface Hop {
   address: string
   port: number
   username: string
@@ -72,6 +73,10 @@ interface Hop {
   passphrase?: string
   /** For prompts: "host" or "host:port", marked when it is a jump host. */
   label: string
+  /** Seconds between keep-alives; 0 = none. */
+  keepAlive: number
+  /** Environment variables for the shell (the target only). */
+  env?: Record<string, string>
 }
 
 /**
@@ -83,7 +88,7 @@ export function planConnection(vault: VaultService, target: ConnectTarget): Hop[
   if ('local' in target) throw new Error('Not an SSH target')
   if (!('hostId' in target)) {
     const { address, port } = target
-    return [{ address, port, username: target.username || userInfo().username, label: label(address, port) }]
+    return [{ address, port, username: target.username || userInfo().username, label: label(address, port), keepAlive: DEFAULT_KEEPALIVE_SECONDS }]
   }
   const hops: Hop[] = []
   const seen = new Set<string>()
@@ -101,6 +106,8 @@ export function planConnection(vault: VaultService, target: ConnectTarget): Hop[
       username: username || userInfo().username,
       password,
       label: hops.length ? `${label(address, port)} (jump host)` : label(address, port),
+      keepAlive: host.data.keepAlive ?? DEFAULT_KEEPALIVE_SECONDS,
+      ...(hops.length === 0 && host.data.env ? { env: host.data.env } : {}),
     }
     if (keyId) {
       const key = vault.key(keyId)
@@ -242,7 +249,7 @@ function connectHop(vault: VaultService, hop: Hop, ask: Ask, track: (c: Client) 
         username,
         ...(sock ? { sock } : {}),
         readyTimeout: 120_000, // generous: includes time the user spends on prompts
-        keepaliveInterval: 20_000,
+        keepaliveInterval: hop.keepAlive * 1000, // 0 turns them off
         keepaliveCountMax: 3,
         hostVerifier: (key: Buffer, verify: (ok: boolean) => void) => {
           verifyHostKey(key).then(verify, () => verify(false))

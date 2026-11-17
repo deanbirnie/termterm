@@ -13,9 +13,9 @@ public class Smoke {
     StringBuilder out = new StringBuilder(); CountDownLatch closed = new CountDownLatch(1); CountDownLatch connected = new CountDownLatch(1);
     volatile String error; List<String> asked = new ArrayList<>(); volatile byte[] hostKey; SshSession session;
     boolean trust = true; Deque<String> passwords = new ArrayDeque<>(); String kbd; Runnable onHostKey;
-    SshSession.Config jump;
+    SshSession.Config jump; Map<String, String> env = new LinkedHashMap<>(); int keepAlive = 20;
     Run start(String user, String password, String key, String passphrase) {
-      SshSession.Config c = new SshSession.Config(); c.host = "127.0.0.1"; c.port = port; c.username = user; c.password = password; c.privateKey = key; c.passphrase = passphrase; c.cols = 100; c.rows = 30; c.jump = jump;
+      SshSession.Config c = new SshSession.Config(); c.host = "127.0.0.1"; c.port = port; c.username = user; c.password = password; c.privateKey = key; c.passphrase = passphrase; c.cols = 100; c.rows = 30; c.jump = jump; c.env = env; c.keepAliveSeconds = keepAlive;
       session = new SshSession(c, new SshSession.Events() {
         public void connected() { connected.countDown(); }
         public void data(byte[] b, int n) { synchronized (out) { out.append(new String(b, 0, n, StandardCharsets.UTF_8)); } }
@@ -42,6 +42,11 @@ public class Smoke {
     r.session.write("echo hi\r".getBytes()); check("input reaches the shell", r.waitFor("ran:echo hi"), r.out.toString());
     r.session.resize(120, 40); r.session.write("x\r".getBytes()); check("resize is applied", r.waitFor("size:120x40"), r.out.toString());
     r.session.write("exit\r".getBytes()); check("remote exit ends the session cleanly", r.ended() && r.error == null, String.valueOf(r.error));
+
+    r = new Run(); r.env.put("LANG", "en_GB.UTF-8"); r.env.put("APP_ENV", "staging"); r.keepAlive = 0; r.start("dean", "pw-ok", null, null);
+    check("environment variables reach the server, keep-alives off is accepted",
+        r.waitFor("welcome") && r.out.indexOf("LANG=en_GB.UTF-8") >= 0 && r.out.indexOf("APP_ENV=staging") >= 0, r.out + " " + r.error);
+    r.session.close(); r.ended();
 
     // Through a jump host (the same test server, reached through itself).
     r = new Run(); r.jump = new SshSession.Config(); r.jump.host = "127.0.0.1"; r.jump.port = port; r.jump.username = "dean"; r.passwords.add("pw-ok");

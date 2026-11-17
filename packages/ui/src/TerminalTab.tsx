@@ -77,6 +77,7 @@ export function TerminalTab({
   isShortcut,
   refocus = 0,
   onOpenFiles,
+  startupScript,
 }: {
   tab: SessionTab
   active: boolean
@@ -89,7 +90,11 @@ export function TerminalTab({
   refocus?: number
   /** Opens this host's files in a new tab, where there is a file browser. */
   onOpenFiles?: () => void
+  /** The host's startup snippet, typed in each time the session connects. */
+  startupScript?: string
 }) {
+  const startupRef = useRef(startupScript)
+  startupRef.current = startupScript
   const shortcutRef = useRef(isShortcut)
   shortcutRef.current = isShortcut
   const snippetsRef = useRef(snippets)
@@ -375,6 +380,8 @@ export function TerminalTab({
       wasConnected.current = true
       retries.current = 0
       setReconnect(null)
+      const startup = startupRef.current
+      if (startup) api.sshWrite(tab.id, startup.replace(/\r?\n/g, '\r').replace(/\r?$/, '\r'))
       void api.commandHistory(key).then(
         (h) => (history.current = h),
         () => undefined,

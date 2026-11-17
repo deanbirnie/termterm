@@ -424,3 +424,26 @@ a.btn, a.update-pill { text-decoration: none; }
 .transfer-name { min-width: 120px; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transfers progress { flex: 1; height: 6px; accent-color: var(--accent); }
 .transfer-size { color: var(--text-muted); white-space: nowrap; }
+
+/* ---- host colours: a mark on the host's card, tabs and panes ---- */
+.host-red { --host: #e5534b; }
+.host-orange { --host: #e8833a; }
+.host-yellow { --host: #d9b43a; }
+.host-green { --host: #57ab5a; }
+.host-teal { --host: #2fbfa5; }
+.host-blue { --host: #4a9eff; }
+.host-purple { --host: #a371f7; }
+.host-pink { --host: #e275ad; }
+.host-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--host); flex: none; }
+.card[class*='host-'] { box-shadow: inset 3px 0 0 var(--host); }
+.terminal-pane[class*='host-'] .pane-header { box-shadow: inset 3px 0 0 var(--host); }
+.terminal-pane.focused[class*='host-'] .pane-header { box-shadow: inset 3px 0 0 var(--host), inset 0 2px 0 var(--accent); }
+.terminal-pane[class*='host-']:not(.tiled) { border-top: 2px solid var(--host); }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.swatch {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--host, transparent);
+  border: 2px solid transparent; display: grid; place-items: center; color: var(--text-muted);
+}
+.swatch.none { border: 1px dashed var(--border); }
+.swatch[aria-checked='true'] { border-color: var(--text); }
+.env-input { font-family: var(--mono, monospace); font-size: 12px; }

@@ -421,6 +421,14 @@ export function Workspace({ locked }: { locked: boolean }) {
   const ready = !locked && snapshot !== null
   const prompt = ready ? prompts[0] : undefined
   const tabTitle = (tab: Tab) => sessions[tab.focus]?.title ?? ''
+  /** The saved host a session is for, if any: its colour and startup snippet. */
+  const hostOf = (session?: SessionTab) =>
+    session && 'hostId' in session.target ? snapshot?.hosts.find((h) => h.id === (session.target as { hostId: string }).hostId) : undefined
+  const colorOf = (session?: SessionTab) => hostOf(session)?.color
+  const startupScriptOf = (session: SessionTab) => {
+    const id = hostOf(session)?.startupSnippetId
+    return id ? snapshot?.snippets.find((s) => s.id === id)?.script : undefined
+  }
   const dropTarget = drop && placed.get(drop.sessionId)
 
   return (
@@ -466,6 +474,7 @@ export function Workspace({ locked }: { locked: boolean }) {
                   ) : (
                     <TerminalIcon size={14} />
                   )}
+                  {colorOf(focused) && <i className={`host-dot host-${colorOf(focused)}`} aria-hidden="true" />}
                   <span className="tab-title">{title}</span>
                   {count > 1 && (
                     <span className="tab-count" aria-label={`${count} panes`}>
@@ -536,7 +545,7 @@ export function Workspace({ locked }: { locked: boolean }) {
             return (
               <div
                 key={session.id}
-                className={`pane terminal-pane ${multi ? 'tiled' : ''} ${multi && focused ? 'focused' : ''}`}
+                className={`pane terminal-pane ${multi ? 'tiled' : ''} ${multi && focused ? 'focused' : ''} ${colorOf(session) ? `host-${colorOf(session)}` : ''}`}
                 hidden={!visible}
                 style={pct(rect)}
                 data-session={session.id}
@@ -622,6 +631,7 @@ export function Workspace({ locked }: { locked: boolean }) {
                         ? () => connect(session.target, session.title, 'files')
                         : undefined
                     }
+                    startupScript={startupScriptOf(session)}
                   />
                 )}
               </div>

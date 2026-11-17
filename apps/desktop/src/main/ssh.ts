@@ -61,7 +61,10 @@ export class SshManager {
           // Also reached when a jump host's connection drops.
           .on('close', () => finish(session.stream && !session.exited ? LOST : undefined))
         const opened = session.size
-        client.shell({ term: 'xterm-256color', ...opened }, (err, stream) => {
+        // Environment variables the host asks for; servers only set those
+        // their AcceptEnv allows, and quietly ignore the rest.
+        const env = hops.at(-1)?.env
+        client.shell({ term: 'xterm-256color', ...opened }, env ? { env } : {}, (err, stream) => {
           if (err) return finish(err.message)
           session.stream = stream
           // A resize that arrived while the shell was being opened.

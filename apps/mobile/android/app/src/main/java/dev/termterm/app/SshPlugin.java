@@ -61,6 +61,15 @@ public class SshPlugin extends Plugin {
     config.password = call.getString("password");
     config.privateKey = call.getString("privateKey");
     config.passphrase = call.getString("passphrase");
+    config.keepAliveSeconds = call.getInt("keepAlive", 20);
+    com.getcapacitor.JSObject env = call.getObject("env");
+    if (env != null) {
+      java.util.Iterator<String> names = env.keys();
+      while (names.hasNext()) {
+        String name = names.next();
+        config.env.put(name, env.optString(name, ""));
+      }
+    }
     config.cols = call.getInt("cols", 80);
     config.rows = call.getInt("rows", 24);
     // Jump hosts, nearest first: jumps[0] is the server the target is reached through.
@@ -77,6 +86,7 @@ public class SshPlugin extends Plugin {
           hop.password = j.has("password") ? j.optString("password", null) : null;
           hop.privateKey = j.has("privateKey") ? j.optString("privateKey", null) : null;
           hop.passphrase = j.has("passphrase") ? j.optString("passphrase", null) : null;
+          hop.keepAliveSeconds = j.optInt("keepAlive", 20);
           inner.jump = hop;
           inner = hop;
         }

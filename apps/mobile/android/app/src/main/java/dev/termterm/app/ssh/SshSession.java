@@ -62,6 +62,10 @@ public final class SshSession {
     public String passphrase;
     /** The server to connect through first (ssh's ProxyJump), or null to connect directly. */
     public Config jump;
+    /** Seconds between keep-alive messages; 0 sends none. */
+    public int keepAliveSeconds = 20;
+    /** Environment variables for the shell (servers apply those their AcceptEnv allows). */
+    public java.util.Map<String, String> env = new java.util.LinkedHashMap<>();
     public int cols = 80;
     public int rows = 24;
   }
@@ -109,6 +113,7 @@ public final class SshSession {
         rows = config.rows;
       }
       ch.setPtyType("xterm-256color", cols, rows, 0, 0);
+      for (java.util.Map.Entry<String, String> e : config.env.entrySet()) ch.setEnv(e.getKey(), e.getValue());
       InputStream fromRemote = ch.getInputStream();
       OutputStream out = ch.getOutputStream();
       ch.connect(CONNECT_TIMEOUT_MS);
@@ -166,7 +171,7 @@ public final class SshSession {
     s.setConfig("PreferredAuthentications", "publickey,password,keyboard-interactive");
     if (c.password != null && !c.password.isEmpty()) s.setPassword(c.password.getBytes(StandardCharsets.UTF_8));
     s.setUserInfo(new Asking(hop, c));
-    s.setServerAliveInterval(20_000);
+    s.setServerAliveInterval(Math.max(0, c.keepAliveSeconds) * 1000); // 0 sends none
     s.setServerAliveCountMax(3);
     s.connect(CONNECT_TIMEOUT_MS);
     return s;

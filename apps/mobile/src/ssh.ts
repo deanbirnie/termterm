@@ -18,7 +18,7 @@ import {
   type SshPromptReply,
   type VaultService,
 } from '@termterm/app'
-import { fromBase64, toBase64 } from '@termterm/core'
+import { DEFAULT_KEEPALIVE_SECONDS, fromBase64, toBase64 } from '@termterm/core'
 
 interface NativeKey {
   privateKey: string
@@ -43,8 +43,20 @@ interface SshPluginApi {
     password?: string
     privateKey?: string
     passphrase?: string
+    /** Seconds between keep-alives; 0 = none. */
+    keepAlive: number
+    /** Environment variables for the shell. */
+    env?: Record<string, string>
     /** Jump hosts, nearest first. */
-    jumps?: Array<{ host: string; port: number; username: string; password?: string; privateKey?: string; passphrase?: string }>
+    jumps?: Array<{
+      host: string
+      port: number
+      username: string
+      password?: string
+      privateKey?: string
+      passphrase?: string
+      keepAlive: number
+    }>
     cols: number
     rows: number
   }): Promise<void>
@@ -207,7 +219,16 @@ export function createSsh(vault: VaultService, events: SshEvents) {
     async connect(sessionId: string, target: ConnectTarget, cols: number, rows: number): Promise<void> {
       if ('local' in target) throw new Error('A local terminal is not available on a phone')
       // The target first, then each jump host it is reached through.
-      type Hop = { address: string; port: number; username: string; password?: string; privateKey?: string; passphrase?: string }
+      type Hop = {
+        address: string
+        port: number
+        username: string
+        password?: string
+        privateKey?: string
+        passphrase?: string
+        keepAlive: number
+      }
+      let env: Record<string, string> | undefined
       const hops: Hop[] = []
       if ('hostId' in target) {
         const seen = new Set<string>()
@@ -218,7 +239,15 @@ export function createSsh(vault: VaultService, events: SshEvents) {
           seen.add(id)
           const host = vault.host(id)
           if (host?.type !== 'host') throw new Error(hops.length ? 'Jump host not found' : 'Host not found')
-          const hop: Hop = { address: host.data.address, port: host.data.port, username: host.data.username, password: host.data.password }
+          const hop: Hop = {
+            address: host.data.address,
+            port: host.data.port,
+            username: host.data.username,
+            password: host.data.password,
+            keepAlive: host.data.keepAlive ?? DEFAULT_KEEPALIVE_SECONDS,
+          }
+          // Environment variables are for the target's shell only.
+          if (hops.length === 0) env = host.data.env
           if (host.data.keyId) {
             const key = vault.key(host.data.keyId)
             if (key?.type === 'key') {
@@ -236,7 +265,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         if (!target.username) {
           throw new Error('This host has no username. Add one to the host, or connect as user@host.')
         }
-        hops.push({ address: target.address, port: target.port, username: target.username })
+        hops.push({ address: target.address, port: target.port, username: target.username, keepAlive: DEFAULT_KEEPALIVE_SECONDS })
       }
       const label = (h: Hop, i: number) => {
         const where = h.port === 22 ? h.address : `${h.address}:${h.port}`
@@ -253,10 +282,13 @@ export function createSsh(vault: VaultService, events: SshEvents) {
           password: first!.password,
           privateKey: first!.privateKey,
           passphrase: first!.passphrase,
+          keepAlive: first!.keepAlive,
+          ...(env ? { env } : {}),
           jumps: jumps.map((h) => ({
             host: h.address,
             port: h.port,
             username: h.username,
+            keepAlive: h.keepAlive,
             ...(h.password ? { password: h.password } : {}),
             ...(h.privateKey ? { privateKey: h.privateKey, passphrase: h.passphrase } : {}),
           })),

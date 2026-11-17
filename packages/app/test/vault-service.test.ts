@@ -446,3 +446,51 @@ describe('importing hosts that share an address', () => {
     expect(b.snapshot().hosts.map((h) => h.label)).toEqual(['one', 'two'])
   })
 })
+
+describe('per-host session settings', () => {
+  const base = { label: 'h', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null }
+
+  it('keeps keep-alive, startup snippet, environment and colour, and checks them', async () => {
+    const s = device('none').open()
+    await s.create('master-password')
+    const snippet = s.saveSnippet(null, { label: 'up', script: 'uptime' })
+    const id = s.saveHost(null, { ...base, keepAlive: 60, startupSnippetId: snippet, env: { LANG: 'C.UTF-8', ' ': 'x' }, color: 'red' })
+    expect(s.snapshot().hosts[0]).toMatchObject({ keepAlive: 60, startupSnippetId: snippet, env: { LANG: 'C.UTF-8' }, color: 'red' })
+    expect(s.host(id)?.data).toMatchObject({ keepAlive: 60, env: { LANG: 'C.UTF-8' } })
+
+    // Saving without them keeps them; null puts them back to the default.
+    s.saveHost(id, { ...base, label: 'renamed' })
+    expect(s.snapshot().hosts[0]).toMatchObject({ keepAlive: 60, color: 'red' })
+    s.saveHost(id, { ...base, keepAlive: 0, color: null, env: {} })
+    expect(s.snapshot().hosts[0]).toMatchObject({ keepAlive: 0 })
+    expect(s.snapshot().hosts[0]?.color).toBeUndefined()
+    expect(s.snapshot().hosts[0]?.env).toBeUndefined()
+    s.saveHost(id, { ...base, keepAlive: null })
+    expect(s.snapshot().hosts[0]?.keepAlive).toBeUndefined()
+
+    expect(() => s.saveHost(id, { ...base, keepAlive: -1 })).toThrow('Keep-alive')
+    expect(() => s.saveHost(id, { ...base, keepAlive: 1.5 })).toThrow('Keep-alive')
+    expect(() => s.saveHost(id, { ...base, env: { '1BAD': 'x' } })).toThrow('not a valid environment variable name')
+    expect(() => s.saveHost(id, { ...base, env: { OK: 'a\nb' } })).toThrow('line break')
+    expect(() => s.saveHost(id, { ...base, color: 'chartreuse' })).toThrow('Unknown colour')
+    expect(() => s.saveHost(id, { ...base, startupSnippetId: 'nope' })).toThrow('Snippet not found')
+
+    // Deleting the snippet takes it off the host.
+    s.deleteItem(snippet)
+    expect(s.snapshot().hosts[0]?.startupSnippetId).toBeUndefined()
+  })
+
+  it('travels through export and import, the snippet link included', async () => {
+    const a = device('none').open()
+    await a.create('master-password')
+    const snippet = a.saveSnippet(null, { label: 'up', script: 'uptime' })
+    a.saveHost(null, { ...base, keepAlive: 30, startupSnippetId: snippet, env: { A: '1' }, color: 'blue' })
+    const { text } = await a.exportVault('export-password')
+    const b = device('none').open()
+    await b.create('master-password')
+    await b.importVault(text, 'export-password')
+    const host = b.snapshot().hosts[0]!
+    expect(host).toMatchObject({ keepAlive: 30, env: { A: '1' }, color: 'blue' })
+    expect(host.startupSnippetId).toBe(b.snapshot().snippets[0]!.id)
+  })
+})
