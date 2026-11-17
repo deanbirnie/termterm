@@ -219,11 +219,16 @@ edit. Mark them complete only when their implementation and evidence exist.
 - [ ] Automated server backup/restore verification.
 - [ ] Native Android device/emulator smoke coverage and targeted Windows
       credential-store and installed-upgrade coverage.
-- [ ] Mobile browser and Java SSH tests in the release workflow; expected-asset,
-      signing and update-metadata validation.
-- [ ] Version-normalisation/validation tests; trim surrounding whitespace only.
-- [ ] Scheduled dependency proposals, verified Action SHA pins with version
-      comments, workflow and shell validation, and Maven/container scans.
+- [x] Mobile browser and Java SSH tests in the release workflow (its `test`
+      job, which every build and publish job waits for).
+- [ ] Expected-asset, signing and update-metadata validation in the release workflow.
+- [x] Version normalisation trims surrounding whitespace only, and validation
+      is strict semantic versioning (no leading zeros, no empty pre-release parts).
+- [ ] Automated tests for that version step.
+- [x] Scheduled dependency proposals (`.github/dependabot.yml`: npm, Actions,
+      Gradle, Docker) and Action SHA pins with version comments.
+- [ ] Workflow and shell validation (actionlint, shellcheck), and Maven and
+      container image scans.
 
 Prioritize platform verification, existing-data compatibility and release
 checks. Preserve an explicit manual verification path until automation lands.
@@ -280,7 +285,7 @@ edits do not refresh this baseline.
   dependencies (build-time tooling, not shipped in the app).
 - `npm outdated`: only `@types/node`, held at 22.x on purpose to match the
   Node 22 runtime.
-- GitHub Actions: the `actions/*` steps are on `v4`, which GitHub now runs on a newer Node than they target and flags as deprecated. Newer majors exist (for example `actions/checkout@v7`, `actions/upload-artifact@v7`, `actions/download-artifact@v8`). Move to them one action at a time, checking each one's inputs against its release notes, since `release.yml` and `cleanup.yml` depend on artifact options.
+- GitHub Actions: the `actions/*` steps were on `v4`, which GitHub flagged as deprecated (Node 20). Moved to current majors on 2026-11-17, pinned by commit.
 - No deprecation warnings from the app's own code. Node prints an
   `ExperimentalWarning` for `node:sqlite` in tests (expected, see above).
 
@@ -290,6 +295,7 @@ Add a row per run, newest first.
 
 | Date | By | Upgraded | Left alone (why) | Notes |
 |---|---|---|---|---|
+| 2026-11-17 | Claude | GitHub Actions to current majors, each pinned by commit with its version in a comment: checkout v7.0.1, setup-node v7.1.0, setup-java v6.3.0, upload-artifact v7.0.2, download-artifact v8.0.2, docker setup-qemu v4.4.0 / setup-buildx v4.4.1 / login v4.8.0 / build-push v7.4.0, action-gh-release v3.0.4, ghcr-cleanup v1.2.2 (audit F04). Server image: `apk upgrade` and no npm, npx, corepack or yarn (F02). Releases now run the mobile and Java SSH tests before building (F05); stricter version check (F06); Dependabot (F09). | Electron 45.3.3 and other npm updates: not part of this batch; Dependabot will propose them. | Each action's inputs checked against its `action.yml` at the pinned commit. Server image built and run locally (uid 99, health check healthy, no package managers inside); `apk upgrade` itself checked in CI (the Alpine mirror is not reachable from the dev sandbox). Version check tried against valid and invalid inputs. |
 | 2026-11-16 | Claude | Electron 45.3.0 → 45.3.2 (audit F01: drops trust in revoked eMudhra intermediates). `TERMTERM_INSECURE_KEYSTORE` now ignored by installed builds (audit F10). | Electron 45.3.3 (published the same day; next run). Other audit findings unchanged. | Typecheck, 57 unit tests and the desktop e2e (Linux, Electron 45.3.2) pass; Windows packaging in CI. Released as a patch to exercise the in-app updater. |
 | 2026-11-12 | Codex | Policy only; no dependency upgrades | Runtime code and workflows unchanged | Added platform, compatibility and release verification; security deferral records; runtime distinctions; update grouping and automation backlog. Documentation reviewed; no maintenance suite run. |
 | 2026-11-11 | initial | n/a | n/a | Policy written; baseline recorded above. |

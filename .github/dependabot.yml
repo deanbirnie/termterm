@@ -1,0 +1,52 @@
+# Opens pull requests for dependency updates, so they arrive without anyone
+# having to look. Each one still goes through CI and review like any other
+# change: see docs/MAINTENANCE.md for what to check before merging.
+#
+# Security fixes are proposed as soon as they are published (enable
+# "Dependabot security updates" in the repository settings); everything else
+# is collected into a few grouped pull requests a week.
+version: 2
+updates:
+  # The whole npm workspace (desktop, mobile, server, shared packages) has one lockfile.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Electron gets its own pull request: it carries Chromium's security
+      # fixes, and its release notes are worth reading on their own.
+      electron:
+        patterns: ['electron']
+      minor-and-patch:
+        update-types: [minor, patch]
+        exclude-patterns: ['electron']
+
+  # The pinned GitHub Actions (by commit, with the version in a comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  # The Android app. JSch and Bouncy Castle are also pinned, with checksums,
+  # in apps/mobile/ssh-test/run.sh: update that file in the same pull request.
+  - package-ecosystem: gradle
+    directory: /apps/mobile/android
+    schedule:
+      interval: weekly
+    groups:
+      android:
+        update-types: [minor, patch]
+
+  # The sync server image's base (node:22-alpine).
+  - package-ecosystem: docker
+    directory: /apps/server
+    schedule:
+      interval: weekly
+    ignore:
+      # Stay on Node 22 until the server is moved to a newer LTS on purpose.
+      - dependency-name: node
+        update-types: [version-update:semver-major]

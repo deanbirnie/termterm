@@ -62,7 +62,7 @@ Decisions worth knowing before changing things:
 
 Automated, on every relevant change (see `.github/workflows/build.yml`):
 
-- `npm test`: 37 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
+- `npm test`: 81 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
 - `npm run e2e`: two desktop app instances against a throwaway SSH server and
   sync server (vault, keys, hosts, sync, password and key logins, password
   change, remote sign-out, turning sync off and signing back in, lock with
@@ -96,13 +96,6 @@ Not yet confirmed anywhere:
 
 Known gaps inside phase 1 scope:
 
-- Signing an open vault in to an existing account (`Vault.joinAccount`) keeps
-  local items, but items deleted on that device while sync was off come back
-  from the account, because tombstones are not kept without sync.
-- If the app dies between the server accepting a password change and the local
-  vault file being rewritten, this device still unlocks with the old password
-  while the account uses the new one. Recovery path: none yet (needs a retry
-  journal).
 - `ssh2` occasionally generates an Ed25519 key its own parser rejects;
   `apps/desktop/src/main/keys.ts` retries until the key parses.
 
@@ -128,18 +121,22 @@ owner's call (see "Releasing" in the README).
       runs on desktop (Android follow-up below)
 - [x] SFTP browser: two panes, drag and drop, on desktop
 
-### Batch 3 — Reliability and housekeeping (next)
+### Batch 3 — Reliability and housekeeping (done)
 
-- [ ] Sync: items deleted while sync was off come back after signing in again
-      (keep tombstones when sync is off, or reconcile on rejoin)
-- [ ] Password change: a retry journal for the crash window between the server
-      accepting the new password and the vault file being rewritten
-- [ ] Maintenance audit (2026-11-12) leftovers: releases wait for every test,
+- [x] Sync: items deleted while sync was off come back after signing in again.
+      Deletions are now kept while sync is off and sent on rejoining (an item
+      edited later on another device still wins); a new account starts without
+      them
+- [x] Password change: the change is noted in the vault file before it is sent,
+      and the next sync finishes it (or drops the note if the server never got
+      it), so a crash between the server accepting and the file being rewritten
+      no longer leaves the device unable to sync
+- [x] Maintenance audit (2026-11-12) leftovers: releases wait for every test,
       including the mobile and SSH ones (F05); a server image without npm and with
       fixed base packages (F02); GitHub Actions upgrades and pinning (F04);
       stricter release version checks (F06); automatic dependency-update PRs (F09)
 
-### Batch 4 — Vault extras
+### Batch 4 — Vault extras (next)
 
 - [ ] Encrypted export and import of the whole vault
 - [ ] Identities (one login shared by several hosts) and host groups
