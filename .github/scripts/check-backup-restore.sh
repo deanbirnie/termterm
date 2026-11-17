@@ -49,11 +49,14 @@ token="$(api POST /register "{\"username\":\"backup-check\",\"kdf\":$kdf,\"authK
 api POST /sync "{\"changes\":[{\"id\":\"item-1\",\"baseSeq\":0,\"blob\":\"$blob\"}]}" "$token" >/dev/null
 
 docker exec termterm-backup-a node --disable-warning=ExperimentalWarning backup.ts /data/backups/check.db
-test "$(stat -c %u "$work/a/backups/check.db")" = 99 || { echo "backup is not owned by the server's user"; exit 1; }
+# The backup belongs to the server's user (and its folder is private to it),
+# so look and copy from inside: this script need not run as root.
+owner="$(docker exec termterm-backup-a stat -c %u /data/backups/check.db)"
+test "$owner" = 99 || { echo "backup is owned by uid $owner, not the server's user (99)"; exit 1; }
+# Restore: a new data folder holding only the backup, as termterm.db. The
+# server takes ownership of what is in its data folder when it starts.
+docker cp termterm-backup-a:/data/backups/check.db "$work/b/termterm.db"
 docker rm -f termterm-backup-a >/dev/null
-
-# Restore: a new data folder holding only the backup, as termterm.db.
-cp "$work/a/backups/check.db" "$work/b/termterm.db"
 docker run -d --name termterm-backup-b -p "$port:8787" -e PUID=99 -e PGID=100 -v "$work/b:/data" "$image" >/dev/null
 wait_healthy termterm-backup-b
 
