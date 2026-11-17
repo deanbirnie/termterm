@@ -66,6 +66,30 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # The workflows and scripts themselves, including those only a release runs.
+  workflow-checks:
+    name: Workflow and script checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          file="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$file" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$file"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$file" | sha256sum --check --quiet
+          tar -xzf "$RUNNER_TEMP/$file" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+      - name: shellcheck
+        run: shellcheck .github/scripts/*.sh apps/mobile/ssh-test/run.sh
+      - name: Release version rules
+        run: .github/scripts/test-release-version.sh
+      - name: Release file checks
+        run: node --test .github/scripts/check-release-files.test.mjs
+
   desktop-e2e:
     name: Desktop end-to-end test
     needs: changes
@@ -117,7 +141,7 @@ jobs:
           # leave the server unable to open its database.
           docker run -d --name termterm -p 8787:8787 -e PUID=99 -e PGID=100 \
             -v "$RUNNER_TEMP/termterm-data:/data" termterm-server
-          for i in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:8787/v1/health; then
               echo
               docker exec termterm sh -c 'echo "server runs as uid $(stat -c %u /proc/1)"; test "$(stat -c %u /proc/1)" = 99'
@@ -222,7 +246,8 @@ jobs:
       # is flaky.)
       - name: Mobile web end-to-end test
         run: |
-          export CHROME_PATH="$(command -v google-chrome || command -v chromium-browser || command -v chromium)"
+          CHROME_PATH="$(command -v google-chrome || command -v chromium-browser || command -v chromium)"
+          export CHROME_PATH
           echo "Using browser: $CHROME_PATH"
           test -n "$CHROME_PATH"
           npm run e2e -w @termterm/mobile
@@ -230,6 +255,13 @@ jobs:
         run: npm run test:ssh -w @termterm/mobile
       - name: Build debug APK
         run: npm run apk -w @termterm/mobile
+      # The release workflow's APK check, on this debug build (its own throwaway
+      # key, so no certificate check), so a broken check shows up here first.
+      - name: Check the APK
+        run: |
+          apk="$(ls apps/mobile/android/app/build/outputs/apk/debug/*.apk)"
+          name="$(node -p "require('./apps/mobile/package.json').version")-debug"
+          .github/scripts/check-apk.sh "$apk" "$name"
       # A debug build, signed with a throwaway key: for trying out, not for
       # keeping. It cannot be installed over a build from another run.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

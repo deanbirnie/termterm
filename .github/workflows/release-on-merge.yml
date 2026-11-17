@@ -48,9 +48,9 @@ jobs:
           count=0
           for label in "${labels[@]}"; do
             case "$label" in
-              'release: major') bump=major; count=$((count + 1)) ;;
-              'release: minor') [ "$bump" = major ] || bump=minor; count=$((count + 1)) ;;
-              'release: patch') [ -n "$bump" ] || bump=patch; count=$((count + 1)) ;;
+              'release: major') bump='major'; count=$((count + 1)) ;;
+              'release: minor') [ "$bump" = major ] || bump='minor'; count=$((count + 1)) ;;
+              'release: patch') [ -n "$bump" ] || bump='patch'; count=$((count + 1)) ;;
             esac
           done
           if [ -z "$bump" ]; then
