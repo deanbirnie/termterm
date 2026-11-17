@@ -1,0 +1,51 @@
+{
+  "format": 1,
+  "kdf": {
+    "alg": "argon2id",
+    "m": 65536,
+    "t": 3,
+    "p": 1,
+    "salt": "jVQDCjqYt8I1WKbXgq0FOA=="
+  },
+  "wrappedVaultKey": "AaD+WKrVzDSJ/71Uwn62wIXgu6F6fSgZhvmsip1jIxSPDU/Lt5E7T2OGDeBYsFuPIo13aWSoaO/Gtr96P7It2ZWnNMvmNtytIA==",
+  "items": {
+    "93064703-af52-436f-b1f9-9fdfded0c2aa": {
+      "blob": "AYppFgYcRJd5jI1eEQQTUNPlPzmZmTPfotz2jof7qJrGe6dwYAdc1/2EyY4+F2v3czj51+DB5sEMIECrJhH3xwQcXpJGp/Yr1hIQ8fCXsrrVEci6GGkIUN1tp4BSaw70tMicrQlunEe1XuA+BYgsxLiE7oVDzAz6ywtBGWnpZtdMtcmKCC64HVrqa7+ARZaPbhezf7mxuR7CHvKKiBw03acXwt1eRiDN071yJc/PeadrJcDsHEIgScRWI5MIGiU/2iMC9skekcK10N/k6jdL4Ws580DXlM4Bb9ZKW8QqfBLAm/WYhF0C+NC1zNTwIkmdrVIg8i1EPGVCNnJohLDjx0LJDvDwhqs3uwlv0dcPYe65zTK1oCMxyxD/BqY6UMYGcsVT0Lr3ummJpzdDa6bmzJVthAIXgn3TdWGW6AuBV9DIx9he5ZtX+ZA1Xp2KRxfgyT0t5s3f",
+      "seq": 1,
+      "dirty": false,
+      "deleted": false
+    },
+    "835edd2f-330e-4fcc-b573-2055c5a8ee89": {
+      "blob": "AUBNqnmf/ebEE2D0HCyou+1x9LlbtSsl2nJ3+ZV/DCT0hoGDQVywlyN6oEY4NVLQUp6l6IeZd6JG/PHYflFmVZbkQMAqcsBLG2Lnb2LeygdyV2DirHTpBqrSsSk4oUaoRckGCn7AuEsmS0qJ+b4f8bunbwQGeGxj5wR7byYCNgs1TmlInXhhxyplv5dnaBhLLKUzUA36t2gRdhKz3hVe+mANlqsZXZnWzZK7mBYuPhws9qK+Bsc5GczA9i/MdOs/fMQKRbfGNJLa+fKcu2rVT7kzS/vFONPmCJunOes+md2jZYI=",
+      "seq": 2,
+      "dirty": false,
+      "deleted": false
+    },
+    "b9081915-9206-41d7-8bb6-b9f115983713": {
+      "blob": "Acepxnk+kJym2DjdxnC7s21zAAhq3ZPhsRItxSEFd/Ymu+6PTdXki5kSpPn6RE6ywpL68NH/o7djcaS5/g7xcrLSdd2eD91tvvi95Ow/Zfwa3+IZlYDo7gHorhz2LvXS/IqCzro41t7xR86Ka28b/pTVEKuL4vqHKvNu6JKMkorcqz1oQc2DRW57iSDF8osbnwvC3iUHklqKWxuAoxdD13/jI1f5vk8N0LFOCyrVh56AIr/IecYQsOh6y98=",
+      "seq": 3,
+      "dirty": false,
+      "deleted": false
+    },
+    "8a6e2c6e-6d19-47b1-8b2e-924b6fdb83b1": {
+      "blob": "AUkJyTCyWzOzBCR6iVah6EDcsyS9IZDDoFQxge+yLyKbqfOxzoM5Q1PGVR5z8p3qv0a2jdzHzXf3mRrEcuOyZA/j/fwr6W4pPy3Z0/Fiy4yd444W85eBsUGJs1/cGgR4PloGnk2Umr9aquyxNy9XmTwO1ieMslP/RkUKOO4HD9Gh",
+      "seq": 4,
+      "dirty": false,
+      "deleted": false
+    },
+    "9b7fecc4-7031-4144-880d-e0f9cbf91a74": {
+      "blob": "AYl4+RrxuT/qDCqibkLK/GE1+kkY+Mofcb0yVQBt3BH+Delp9wQ6i+PQnNm7v5s90f48Q6BmATE210E9vZYe+iLHDMXhV7FoYUyH6SH5hFP7jqk4dgD6JxXbaPgLDxE5NjUqoZC5NFjvHyXZFNQU7cKRTzy7ZdoIhHSpQViBcY3tW2UB1jMb/L9DKcyI2LM5UIleRbShq7z8RkhB17Rk0FJlTX0X/qoBYhZXUQpP/QGdpY2c9AIcObIRHDlKZfWxOXw0psSW3HWRC3CWZGb/SFzPAko=",
+      "seq": 5,
+      "dirty": false,
+      "deleted": false
+    }
+  },
+  "sync": {
+    "serverUrl": "http://127.0.0.1:35627",
+    "username": "fixture",
+    "tokenBlob": "AWfQi+Nx7BY04rQ1StYQGPpy/bKZVgCBVNGZDMzsm1Esnb0Oq3V5p515cxmQgwuQAcHWn4hqPy830m5ttHbxFcLvR+4oBItUklF+dP7PhJNCyvJv",
+    "cursor": 0,
+    "lastSyncAt": 1794952807517
+  },
+  "keyCheck": "ASp8Y0MOczTPXY28aWb7VmC+8X/UeE4M86m4LTn1vfzdt1vx+3riEJP8IW2cJBF1iA=="
+}

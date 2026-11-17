@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "kdf": {
+    "alg": "argon2id",
+    "m": 65536,
+    "t": 3,
+    "p": 1,
+    "salt": "AEVL82FpplVCtX5UEunV4g=="
+  },
+  "wrappedVaultKey": "AVpxhW41Fbo2qsVS3Ee4uv4ERUK5vtsyRbOn7eFM4CchvOhgNjP3vqfY7uw1cdsLJOTfvmk1NFV1+zPkJKBqUTfJZSiXnG/1jA==",
+  "items": {
+    "d2f88d48-0d1f-4d32-ada6-ceb23a2baa31": {
+      "blob": "AWH38EkmsHe11UYovgYIyxqb2w/xBjD3bKXFFRk79f48FV2UiJOM3IjdgAyWbyW9R17YCno3JTa/mXbco10x8qou5ph58L65K7h6M9O2+K6nXnKUEb63VKnXSEclts3ot33wn3yBOqkPD6MxKAWpJ0v6x2LP7zcWM80iB47YKwgO6BmSRz4tQLowXJMxYQxN/rTUmXiWeH0/mX0Nkqd43fC+dOQW+be1yrkD1o11tq45ORoTphGSoPFAyTouL4ldpE64PEvm5DCYg9ADbWTn+3l6mjL8mkH6u30rnCux/ytLSYrEY+N4UIgBG1FKUIojmqINOZbTKrgkhHcIlsSFTeIVsyqPRLOnAggaheBiulKXvjI0Ph7rdxitMhjdk9JRm0Re6yMv5PV79ReSS4gjR24HsdC4KaHUtKfrAsAMAhcEIpM1J0spz8FqW1blrN/6MbGwBE22",
+      "seq": 0,
+      "dirty": true,
+      "deleted": false
+    },
+    "0991306e-f808-46f1-9cc0-20f939484044": {
+      "blob": "ARxREqFkR0SdqXo2F6CdJqRpBK/XMlO5elXQyt+3YtzFZsm98JTzRjvuvon8htIpsvExnH7U/wR7fh8Pc16IKc3Yi2fvM5Ss4VoGP1YMxs6gQeeSy7uV1BOHy2NyNGt+FrdHamSFeRlhJdPXpH0Zjp7d9gXqTfHRjt9UGdcQEqE5WqR77cM6iMDo1noeFZoOG1Qw5u311j314xm4jfWgsvWlXd0b0EvAwYPOKss+EY/IzG7+5CG60wEnU33fbDqETvjEzOLtwnz/VBYyDtvftrVk6tFKhFPkorjMRc2JjyNq114=",
+      "seq": 0,
+      "dirty": true,
+      "deleted": false
+    },
+    "4f1dced9-a7e5-44fc-8450-a4cce0af6d3d": {
+      "blob": "AVOfI6gqoWI89NVIPs4DOosw+yfovpWAK528eL9MKslPdn2KJTGML5hGncDrxxUsnyYVgyw08aS2m7E9o+6SGHUcBjM1hvImAFRwpf1KgIh8dD04/NM8SgQihrtYgyfDSFHapc1AAHbzaphkbY5EtOfojXKD9Njqzu631yb4ML1v7UPHkZs+/I9tcf5EYfhls+2XvQjVlAHRp0FZjvMiGVGgznn0i/9w6io4spfiB0bGrnq+xt5CXBTHM54=",
+      "seq": 0,
+      "dirty": true,
+      "deleted": false
+    },
+    "8231a838-17b1-45a2-97d1-6ae0e2a9e4f0": {
+      "blob": "AfT1pwmxy2jAg3yO7GK3bgUqNwkRHwNGGccbig2T7twEgO7g0ZhHfrzg982LT9/kNSyeNf5U1NcMBc5f8n4OyNzWP/7PS/SBLt4DAP8mMeEcDHXmr1GkdmtNJNlHGMyQEdUsgKA/yjP7X8lDkRPFXPq8M/xBICZXMDSrI380IZyW",
+      "seq": 0,
+      "dirty": true,
+      "deleted": false
+    },
+    "ba2be24e-8b93-40ae-a45b-edbf32674324": {
+      "blob": "AeUt4FLb+VbYrx9vbC0wrAEjjn7Mra12HFb/X1JKAbFYJcWkQQb+MVgyhvLlTd3FVGK8OTf9nGuNgzt16qzoZ8IrSbHcBigfFvr2Ufitl9GXcSOedptl77GEKxOJIIlsXZQ8uj3YDC1iVkYEGwIpMPD8zdLhAtQ2BoKBJ9cRV8l6o+qEsluKSEWrW0yifbQHK3ZNcZonOioz/UblHTHg1YJlHmnBim6WIcW6Dxg3IlerrXGW6eiZAzGH/KxBfa+/9XJCDyjshSdMmK+iy6lWcvbsTJI=",
+      "seq": 0,
+      "dirty": true,
+      "deleted": false
+    }
+  },
+  "sync": null,
+  "keyCheck": "Aatlc7nNsckrcXREyHiVkD/VbDNH+sFUvUfQGRr/xyKc4Xf8BLfooCcNvMwtns1dSg=="
+}

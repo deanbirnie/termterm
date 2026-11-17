@@ -9,3 +9,4 @@ release/
 test-results/
 apps/desktop/test-results/
 apps/mobile/test-results/
+apps/server/test/compat/.work/
