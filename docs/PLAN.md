@@ -89,8 +89,6 @@ Not yet confirmed anywhere:
   a real device (added after the last device test).
 - Android fingerprint unlock, background sessions and the new icon on a device.
 - Windows Hello unlock on a real Windows machine.
-- A signed release APK (needs the signing key secrets, then a release).
-- The Windows in-app update from one release to the next.
 - "Open unlocked on this device" against a real OS credential store.
 - Anything on macOS.
 
@@ -104,10 +102,11 @@ Known gaps inside phase 1 scope:
 
 ## Work queue
 
-Agreed with the owner on 2026-11-17: four batches, done in this order, **one
-pull request per batch**. All four are done; new work gets queued here.
-Whether a batch's PR becomes a release is the owner's call (see "Releasing" in
-the README).
+Agreed with the owner: batches done in this order, **one pull request per
+batch**. Batches 1 to 4 (2026-11-17) are done; batches 5 onwards were agreed on
+2026-11-17 as the next queue. Whether a batch's PR becomes a release is the
+owner's call (see "Releasing" in the README); a batch marked **release** has
+already been agreed as one.
 
 ### Batch 1 — Everyday terminal (done)
 
@@ -148,7 +147,76 @@ the README).
 - [x] Identities (one login shared by several hosts) and host groups
 - [x] Account deletion from the app (Sync → Delete account, with the master password)
 
+### Batch 5 — Housekeeping, rollback protection, user guide (next; **release**)
+
+- [ ] Bring this plan up to date (items shipped in batches 1–4, things since
+      confirmed on devices) and a maintenance run (Electron 45.3.3 and whatever
+      else is due; see `docs/MAINTENANCE.md`)
+- [ ] Rollback protection: each device remembers how far the vault has got, so
+      a malicious or broken server cannot quietly serve an older copy
+- [ ] User documentation: how to use the app, every feature, what it does and
+      where to find it (desktop and Android)
+
+### Batch 6 — Safer releases and data
+
+- [ ] Release checks: every expected file attached and signed, update metadata
+      correct; tests for the version step; actionlint and shellcheck
+- [ ] Vaults made by earlier releases still open; old and new apps sync together
+- [ ] Server: backup guide, an automated backup-and-restore check, storage usage
+      reporting
+
+### Batch 7 — Everyday sessions
+
+- [ ] Per-host keep-alive interval, startup snippet, environment variables
+- [ ] Terminal themes, fonts, a colour per host
+- [ ] Session logs (save a session's output to a file)
+- [ ] Broadcast input to several panes at once
+
+### Batch 8 — Android catches up
+
+- [ ] Port forwarding on Android
+- [ ] Start chosen forwards when the app opens
+- [ ] SFTP file browser on Android
+
+### Batch 9 — Files, part 2
+
+- [ ] File permissions, and editing a remote file in place (desktop and Android)
+- [ ] Android emulator tests in CI
+
+### Batch 10 — Connecting in more places
+
+- [ ] Reaching a host through a SOCKS or HTTP proxy
+- [ ] SSH certificates and agent forwarding
+
+### Batch 11 — Hardware keys and scanning
+
+- [ ] FIDO2 / security-key keys
+- [ ] Scans of the Android libraries and the server image
+
+### Batch 12 — Windows code signing
+
+- [ ] Sign the Windows installer (needs a certificate bought in the owner's
+      name; can move earlier once there is one)
+
+### Batch 13 — Shared vaults for teams
+
+- [ ] Per-vault keys wrapped to each member's public key (likely two PRs)
+
+### Back burner (only when the owner asks)
+
+- [ ] macOS build, with Touch ID unlock and self-update (signing and notarisation)
+- [ ] iOS app
+- [ ] Mosh, Telnet, serial
+
+On-device checks, for the owner when convenient (not batch work): Windows Hello
+unlock and "Open unlocked on this device" on Windows; fingerprint unlock,
+background sessions, keyboard behaviour and the export/import file picker on
+Android.
+
 ## Phase 2 — Vault hardening and account management
+
+The phases below are the full roadmap; the order work is done in is the work
+queue above, which names the batch each open item belongs to.
 
 - [x] Change master password: re-wraps the vault key and rotates `authKey` via `POST /v1/password`, which signs out other devices; they adopt the new keys on "Sign in again" (`Vault.adoptAccountKeys`)
 - [x] "Open unlocked on this device": the vault key is kept in the OS credential
@@ -188,10 +256,11 @@ the README).
       replaced by an imported one. Desktop reads `~/.ssh`; phones take pasted text.
       Passphrase-protected keys are listed to add by hand (`packages/app/src/ssh-import.ts`,
       `VaultService.scanSshImport` / `applySshImport`, `apps/desktop/src/main/ssh-files.ts`)
-- [ ] Encrypted export / import of the vault
-- [ ] Identities (reusable username + credential shared across hosts), host groups
+- [x] Encrypted export / import of the vault (Batch 4: Settings → Export and import)
+- [x] Identities (reusable username + credential shared across hosts), host groups (Batch 4)
 - [ ] SSH certificates, FIDO2 / security-key keys, agent forwarding
-- [ ] Account deletion from the app (today it takes a database command on the server; see the README), server-side storage quota reporting, server backups doc
+- [x] Account deletion from the app (Batch 4: Sync → Delete account)
+- [ ] Server-side storage usage reporting, server backups doc (Batch 6)
 
 ## Phase 3 — Terminal and session features
 
@@ -261,7 +330,7 @@ the README).
 - [x] First real releases made; the Release workflow works end to end
 - [x] Confirmed by the owner on real devices (0.6.0 → 0.6.1): the desktop app updates itself from the New update card, and the Android app downloads and installs its APK
 - [ ] Code signing for the Windows installer; macOS build (needs signing and notarisation before it can self-update)
-- [ ] Android app (`apps/mobile`, Capacitor) reusing `packages/core`, `packages/app` and `packages/ui`:
+- [x] Android app (`apps/mobile`, Capacitor) reusing `packages/core`, `packages/app` and `packages/ui`:
   - [x] Step 1: shared UI and vault logic moved out of the desktop app into `packages/ui` and `packages/app`
   - [x] Step 2: Android app with vault and sync (no SSH yet). The web layer is
         covered by `npm run e2e:mobile` in a phone-sized browser (vault, storage,
@@ -293,7 +362,7 @@ the README).
         sessions themselves have been used on a phone. Open questions
         for a device test: whether long-idle sessions survive Doze without a wake
         lock, and how the prompt behaves on phones with face unlock only.
-  - [x] Step 5: signed `termterm-<version>.apk` on each release, when the signing key secrets are set (README, "Android signing key"). **Not yet exercised: needs the secrets and a real release.**
+  - [x] Step 5: signed `termterm-<version>.apk` on each release, when the signing key secrets are set (README, "Android signing key"). Exercised since 0.3.x: every release carries a signed APK, checked against the release certificate, and the owner has installed one over another.
 - [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
 
 ## Working on the repo
