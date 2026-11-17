@@ -7,7 +7,8 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
@@ -34,6 +35,65 @@ function hostKey() {
 }
 const logins = []
 let authorizedKey = null // public key line the server accepts, set once the app generates one
+// The test box's files over SFTP: a folder standing in for the server's disk.
+const sftpRoot = join(mkdtempSync(join(tmpdir(), 'termterm-sftp-')))
+mkdirSync(join(sftpRoot, 'home/tester/logs'), { recursive: true })
+writeFileSync(join(sftpRoot, 'home/tester/notes.txt'), 'remote notes\n')
+writeFileSync(join(sftpRoot, 'home/tester/logs/app.log'), 'started\n')
+function serveSftp(sftp) {
+  const { STATUS_CODE: S, flagsToString } = utils.sftp
+  const remotePath = (p) => posix.normalize(p.startsWith('/') ? p : `/home/tester/${p}`)
+  const onDisk = (p) => join(sftpRoot, remotePath(p))
+  const handles = new Map()
+  let nextHandle = 0
+  const handle = (value) => {
+    const b = Buffer.alloc(4)
+    b.writeUInt32BE(nextHandle)
+    handles.set(nextHandle++, value)
+    return b
+  }
+  const get = (h) => handles.get(h.readUInt32BE(0))
+  const attrs = (st) => ({ mode: st.mode, uid: 0, gid: 0, size: st.size, atime: st.atimeMs / 1000 | 0, mtime: st.mtimeMs / 1000 | 0 })
+  const fail = (id, e) => sftp.status(id, e?.code === 'ENOENT' ? S.NO_SUCH_FILE : S.FAILURE, e?.message)
+  const ok = (id, fn) => {
+    try {
+      fn()
+      sftp.status(id, S.OK)
+    } catch (e) {
+      fail(id, e)
+    }
+  }
+  sftp.on('REALPATH', (id, p) => sftp.name(id, [{ filename: remotePath(p), longname: remotePath(p), attrs: {} }]))
+  sftp.on('STAT', (id, p) => { try { sftp.attrs(id, attrs(fs.statSync(onDisk(p)))) } catch (e) { fail(id, e) } })
+  sftp.on('LSTAT', (id, p) => { try { sftp.attrs(id, attrs(fs.lstatSync(onDisk(p)))) } catch (e) { fail(id, e) } })
+  sftp.on('FSTAT', (id, h) => { try { sftp.attrs(id, attrs(fs.fstatSync(get(h).fd))) } catch (e) { fail(id, e) } })
+  sftp.on('OPENDIR', (id, p) => { try { sftp.handle(id, handle({ dir: onDisk(p), names: fs.readdirSync(onDisk(p)) })) } catch (e) { fail(id, e) } })
+  sftp.on('READDIR', (id, h) => {
+    const d = get(h)
+    if (!d || d.done) return sftp.status(id, S.EOF)
+    d.done = true
+    sftp.name(id, d.names.map((n) => ({ filename: n, longname: n, attrs: attrs(fs.lstatSync(join(d.dir, n))) })))
+  })
+  sftp.on('OPEN', (id, p, flags) => { try { sftp.handle(id, handle({ fd: fs.openSync(onDisk(p), flagsToString(flags)) })) } catch (e) { fail(id, e) } })
+  sftp.on('READ', (id, h, offset, length) => {
+    const buf = Buffer.alloc(length)
+    const n = fs.readSync(get(h).fd, buf, 0, length, offset)
+    n ? sftp.data(id, buf.subarray(0, n)) : sftp.status(id, S.EOF)
+  })
+  sftp.on('WRITE', (id, h, offset, data) => ok(id, () => fs.writeSync(get(h).fd, data, 0, data.length, offset)))
+  sftp.on('CLOSE', (id, h) => ok(id, () => {
+    const v = get(h)
+    if (v?.fd !== undefined) fs.closeSync(v.fd)
+    handles.delete(h.readUInt32BE(0))
+  }))
+  sftp.on('MKDIR', (id, p) => ok(id, () => fs.mkdirSync(onDisk(p))))
+  sftp.on('RMDIR', (id, p) => ok(id, () => fs.rmdirSync(onDisk(p))))
+  sftp.on('REMOVE', (id, p) => ok(id, () => fs.unlinkSync(onDisk(p))))
+  sftp.on('RENAME', (id, a, b) => ok(id, () => fs.renameSync(onDisk(a), onDisk(b))))
+  sftp.on('SETSTAT', (id) => sftp.status(id, S.OK))
+  sftp.on('FSETSTAT', (id) => sftp.status(id, S.OK))
+}
+
 const sshHostKey = hostKey()
 const sshServer = new Server({ hostKeys: [sshHostKey] }, (client) => {
   client
@@ -53,8 +113,32 @@ const sshServer = new Server({ hostKeys: [sshHostKey] }, (client) => {
       ctx.reject(['publickey', 'password'])
     })
     .on('ready', () => {
+      // Like sshd: open TCP connections for the client (jump hosts, local and SOCKS forwards)...
+      client.on('tcpip', (accept, reject, info) => {
+        const socket = net.connect(info.destPort, info.destIP)
+        socket.once('connect', () => {
+          const channel = accept()
+          socket.pipe(channel).pipe(socket)
+        })
+        socket.once('error', () => reject())
+      })
+      // ...and listen on the server for remote forwards.
+      const listeners = []
+      client.on('request', (accept, reject, name, info) => {
+        if (name !== 'tcpip-forward') return reject?.()
+        const listener = net.createServer((socket) => {
+          client.forwardOut(info.bindAddr, info.bindPort, socket.remoteAddress, socket.remotePort, (err, channel) => {
+            if (err) return socket.destroy()
+            socket.pipe(channel).pipe(socket)
+          })
+        })
+        listeners.push(listener)
+        listener.listen(info.bindPort, info.bindAddr, () => accept?.(listener.address().port))
+      })
+      client.on('close', () => listeners.forEach((l) => l.close()))
       client.on('session', (accept) => {
         const session = accept()
+        session.on('sftp', (accept) => serveSftp(accept()))
         session.on('pty', (accept) => accept())
         session.on('window-change', (accept) => accept?.())
         session.on('shell', (accept) => {
@@ -93,6 +177,7 @@ const syncUrl = `http://127.0.0.1:${sync.server.address().port}`
 // A fake release feed: version 9.9.9 with a small stand-in "installer".
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
+import net from 'node:net'
 const fakeInstaller = Buffer.from('not a real installer, just bytes to download and verify')
 const feedFiles = {
   '/latest-linux.yml': [
@@ -289,6 +374,176 @@ try {
   assert.equal(await a.page.getByRole('dialog').count(), 0)
   step('second tab logged in with the vault key, no trust prompt this time')
 
+  // ---- port forwarding through the test box -----------------------------------------
+  {
+    const page = a.page
+    const loginsBefore = logins.length // each forward logs in on its own; later checks count only sessions
+    const freePort = () =>
+      new Promise((resolve) => {
+        const probe = net.createServer().listen(0, '127.0.0.1', () => {
+          const { port } = probe.address()
+          probe.close(() => resolve(port))
+        })
+      })
+    const echo = net.createServer((s) => s.on('data', (d) => s.write(`echo:${d}`)))
+    await new Promise((r) => echo.listen(0, '127.0.0.1', r))
+    const echoPort = echo.address().port
+    /** Connects to a port, optionally does a SOCKS5 CONNECT first, sends "ping", returns the reply. */
+    const ping = (port, socksTo) =>
+      new Promise((resolve) => {
+        const sock = net.connect(port, '127.0.0.1')
+        let got = Buffer.alloc(0)
+        let stage = socksTo ? 'greeting' : 'open'
+        sock.on('connect', () => (socksTo ? sock.write(Buffer.from([5, 1, 0])) : sock.write('ping')))
+        sock.on('data', (d) => {
+          got = Buffer.concat([got, d])
+          if (stage === 'greeting' && got.length >= 2) {
+            const name = Buffer.from(socksTo.host)
+            sock.write(Buffer.concat([Buffer.from([5, 1, 0, 3, name.length]), name, Buffer.from([socksTo.port >> 8, socksTo.port & 255])]))
+            got = got.subarray(2)
+            stage = 'request'
+          }
+          if (stage === 'request' && got.length >= 10) {
+            got = got.subarray(10)
+            stage = 'open'
+            sock.write('ping')
+          }
+          if (stage === 'open' && got.toString().includes('echo:ping')) {
+            sock.end()
+            resolve(got.toString())
+          }
+        })
+        sock.on('error', () => resolve('refused'))
+        sock.on('close', () => resolve(got.toString() || 'closed'))
+      })
+    const [localPort, socksPort, remotePort] = [await freePort(), await freePort(), await freePort()]
+
+    const addForward = async (kind, bindPort, dest) => {
+      await page.getByRole('button', { name: 'New port forward' }).click()
+      const panel = page.getByRole('complementary', { name: 'Port forward' })
+      await panel.getByLabel('Through host').selectOption({ label: 'Test box' })
+      await panel.getByLabel('Kind').selectOption(kind)
+      await panel.getByLabel('Listening port').fill(String(bindPort))
+      if (dest) {
+        await panel.getByLabel('Destination host').fill('127.0.0.1')
+        await panel.getByLabel('Destination port').fill(String(dest))
+      }
+      await panel.getByRole('button', { name: 'Save' }).click()
+      await panel.getByRole('button', { name: 'Close' }).click()
+    }
+    await page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await page.getByRole('navigation').getByRole('button', { name: 'Forwarding', exact: true }).click()
+    await addForward('local', localPort, echoPort)
+    await addForward('dynamic', socksPort)
+    await addForward('remote', remotePort, echoPort)
+    const local = `${localPort} → 127.0.0.1:${echoPort}`
+    const socks = `SOCKS on ${socksPort}`
+    const remote = `${remotePort} → 127.0.0.1:${echoPort}`
+    for (const label of [local, socks, remote]) {
+      await page.getByRole('button', { name: `Start ${label}` }).click()
+    }
+    await assertCount(page.getByText(/^Running · 0 connections$/), 3)
+    await shot(page, '11-forwarding')
+
+    assert.match(await ping(localPort), /echo:ping/)
+    assert.match(await ping(socksPort, { host: 'localhost', port: echoPort }), /echo:ping/)
+    assert.match(await ping(remotePort), /echo:ping/) // the server's port, back to this computer
+    step('local, SOCKS and remote port forwards carry traffic through the test box')
+
+    // A connection held open shows in the count; stopping closes the port.
+    const held = net.connect(localPort, '127.0.0.1')
+    await page.locator('.forward-row', { hasText: local }).getByText('Running · 1 connection', { exact: true }).waitFor()
+    held.destroy()
+    await page.getByRole('button', { name: `Stop ${local}` }).click()
+    await page.getByRole('button', { name: `Start ${local}` }).waitFor()
+    assert.equal(await ping(localPort), 'refused')
+
+    // Its port taken by something else: an error, not a silent failure.
+    const squatter = net.createServer().listen(localPort, '127.0.0.1')
+    await new Promise((r) => squatter.once('listening', r))
+    await page.getByRole('button', { name: `Start ${local}` }).click()
+    await page.getByText(`Port ${localPort} is already in use on this computer`).waitFor()
+    squatter.close()
+    for (const label of [socks, remote]) await page.getByRole('button', { name: `Stop ${label}` }).click()
+    echo.close()
+    logins.splice(loginsBefore)
+    await page.getByRole('navigation').getByRole('button', { name: 'Hosts', exact: true }).click()
+    step('forwards show their connections, stop cleanly, and report a port already in use')
+  }
+
+  // ---- browsing files over SFTP -------------------------------------------------------
+  {
+    const page = a.page
+    const loginsBefore = logins.length // file browsing logs in on its own; later checks count only sessions
+    const localDir = join(tmp, 'local-files')
+    mkdirSync(join(localDir, 'bundle'), { recursive: true })
+    writeFileSync(join(localDir, 'upload-me.txt'), 'from this computer\n')
+    writeFileSync(join(localDir, 'bundle/inner.txt'), 'inside a folder\n')
+    const remoteHome = join(sftpRoot, 'home/tester')
+
+    await page.locator('.card', { hasText: 'Test box' }).click()
+    await page.getByRole('button', { name: 'Files', exact: true }).click()
+    const server = page.getByRole('region', { name: 'Server' })
+    const local = page.getByRole('region', { name: 'This computer' })
+    const row = (pane, name) => pane.getByRole('option', { name, exact: true })
+    await row(server, 'notes.txt').waitFor()
+    await row(server, 'logs').waitFor()
+    await local.getByLabel('Folder on this computer').fill(localDir)
+    await local.getByLabel('Folder on this computer').press('Enter')
+    await row(local, 'upload-me.txt').waitFor()
+    await shot(page, '12-files')
+
+    await row(local, 'upload-me.txt').click()
+    await local.getByRole('button', { name: /Upload/ }).click()
+    await row(server, 'upload-me.txt').waitFor()
+    assert.equal(readFileSync(join(remoteHome, 'upload-me.txt'), 'utf8'), 'from this computer\n')
+    await row(local, 'bundle').dragTo(server.getByRole('listbox', { name: 'Files' }))
+    await row(server, 'bundle').waitFor()
+    assert.equal(readFileSync(join(remoteHome, 'bundle/inner.txt'), 'utf8'), 'inside a folder\n')
+    await row(server, 'notes.txt').click()
+    await server.getByRole('button', { name: /Download/ }).click()
+    await row(local, 'notes.txt').waitFor()
+    assert.equal(readFileSync(join(localDir, 'notes.txt'), 'utf8'), 'remote notes\n')
+    step('files upload (by button and by dragging a folder across) and download, contents intact')
+
+    // Copying over something that is already there is refused, not overwritten.
+    writeFileSync(join(localDir, 'upload-me.txt'), 'changed here\n')
+    await row(local, 'upload-me.txt').click()
+    await local.getByRole('button', { name: /Upload/ }).click()
+    await page.getByRole('list', { name: 'Transfers' }).getByText('"upload-me.txt" is already there. Rename or delete it first.').waitFor()
+    assert.equal(readFileSync(join(remoteHome, 'upload-me.txt'), 'utf8'), 'from this computer\n')
+
+    // Folders: open and go back up; new folder, rename, delete.
+    await row(server, 'logs').dblclick()
+    await row(server, 'app.log').waitFor()
+    await server.getByRole('button', { name: 'Up one folder' }).click()
+    await row(server, 'notes.txt').waitFor()
+    assert.equal(await server.getByLabel('Folder on the server').inputValue(), '/home/tester')
+    await server.getByRole('button', { name: 'New folder' }).click()
+    await page.getByRole('dialog', { name: 'New folder' }).getByLabel('Name').fill('made-here')
+    await page.getByRole('dialog', { name: 'New folder' }).getByRole('button', { name: 'Create' }).click()
+    await row(server, 'made-here').click()
+    await server.getByRole('button', { name: 'Rename' }).click()
+    await page.getByRole('dialog', { name: 'Rename made-here' }).getByLabel('Name').fill('renamed')
+    await page.getByRole('dialog', { name: 'Rename made-here' }).getByRole('button', { name: 'Rename' }).click()
+    await row(server, 'renamed').waitFor()
+    assert.ok(existsSync(join(remoteHome, 'renamed')))
+    await row(server, 'renamed').click()
+    await server.getByRole('button', { name: 'Delete' }).click()
+    await page.getByRole('dialog', { name: 'Delete renamed?' }).getByRole('button', { name: 'Delete' }).click()
+    await assertCount(row(server, 'renamed'), 0)
+    assert.ok(!existsSync(join(remoteHome, 'renamed')))
+    await page.getByRole('button', { name: 'Close Test box' }).last().click()
+
+    // A terminal to a host opens its files too.
+    await page.getByRole('tab', { name: /Test box/ }).first().click()
+    await page.getByRole('button', { name: 'Browse files' }).click()
+    await row(server, 'notes.txt').waitFor()
+    await page.getByRole('button', { name: 'Close Test box' }).last().click()
+    logins.splice(loginsBefore)
+    step('folders open and go back up; new folder, rename and delete work; nothing is overwritten; a terminal opens its host\'s files')
+  }
+
   // ---- a terminal on this computer -------------------------------------------------
   const activeRows = () => a.page.locator('.pane:not([hidden]) .xterm-rows')
   await a.page.getByRole('button', { name: 'Vault', exact: true }).click()
@@ -447,7 +702,10 @@ try {
         '  User tester',
         '  IdentityFile deploy_key',
         'Host behind-bastion',
-        '  HostName 10.9.9.9',
+        '  HostName 127.0.0.1',
+        `  Port ${sshPort}`,
+        '  User tester',
+        '  IdentityFile deploy_key',
         '  ProxyJump imported-box',
         'Host locked-box',
         '  HostName 10.9.9.10',
@@ -469,9 +727,9 @@ try {
     const found = dialog.getByRole('list', { name: 'Hosts found' })
     await found.getByText('imported-box', { exact: true }).waitFor()
     assert.equal(await found.getByRole('checkbox').count(), 3)
-    await found.getByText(`tester@127.0.0.1:${sshPort} · key deploy_key`).waitFor()
-    await found.getByText('fallback@10.9.9.9').waitFor() // User from "Host *"
-    await dialog.getByText(/ProxyJump is not supported yet, so these connect directly: behind-bastion/).waitFor()
+    await assertCount(found.getByText(`tester@127.0.0.1:${sshPort} · key deploy_key`), 2)
+    await found.getByText('fallback@10.9.9.10 · key locked_key').waitFor() // User from "Host *"
+    assert.equal(await dialog.getByText(/ProxyJump/).count(), 0) // behind-bastion's jump host is in the config
     await dialog.getByText(/1 known_hosts entries are hashed/).waitFor()
     await shot(c.page, '10-import-preview')
     await dialog.getByRole('button', { name: 'Import 3 hosts' }).click()
@@ -492,6 +750,17 @@ try {
     await c.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
     assert.equal(await c.page.getByRole('dialog').count(), 0) // no "Trust this host?"
     assert.equal(logins.pop(), 'publickey') // (taken off: later checks count device A's and B's logins)
+
+    // ProxyJump came across: behind-bastion goes through imported-box, logging in to each with the key.
+    await c.page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await c.page.locator('.card', { hasText: 'behind-bastion' }).click()
+    assert.equal(await c.page.getByLabel('Jump host').locator('option:checked').innerText(), 'imported-box')
+    const loginsBefore = logins.length
+    await c.page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+    await assertCount(c.page.getByRole('tab', { name: /behind-bastion/ }), 1)
+    await c.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
+    assert.deepEqual(logins.splice(loginsBefore), ['publickey', 'publickey']) // the jump host, then the target
+    assert.equal(await c.page.getByRole('dialog').count(), 0)
     authorizedKey = before
 
     // Importing again finds them already there.
@@ -502,7 +771,7 @@ try {
     assert.equal(await dialog.getByRole('checkbox', { checked: true }).count(), 0)
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await c.app.close()
-    step('the imported host connected with its key and no trust prompt; importing again adds nothing')
+    step('the imported host connected with its key and no trust prompt; one behind a jump host connected through it; importing again adds nothing')
   }
 
   // ---- device B: sign in, everything arrives, no trust prompt --------------------
@@ -817,5 +1086,6 @@ try {
   feed.close()
   sshServer.close()
   rmSync(tmp, { recursive: true, force: true })
+  rmSync(sftpRoot, { recursive: true, force: true })
 }
 process.exit(0)

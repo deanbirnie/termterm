@@ -10,6 +10,7 @@ import { registerPlugin, type PluginListenerHandle } from '@capacitor/core'
 import {
   fingerprintOf,
   keyTypeOfBlob,
+  MAX_JUMPS,
   type ConnectTarget,
   type KeyTools,
   type SessionStatus,
@@ -26,7 +27,8 @@ interface NativeKey {
   keyType: string
 }
 
-type NativePrompt = { promptId: string; sessionId: string } & (
+/** `hop`: 0 is the target, 1 the jump host it is reached through, and so on. */
+type NativePrompt = { promptId: string; sessionId: string; hop?: number } & (
   | { kind: 'hostkey'; publicKey: string }
   | { kind: 'password'; username: string; retry: boolean }
   | { kind: 'keyboard'; name: string; instructions: string; prompts: Array<{ prompt: string; echo: boolean }> }
@@ -41,6 +43,8 @@ interface SshPluginApi {
     password?: string
     privateKey?: string
     passphrase?: string
+    /** Jump hosts, nearest first. */
+    jumps?: Array<{ host: string; port: number; username: string; password?: string; privateKey?: string; passphrase?: string }>
     cols: number
     rows: number
   }): Promise<void>
@@ -106,8 +110,8 @@ export interface SshEvents {
 export function createSsh(vault: VaultService, events: SshEvents) {
   /** What to do with the interface's answer to a prompt it is showing. */
   const pending = new Map<string, (reply: SshPromptReply) => void>()
-  /** Where each session is connecting to, for host key decisions and prompt titles. */
-  const targets = new Map<string, { address: string; port: number; label: string; failure?: string }>()
+  /** Where each session connects, hop by hop (0 is the target), for host key decisions and prompt titles. */
+  const targets = new Map<string, { hops: Array<{ address: string; port: number; label: string }>; failure?: string }>()
 
   void Ssh.addListener('data', (e) => events.data(e.sessionId, fromBase64(e.data)))
 
@@ -123,12 +127,14 @@ export function createSsh(vault: VaultService, events: SshEvents) {
   })
 
   void Ssh.addListener('prompt', (p) => {
-    const target = targets.get(p.sessionId)
-    if (!target) {
+    const session = targets.get(p.sessionId)
+    const hop = session?.hops[p.hop ?? 0]
+    if (!session || !hop) {
       void Ssh.promptReply({ promptId: p.promptId })
       return
     }
-    const base = { promptId: p.promptId, sessionId: p.sessionId, host: target.label }
+    const target = hop
+    const base = { promptId: p.promptId, sessionId: p.sessionId, host: hop.label }
 
     if (p.kind === 'hostkey') {
       // Trust on first use; a key different from the one on record is refused
@@ -153,7 +159,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         if (reply === true) {
           vault.trustHostKey(entry, changed)
         } else {
-          target.failure = changed
+          session.failure = changed
             ? 'Host key mismatch: connection refused'
             : 'Host key was not trusted'
         }
@@ -199,43 +205,61 @@ export function createSsh(vault: VaultService, events: SshEvents) {
 
   return {
     async connect(sessionId: string, target: ConnectTarget, cols: number, rows: number): Promise<void> {
-      let address: string
-      let port: number
-      let username: string
-      let password: string | undefined
-      let privateKey: string | undefined
-      let passphrase: string | undefined
-
       if ('local' in target) throw new Error('A local terminal is not available on a phone')
+      // The target first, then each jump host it is reached through.
+      type Hop = { address: string; port: number; username: string; password?: string; privateKey?: string; passphrase?: string }
+      const hops: Hop[] = []
       if ('hostId' in target) {
-        const host = vault.host(target.hostId)
-        if (host?.type !== 'host') throw new Error('Host not found')
-        ;({ address, port, username } = host.data)
-        password = host.data.password
-        if (host.data.keyId) {
-          const key = vault.key(host.data.keyId)
-          if (key?.type === 'key') {
-            privateKey = key.data.privateKey
-            passphrase = key.data.passphrase
+        const seen = new Set<string>()
+        let id: string | undefined = target.hostId
+        while (id) {
+          if (seen.has(id)) throw new Error('A host cannot be reached through itself')
+          if (hops.length > MAX_JUMPS) throw new Error(`At most ${MAX_JUMPS} jump hosts in a row`)
+          seen.add(id)
+          const host = vault.host(id)
+          if (host?.type !== 'host') throw new Error(hops.length ? 'Jump host not found' : 'Host not found')
+          const hop: Hop = { address: host.data.address, port: host.data.port, username: host.data.username, password: host.data.password }
+          if (host.data.keyId) {
+            const key = vault.key(host.data.keyId)
+            if (key?.type === 'key') {
+              hop.privateKey = key.data.privateKey
+              hop.passphrase = key.data.passphrase
+            }
           }
+          if (!hop.username) {
+            throw new Error(`${host.data.label} has no username. Add one to the host${hops.length ? '' : ', or connect as user@host'}.`)
+          }
+          hops.push(hop)
+          id = host.data.jumpHostId
         }
       } else {
-        ;({ address, port, username } = target)
+        if (!target.username) {
+          throw new Error('This host has no username. Add one to the host, or connect as user@host.')
+        }
+        hops.push({ address: target.address, port: target.port, username: target.username })
       }
-      if (!username) {
-        throw new Error('This host has no username. Add one to the host, or connect as user@host.')
+      const label = (h: Hop, i: number) => {
+        const where = h.port === 22 ? h.address : `${h.address}:${h.port}`
+        return i > 0 ? `${where} (jump host)` : where
       }
-
-      targets.set(sessionId, { address, port, label: port === 22 ? address : `${address}:${port}` })
+      targets.set(sessionId, { hops: hops.map((h, i) => ({ address: h.address, port: h.port, label: label(h, i) })) })
+      const [first, ...jumps] = hops
       try {
         await Ssh.connect({
           sessionId,
-          host: address,
-          port,
-          username,
-          password,
-          privateKey,
-          passphrase,
+          host: first!.address,
+          port: first!.port,
+          username: first!.username,
+          password: first!.password,
+          privateKey: first!.privateKey,
+          passphrase: first!.passphrase,
+          jumps: jumps.map((h) => ({
+            host: h.address,
+            port: h.port,
+            username: h.username,
+            ...(h.password ? { password: h.password } : {}),
+            ...(h.privateKey ? { privateKey: h.privateKey, passphrase: h.passphrase } : {}),
+          })),
           cols: Math.max(1, Math.floor(cols) || 80),
           rows: Math.max(1, Math.floor(rows) || 24),
         })

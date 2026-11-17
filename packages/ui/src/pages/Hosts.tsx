@@ -1,4 +1,4 @@
-import { FileInput, KeyRound, Plus, Server, X } from 'lucide-react'
+import { FileInput, FolderOpen, KeyRound, Plus, Server, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { ConnectTarget, HostInput, HostView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
@@ -31,7 +31,7 @@ export function HostsPage({
   onConnect,
 }: {
   snapshot: VaultSnapshot
-  onConnect: (target: ConnectTarget, title: string) => void
+  onConnect: (target: ConnectTarget, title: string, kind?: 'files') => void
 }) {
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
@@ -52,6 +52,8 @@ export function HostsPage({
   }, [snapshot.hosts, query])
 
   const open = (h: HostView) => onConnect({ hostId: h.id }, h.label)
+  const browse = (h: HostView) => onConnect({ hostId: h.id }, h.label, 'files')
+  const canBrowse = info?.capabilities.sftp ?? false
   const quickConnect = () => {
     if (!quick || !('address' in quick)) return
     onConnect(quick, quick.username ? `${quick.username}@${quick.address}` : quick.address)
@@ -148,6 +150,7 @@ export function HostsPage({
           onClose={() => setEditing(null)}
           onSaved={(id) => setEditing({ id })}
           onConnect={canConnect ? open : undefined}
+          onBrowse={canConnect && canBrowse ? browse : undefined}
         />
       )}
     </div>
@@ -160,6 +163,7 @@ function HostPanel({
   onClose,
   onSaved,
   onConnect,
+  onBrowse,
 }: {
   host?: HostView
   snapshot: VaultSnapshot
@@ -167,6 +171,8 @@ function HostPanel({
   onSaved: (id: string) => void
   /** Absent when this build cannot open SSH sessions. */
   onConnect?: (h: HostView) => void
+  /** Opens the host's files (SFTP); absent where there is no file browser. */
+  onBrowse?: (h: HostView) => void
 }) {
   const [label, setLabel] = useState(host?.label ?? '')
   const [address, setAddress] = useState(host?.address ?? '')
@@ -174,6 +180,7 @@ function HostPanel({
   const [username, setUsername] = useState(host?.username ?? '')
   const [tags, setTags] = useState(host?.tags.join(', ') ?? '')
   const [keyId, setKeyId] = useState(host?.keyId ?? '')
+  const [jumpHostId, setJumpHostId] = useState(host?.jumpHostId ?? '')
   const [password, setPassword] = useState('')
   const [clearPassword, setClearPassword] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -183,6 +190,19 @@ function HostPanel({
   useEffect(() => {
     if (keyId && !snapshot.keys.some((k) => k.id === keyId)) setKeyId('')
   }, [snapshot.keys, keyId])
+  useEffect(() => {
+    if (jumpHostId && !snapshot.hosts.some((h) => h.id === jumpHostId)) setJumpHostId('')
+  }, [snapshot.hosts, jumpHostId])
+
+  // Hosts this one can go through: not itself, nor any that already go through it.
+  const jumpChoices = snapshot.hosts.filter((h) => {
+    if (!host) return true
+    for (let id: string | undefined = h.id, n = 0; id && n < 10; n++) {
+      if (id === host.id) return false
+      id = snapshot.hosts.find((x) => x.id === id)?.jumpHostId
+    }
+    return true
+  })
 
   const input = (): HostInput => ({
     label,
@@ -191,6 +211,7 @@ function HostPanel({
     username,
     tags: tags.split(','),
     keyId: keyId || null,
+    jumpHostId: jumpHostId || null,
     password: password ? password : clearPassword ? null : undefined,
   })
   const dirty =
@@ -201,6 +222,7 @@ function HostPanel({
     username !== host.username ||
     tags !== host.tags.join(', ') ||
     keyId !== (host.keyId ?? '') ||
+    jumpHostId !== (host.jumpHostId ?? '') ||
     !!password ||
     clearPassword
 
@@ -266,6 +288,19 @@ function HostPanel({
           </select>
         </Field>
         <Field
+          label="Jump host"
+          hint="Connect through another saved host first, for a server that is only reachable from there (ssh's ProxyJump)."
+        >
+          <select value={jumpHostId} onChange={(e) => setJumpHostId(e.target.value)}>
+            <option value="">None: connect directly</option>
+            {jumpChoices.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
           label="Password"
           hint={
             host?.hasPassword && !clearPassword ? (
@@ -320,6 +355,11 @@ function HostPanel({
           >
             {dirty && host ? 'Save and connect' : 'Connect'}
           </Button>
+          {onBrowse && host && (
+            <Button disabled={busy || dirty} onClick={() => onBrowse(host)} title="Browse this host's files (SFTP)">
+              <FolderOpen size={15} /> Files
+            </Button>
+          )}
         </footer>
       ) : (
         <footer className="panel-foot">

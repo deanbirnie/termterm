@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { TermtermApi } from '@termterm/app'
 
 const invoke =
@@ -42,6 +42,24 @@ const api: TermtermApi = {
   importKey: invoke('key:import'),
   renameKey: invoke('key:rename'),
   saveSnippet: invoke('snippet:save'),
+  saveForward: invoke('forward:save'),
+  forwardStart: invoke('forward:start'),
+  forwardStop: invoke('forward:stop'),
+  forwardStates: invoke('forward:states'),
+  onForwardState: on('forward:state'),
+  sftpOpen: invoke('sftp:open'),
+  sftpList: invoke('sftp:list'),
+  sftpMkdir: invoke('sftp:mkdir'),
+  sftpRename: invoke('sftp:rename'),
+  sftpDelete: invoke('sftp:delete'),
+  sftpClose: send('sftp:close'),
+  localList: invoke('local:list'),
+  localMkdir: invoke('local:mkdir'),
+  localRename: invoke('local:rename'),
+  localDelete: invoke('local:delete'),
+  transfer: invoke('files:transfer'),
+  onTransfer: on('files:transfer'),
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
   sshImportScan: invoke('ssh-import:scan'),
   sshImportApply: invoke('ssh-import:apply'),
   commandHistory: invoke('history:get'),

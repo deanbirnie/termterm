@@ -232,22 +232,86 @@ describe('importing from OpenSSH files', () => {
     )
     const preview = service.scanSshImport({
       source: 'test',
-      config: 'Host web\n  HostName web.example.com\n  User deploy\nHost db\n  HostName db.internal\n  User ops\nHost other\n  HostName other.example.com\n  ProxyJump web',
+      config:
+        'Host web\n  HostName web.example.com\n  User deploy\nHost db\n  HostName db.internal\n  User ops\n' +
+        'Host other\n  HostName other.example.com\n  ProxyJump web\nHost far\n  HostName far.example.com\n  ProxyJump a@b:2,c',
       knownHosts: `web.example.com ssh-ed25519 ${ed(1)}\ndb.internal ssh-ed25519 ${ed(2)}\n|1|x=|y= ssh-ed25519 ${ed(3)}`,
     })
     expect(preview.hosts.map((h) => [h.alias, h.exists])).toEqual([
       ['web', false],
       ['db', true],
       ['other', false],
+      ['far', false],
     ])
     expect(preview.knownHosts).toEqual({ add: 1, already: 0, conflicting: 1, skipped: 1 })
-    expect(preview.notes.join(' ')).toMatch(/ProxyJump .*other/)
+    // "other" jumps through "web" from the same config; "far" names hops this cannot follow.
+    expect(preview.notes.join(' ')).toMatch(/ProxyJump .*connect directly: far\./)
 
-    const result = await service.applySshImport(['web', 'db'], true)
-    expect(result).toEqual({ hosts: 1, knownHosts: 1, keys: 0, keysNeedingPassphrase: [] })
-    expect(service.snapshot().hosts.map((h) => h.label).sort()).toEqual(['mine', 'web'])
+    const result = await service.applySshImport(['web', 'db', 'other'], true)
+    expect(result).toEqual({ hosts: 2, knownHosts: 1, keys: 0, keysNeedingPassphrase: [] })
+    const hosts = service.snapshot().hosts
+    expect(hosts.map((h) => h.label).sort()).toEqual(['mine', 'other', 'web'])
+    expect(hosts.find((h) => h.label === 'other')?.jumpHostId).toBe(hosts.find((h) => h.label === 'web')?.id)
     expect(service.knownHostsFor('db.internal', 22).map((k) => k.data.publicKey)).toEqual([ed(9)])
     expect(service.knownHostsFor('web.example.com', 22)).toHaveLength(1)
     await expect(service.applySshImport(['web'], true)).rejects.toThrow('Scan for hosts first')
+  })
+})
+
+describe('jump hosts and port forwards', () => {
+  const host = (label: string, jumpHostId: string | null = null) => ({
+    label,
+    address: `${label}.example.com`,
+    port: 22,
+    username: 'me',
+    tags: [],
+    keyId: null,
+    jumpHostId,
+  })
+
+  it('a host can go through another, but never round in a loop', async () => {
+    const service = device('none').open()
+    await service.create('master-password')
+    const gw = service.saveHost(null, host('gw'))
+    const inner = service.saveHost(null, host('inner', gw))
+    expect(service.host(inner)?.data.jumpHostId).toBe(gw)
+    expect(() => service.saveHost(gw, host('gw', inner))).toThrow('cannot be reached through itself')
+    expect(() => service.saveHost(gw, host('gw', gw))).toThrow('cannot be reached through itself')
+    expect(() => service.saveHost(null, host('x', 'missing'))).toThrow('Jump host not found')
+    // Leaving jumpHostId out keeps it; null removes it.
+    const { jumpHostId: _keep, ...withoutJump } = host('inner')
+    service.saveHost(inner, withoutJump)
+    expect(service.host(inner)?.data.jumpHostId).toBe(gw)
+    service.saveHost(inner, host('inner', null))
+    expect(service.host(inner)?.data.jumpHostId).toBeUndefined()
+  })
+
+  it('saves forwards, and deleting their host removes them and detaches hosts that jumped through it', async () => {
+    const service = device('none').open()
+    await service.create('master-password')
+    const gw = service.saveHost(null, host('gw'))
+    const inner = service.saveHost(null, host('inner', gw))
+    const local = service.saveForward(null, {
+      label: '',
+      hostId: gw,
+      kind: 'local',
+      bindHost: '',
+      bindPort: 8080,
+      destHost: 'intranet',
+      destPort: 80,
+    })
+    service.saveForward(null, { label: 'socks', hostId: gw, kind: 'dynamic', bindHost: '', bindPort: 1080 })
+    const forwards = service.snapshot().forwards
+    expect(forwards.find((f) => f.id === local)).toMatchObject({ label: '8080 → intranet:80', bindHost: '127.0.0.1' })
+    expect(forwards.find((f) => f.kind === 'dynamic')).not.toHaveProperty('destHost')
+    expect(() =>
+      service.saveForward(null, { label: '', hostId: gw, kind: 'local', bindHost: '', bindPort: 70000, destHost: 'x', destPort: 1 }),
+    ).toThrow('Listening port must be 1-65535')
+    expect(() => service.saveForward(null, { label: '', hostId: 'nope', kind: 'dynamic', bindHost: '', bindPort: 1 })).toThrow(
+      'Choose a host',
+    )
+    service.deleteItem(gw)
+    expect(service.snapshot().forwards).toEqual([])
+    expect(service.host(inner)?.data.jumpHostId).toBeUndefined()
   })
 })

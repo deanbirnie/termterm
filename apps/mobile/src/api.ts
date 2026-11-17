@@ -27,6 +27,9 @@ const NATIVE = Capacitor.isNativePlatform()
 const SSH_UNAVAILABLE = 'SSH sessions are only available in the installed app'
 const KEYS_UNAVAILABLE = 'Keys can only be created in the installed app'
 const SETTINGS_KEY = 'termterm.settings'
+const notOnPhone = async (): Promise<never> => {
+  throw new Error('Browsing files is available in the desktop app')
+}
 
 class Emitter<Args extends unknown[]> {
   private listeners = new Set<(...args: Args) => void>()
@@ -198,6 +201,28 @@ export function createApi(): TermtermApi {
     importKey: (input) => vault.importKey(input),
     renameKey: async (id, label) => vault.renameKey(id, label),
     saveSnippet: async (id, input) => vault.saveSnippet(id, input),
+    // Port forwards are saved (and sync) here, but run only in the desktop app.
+    saveForward: async (id, input) => vault.saveForward(id, input),
+    forwardStart: async () => {
+      throw new Error('Port forwards run in the desktop app')
+    },
+    forwardStop: async () => undefined,
+    forwardStates: async () => ({}),
+    onForwardState: () => () => undefined,
+    // The file browser is desktop-only for now.
+    sftpOpen: notOnPhone,
+    sftpList: notOnPhone,
+    sftpMkdir: notOnPhone,
+    sftpRename: notOnPhone,
+    sftpDelete: notOnPhone,
+    sftpClose: () => undefined,
+    localList: notOnPhone,
+    localMkdir: notOnPhone,
+    localRename: notOnPhone,
+    localDelete: notOnPhone,
+    transfer: notOnPhone,
+    onTransfer: () => () => undefined,
+    pathForFile: () => '',
     // A phone has no ~/.ssh: only pasted text.
     sshImportScan: async (paste) => {
       if (!paste) throw new Error('Paste the contents of ~/.ssh/config to import from it')

@@ -100,6 +100,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .password-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .row { display: flex; gap: 10px; }
 .row .field:has(.narrow) { flex: 0 0 84px; }
+.row .field:has(.port-input) { flex: 0 0 124px; }
 
 /* ---- auth ---- */
 .auth { height: 100%; display: grid; place-items: center; padding: 24px; overflow: auto; }
@@ -197,6 +198,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .card-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 8px; background: #1f4d47; color: #8ff0de; flex: none; }
 .card-icon.key { background: #26406b; color: #a9cbff; }
 .card-icon.snippet { background: #4a3a1c; color: #f2d48a; }
+.card-icon.forward { background: #2d2f45; color: #b5b9e6; }
+.card-icon.forward.on { background: #1f4d47; color: #8ff0de; }
+.forward-list { grid-template-columns: 1fr; }
+.forward-row { display: flex; align-items: center; gap: 10px; }
+.forward-row .card { flex: 1; min-width: 0; }
+.forward-state { color: var(--accent); }
 .card-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .card-text strong, .card-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-text small { color: var(--text-muted); font-size: 12px; }
@@ -377,3 +384,36 @@ a.btn, a.update-pill { text-decoration: none; }
 .import-list .muted { font-size: 12.5px; }
 .import-notes { font-size: 12.5px; color: var(--text-muted); margin: 6px 0; padding-left: 18px; list-style: disc; }
 .hint-box { font-size: 13px; color: var(--text-muted); background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+
+/* ---- files (SFTP) ---- */
+.files-tab { height: 100%; display: flex; flex-direction: column; background: var(--bg); min-height: 0; }
+.files-tab > .session-bar { margin-top: auto; }
+.files-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+.file-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); }
+.file-pane:last-child { border-right: 0; }
+.file-pane.dropping { outline: 2px dashed var(--accent); outline-offset: -4px; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.file-pane-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg-raised); }
+.file-pane-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.file-tools { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.file-tools .btn { margin-left: 6px; padding: 5px 10px; }
+.file-path { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.file-path input { padding: 5px 8px; font-size: 12.5px; }
+.file-pane > .error { margin: 6px 10px; }
+.file-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px; outline: none; }
+.file-row {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) 76px 150px; align-items: center; gap: 8px;
+  padding: 4px 8px; border-radius: 5px; font-size: 13px; cursor: default; user-select: none;
+}
+.file-row:hover { background: var(--bg-hover); }
+.file-row.selected { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.file-icon { color: var(--text-muted); }
+.file-icon.dir { color: #e3b341; }
+.file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-size, .file-date { color: var(--text-muted); font-size: 12px; text-align: right; white-space: nowrap; overflow: hidden; }
+@media (max-width: 1100px) { .file-row { grid-template-columns: 18px minmax(0, 1fr) 70px; } .file-date { display: none; } }
+.transfers { border-top: 1px solid var(--border); background: var(--bg-raised); padding: 4px 10px; max-height: 140px; overflow-y: auto; }
+.transfers li { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
+.transfers li.done svg { color: var(--accent); }
+.transfer-name { min-width: 120px; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transfers progress { flex: 1; height: 6px; accent-color: var(--accent); }
+.transfer-size { color: var(--text-muted); white-space: nowrap; }

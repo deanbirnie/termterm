@@ -1,5 +1,6 @@
 import {
   Columns2,
+  FolderOpen,
   Laptop,
   Lock,
   Maximize2,
@@ -32,6 +33,7 @@ import {
   type Side,
 } from './layout'
 import { PromptDialog } from './Prompts'
+import { FilesTab } from './FilesTab'
 import { TerminalTab } from './TerminalTab'
 import { UpdateCard, UpdatePill, useAppInfo } from './Update'
 import { VaultView } from './VaultView'
@@ -41,6 +43,8 @@ export interface SessionTab {
   id: string
   title: string
   target: ConnectTarget
+  /** A file browser (SFTP) instead of a terminal. */
+  kind?: 'files'
 }
 
 /** A tab: one or more sessions arranged in panes. */
@@ -83,6 +87,7 @@ export function Workspace({ locked }: { locked: boolean }) {
   // Panes need a screen and a pointer: desktop only.
   const canSplit = info?.platform === 'desktop'
   const localTerminal = info?.capabilities.localTerminal ?? false
+  const canBrowse = info?.capabilities.sftp ?? false
 
   useEffect(() => {
     if (locked) {
@@ -127,14 +132,14 @@ export function Workspace({ locked }: { locked: boolean }) {
 
   // ---- tabs and panes ----------------------------------------------------------
 
-  const newSession = (target: ConnectTarget, title: string): SessionTab => {
-    const session = { id: crypto.randomUUID(), title, target }
+  const newSession = (target: ConnectTarget, title: string, kind?: 'files'): SessionTab => {
+    const session: SessionTab = { id: crypto.randomUUID(), title, target, ...(kind ? { kind } : {}) }
     setSessions((s) => ({ ...s, [session.id]: session }))
     return session
   }
 
-  const connect = useCallback((target: ConnectTarget, title: string) => {
-    const session = newSession(target, title)
+  const connect = useCallback((target: ConnectTarget, title: string, kind?: 'files') => {
+    const session = newSession(target, title, kind)
     const tab = { id: crypto.randomUUID(), layout: pane(session.id), focus: session.id }
     setTabs((t) => [...t, tab])
     setActive(tab.id)
@@ -152,7 +157,10 @@ export function Workspace({ locked }: { locked: boolean }) {
     })
 
   const forget = (sessionIds: string[]) => {
-    for (const id of sessionIds) api.sshClose(id)
+    for (const id of sessionIds) {
+      api.sshClose(id)
+      api.sftpClose(id)
+    }
     setPrompts((q) => q.filter((p) => !sessionIds.includes(p.sessionId)))
     setSessions((s) => {
       const next = { ...s }
@@ -451,7 +459,13 @@ export function Workspace({ locked }: { locked: boolean }) {
                     setActive(tab.id)
                   }}
                 >
-                  {focused && 'local' in focused.target ? <Laptop size={14} /> : <TerminalIcon size={14} />}
+                  {focused?.kind === 'files' ? (
+                    <FolderOpen size={14} />
+                  ) : focused && 'local' in focused.target ? (
+                    <Laptop size={14} />
+                  ) : (
+                    <TerminalIcon size={14} />
+                  )}
                   <span className="tab-title">{title}</span>
                   {count > 1 && (
                     <span className="tab-count" aria-label={`${count} panes`}>
@@ -537,7 +551,13 @@ export function Workspace({ locked }: { locked: boolean }) {
                     onDoubleClick={() => toggleZoom(session.id)}
                     title="Drag to move this pane. Double-click to zoom."
                   >
-                    {'local' in session.target ? <Laptop size={13} /> : <TerminalIcon size={13} />}
+                    {session.kind === 'files' ? (
+                      <FolderOpen size={13} />
+                    ) : 'local' in session.target ? (
+                      <Laptop size={13} />
+                    ) : (
+                      <TerminalIcon size={13} />
+                    )}
                     <span className="pane-title">{session.title}</span>
                     <span className="pane-actions">
                       <button
@@ -586,15 +606,24 @@ export function Workspace({ locked }: { locked: boolean }) {
                     </span>
                   </div>
                 )}
-                <TerminalTab
-                  tab={session}
-                  active={visible && focused}
-                  refocus={refocus}
-                  snippets={snapshot?.snippets ?? []}
-                  closeLabel={multi ? 'Close pane' : 'Close tab'}
-                  onClose={() => closePane(session.id)}
-                  isShortcut={isShortcut}
-                />
+                {session.kind === 'files' ? (
+                  <FilesTab tab={session} active={visible} onClose={() => closePane(session.id)} />
+                ) : (
+                  <TerminalTab
+                    tab={session}
+                    active={visible && focused}
+                    refocus={refocus}
+                    snippets={snapshot?.snippets ?? []}
+                    closeLabel={multi ? 'Close pane' : 'Close tab'}
+                    onClose={() => closePane(session.id)}
+                    isShortcut={isShortcut}
+                    onOpenFiles={
+                      canBrowse && !('local' in session.target)
+                        ? () => connect(session.target, session.title, 'files')
+                        : undefined
+                    }
+                  />
+                )}
               </div>
             )
           })}

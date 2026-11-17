@@ -14,6 +14,59 @@ export interface HostView {
   tags: string[]
   hasPassword: boolean
   keyId?: string
+  /** Connected through this host first (ProxyJump). */
+  jumpHostId?: string
+}
+
+export interface ForwardView {
+  id: string
+  label: string
+  hostId: string
+  kind: 'local' | 'remote' | 'dynamic'
+  bindHost: string
+  bindPort: number
+  destHost?: string
+  destPort?: number
+}
+
+export type ForwardInput = Omit<ForwardView, 'id'>
+
+/** A running (or failed) port forward on this device. */
+export interface ForwardState {
+  state: 'starting' | 'active' | 'error' | 'stopped'
+  error?: string
+  /** Connections currently going through it. */
+  connections?: number
+}
+
+/** A file or folder in the SFTP browser, on this computer or on a server. */
+export interface FileEntry {
+  name: string
+  /** The full path, in the form its side uses (Windows paths on Windows, / on servers). */
+  path: string
+  type: 'file' | 'dir' | 'link' | 'other'
+  size: number
+  /** ms since 1970 */
+  modified: number
+}
+
+export interface FolderListing {
+  path: string
+  /** null at the top (/, or a drive on Windows). */
+  parent: string | null
+  entries: FileEntry[]
+}
+
+export interface TransferState {
+  id: string
+  sessionId: string
+  direction: 'upload' | 'download'
+  /** What is being copied, for display. */
+  name: string
+  done: number
+  total: number
+  state: 'running' | 'done' | 'error'
+  error?: string
 }
 
 export interface KeyView {
@@ -58,6 +111,7 @@ export interface VaultSnapshot {
   keys: KeyView[]
   snippets: SnippetView[]
   knownHosts: KnownHostView[]
+  forwards: ForwardView[]
   sync: SyncStatus
 }
 
@@ -91,6 +145,10 @@ export interface AppInfo {
     localTerminal?: boolean
     /** Can read ~/.ssh on this device to import hosts. */
     sshFiles?: boolean
+    /** Can run port forwards (desktop). */
+    forwards?: boolean
+    /** Has the SFTP file browser (desktop). */
+    sftp?: boolean
   }
 }
 
@@ -165,6 +223,8 @@ export interface HostInput {
   keyId: string | null
   /** undefined = leave as is, null = remove, string = set */
   password?: string | null
+  /** undefined = leave as is, null = connect directly, string = the host to go through */
+  jumpHostId?: string | null
 }
 
 export interface KeyImportInput {
@@ -241,6 +301,32 @@ export interface TermtermApi {
   importKey(input: KeyImportInput): Promise<string>
   renameKey(id: string, label: string): Promise<void>
   saveSnippet(id: string | null, input: { label: string; script: string }): Promise<string>
+  saveForward(id: string | null, input: ForwardInput): Promise<string>
+  /** Runs a saved port forward on this device until stopped, the app quits or the vault locks. */
+  forwardStart(id: string): Promise<void>
+  forwardStop(id: string): Promise<void>
+  forwardStates(): Promise<Record<string, ForwardState>>
+  onForwardState(cb: (id: string, state: ForwardState) => void): () => void
+
+  /** Opens an SFTP connection for a Files tab. Prompts arrive like a terminal's, with this session id. */
+  sftpOpen(sessionId: string, target: ConnectTarget): Promise<{ home: string }>
+  sftpList(sessionId: string, path: string): Promise<FolderListing>
+  sftpMkdir(sessionId: string, path: string): Promise<void>
+  sftpRename(sessionId: string, from: string, to: string): Promise<void>
+  /** Removes a file, or a folder with everything in it. */
+  sftpDelete(sessionId: string, path: string): Promise<void>
+  sftpClose(sessionId: string): void
+  /** The same operations on this computer's files. */
+  localList(path: string | null): Promise<FolderListing>
+  localMkdir(path: string): Promise<void>
+  localRename(from: string, to: string): Promise<void>
+  localDelete(path: string): Promise<void>
+  /** Copies files and folders (with their contents) into a folder on the other side. */
+  transfer(sessionId: string, direction: 'upload' | 'download', paths: string[], toFolder: string): Promise<void>
+  onTransfer(cb: (t: TransferState) => void): () => void
+  /** The path of a file dropped onto the window from the system's file manager. */
+  pathForFile(file: File): string
+
   /**
    * Reads OpenSSH's files for import: this computer's ~/.ssh when nothing is
    * given (desktop only), or pasted text. Remembers the result for sshImportApply.
