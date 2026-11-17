@@ -21,6 +21,11 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
         exclude-patterns: ['electron']
+    ignore:
+      # Held at 22.x on purpose: the types must match the Node 22 the server
+      # and CI run on. Move it together with Node itself.
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
 
   # The pinned GitHub Actions (by commit, with the version in a comment).
   - package-ecosystem: github-actions
@@ -40,6 +45,13 @@ updates:
     groups:
       android:
         update-types: [minor, patch]
+    ignore:
+      # A new Gradle major has to be supported by Capacitor and the Android
+      # Gradle plugin first: upgrade it on purpose, with a test build.
+      - dependency-name: gradle-wrapper
+        update-types: [version-update:semver-major]
+      - dependency-name: com.android.tools.build:gradle
+        update-types: [version-update:semver-major]
 
   # The sync server image's base (node:22-alpine).
   - package-ecosystem: docker
