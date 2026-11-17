@@ -62,7 +62,7 @@ Decisions worth knowing before changing things:
 
 Automated, on every relevant change (see `.github/workflows/build.yml`):
 
-- `npm test`: 89 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
+- `npm test`: 107 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
 - `npm run e2e`: two desktop app instances against a throwaway SSH server and
   sync server (vault, keys, hosts, sync, password and key logins, password
   change, remote sign-out, turning sync off and signing back in, lock with
@@ -157,15 +157,19 @@ already been agreed as one.
 - [x] User documentation: [docs/USER-GUIDE.md](USER-GUIDE.md), every feature on
       desktop and Android
 
-### Batch 6 — Safer releases and data (next)
+### Batch 6 — Safer releases and data (done)
 
-- [ ] Release checks: every expected file attached and signed, update metadata
-      correct; tests for the version step; actionlint and shellcheck
-- [ ] Vaults made by earlier releases still open; old and new apps sync together
-- [ ] Server: backup guide, an automated backup-and-restore check, storage usage
-      reporting
+- [x] Release checks: every expected file attached and the update metadata
+      matching them (sizes, SHA-512), the APK signed by the release key with
+      the right version code; tests for the version step; actionlint and
+      shellcheck on every PR
+- [x] Vaults made by earlier releases still open (fixtures from 0.1.0, 0.5.0
+      and 0.9.0's own code); 0.9.0 and today's app sync together through
+      either server
+- [x] Server: backup command and guide (README, "Backups"), an automated
+      backup-and-restore check in CI, storage usage per account (Sync page)
 
-### Batch 7 — Everyday sessions
+### Batch 7 — Everyday sessions (next)
 
 - [ ] Per-host keep-alive interval, startup snippet, environment variables
 - [ ] Terminal themes, fonts, a colour per host
@@ -267,7 +271,7 @@ queue above, which names the batch each open item belongs to.
 - [x] Identities (reusable username + credential shared across hosts), host groups (Batch 4)
 - [ ] SSH certificates, FIDO2 / security-key keys, agent forwarding
 - [x] Account deletion from the app (Batch 4: Sync → Delete account)
-- [ ] Server-side storage usage reporting, server backups doc (Batch 6)
+- [x] Server-side storage usage reporting, server backups doc (Batch 6)
 
 ## Phase 3 — Terminal and session features
 

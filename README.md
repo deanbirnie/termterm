@@ -427,7 +427,9 @@ git push origin v0.2.0
 ```
 
 The workflow runs every test (unit, desktop and mobile end-to-end, and the
-Android SSH core), then:
+Android SSH core), checks that the APK is signed by the release key with the
+right version, and checks that every file and the update metadata agree before
+anything is published. In order, it:
 
 1. builds the Windows installer, the Linux AppImage and the signed Android APK, all stamped with that version;
 2. pushes `ghcr.io/deanbirnie/termterm-server` tagged `0.2.0`, `0.2` and `latest`;
