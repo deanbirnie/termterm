@@ -585,6 +585,7 @@ export class VaultService {
       data.destHost = required(input.destHost, 'Destination host', 255)
       data.destPort = port(input.destPort, 'Destination port')
     }
+    if (input.autoStart === true) data.autoStart = true
     data.label =
       (input.label ?? '').trim().slice(0, 128) ||
       (kind === 'dynamic' ? `SOCKS on ${data.bindPort}` : `${data.bindPort} → ${data.destHost}:${data.destPort}`)
@@ -822,6 +823,7 @@ export class VaultService {
         ...(kind !== 'dynamic' && str(data.destHost, 255) && port(data.destPort)
           ? { destHost: data.destHost, destPort: data.destPort }
           : {}),
+        ...(data.autoStart === true ? { autoStart: true } : {}),
       }
       if (kind !== 'dynamic' && !forward.destHost) { result.skipped++; continue }
       add(id, 'forward', forward, (f) => f.data.hostId === hostId && f.data.kind === kind && f.data.bindPort === bindPort)

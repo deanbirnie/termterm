@@ -111,7 +111,15 @@ if (!app.requestSingleInstanceLock()) {
       rememberDevice: () => settings.get().rememberDevice,
     },
     (snapshot) => emit('vault:snapshot', snapshot),
-    (phase) => emit('phase', phase),
+    (phase) => {
+      emit('phase', phase)
+      // Forwards marked to start by themselves, whenever the vault is opened.
+      if (phase === 'unlocked') {
+        for (const f of vault.snapshot().forwards) {
+          if (f.autoStart && !forwards.isRunning(f.id)) void forwards.start(f.id).catch(() => undefined)
+        }
+      }
+    },
   )
   // Shells on this computer. They report through the same events as SSH
   // sessions, so the interface handles both the same way.

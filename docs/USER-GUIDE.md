@@ -10,8 +10,8 @@ differ, this guide says **(desktop)** or **(Android)**.
 - [Connecting and the terminal](#connecting-and-the-terminal)
 - [Panes: several terminals in one tab (desktop)](#panes-several-terminals-in-one-tab-desktop)
 - [A terminal on your own computer (desktop)](#a-terminal-on-your-own-computer-desktop)
-- [Files (desktop)](#files-desktop)
-- [Port forwarding (desktop)](#port-forwarding-desktop)
+- [Files](#files)
+- [Port forwarding](#port-forwarding)
 - [Keychain: keys and identities](#keychain-keys-and-identities)
 - [Snippets](#snippets)
 - [Known hosts](#known-hosts)
@@ -234,11 +234,12 @@ Choose which shell opens by default under **Settings → Terminal**.
 
 ---
 
-## Files (desktop)
+## Files
 
-Browse a server's files over SFTP, beside your own computer's files. Open it
-with **Files** in a host's details, or with the folder button at the top right
-of a terminal.
+Browse a server's files over SFTP. Open it with **Files** in a host's
+details, or with the folder button at the top right of a terminal.
+
+**On desktop** the server's files are shown beside your own computer's:
 
 - **Open** a folder by double-clicking it. Go up with Backspace or the up
   arrow, or type a path.
@@ -253,12 +254,24 @@ of a terminal.
 - **Nothing is ever overwritten.** If a file with the same name is already
   there, the copy stops and tells you.
 
+**On Android** you see the server's files only:
+
+- Tap a folder to open it; tap a file to select it.
+- **Download** saves the selected file where you choose, through Android's own
+  "save as" (Downloads, Google Drive, and so on).
+- **Upload…** opens Android's file picker; the files you choose are copied
+  into the folder that is open.
+- New folder, Rename and Delete work as on desktop, and nothing is
+  overwritten. Folders can't be downloaded as a whole on a phone yet: open one
+  and download its files.
+
 ---
 
-## Port forwarding (desktop)
+## Port forwarding
 
-Port forwards are saved under **Forwarding**. They sync to your other devices
-like everything else, but they only run in the desktop app.
+Port forwards are saved under **Forwarding** (**Ports** on a phone). They sync
+to your other devices like everything else, and run in both the desktop and
+the Android app.
 
 | Kind | Like | Use it to |
 |---|---|---|
@@ -272,8 +285,17 @@ like everything else, but they only run in the desktop app.
    **Destination port**.
 
 Start and stop each forward on the Forwarding page, where it also shows how
-many connections are open. If the port is already in use on your computer,
-termterm tells you rather than failing quietly.
+many connections are open (for local and SOCKS forwards). If the port is
+already in use on your device, termterm tells you rather than failing quietly.
+
+**Start automatically when the vault is opened**, in a forward's details,
+starts it by itself each time you unlock, on every device that runs forwards.
+
+A running forward keeps going while the vault is locked, like an open
+terminal, until you stop it or quit the app. On Android, the "SSH session
+open" notification stays while forwards run, so they keep working in the
+background. On a phone, "this device" means the phone: a local forward or
+SOCKS proxy is for apps on the phone itself.
 
 ---
 

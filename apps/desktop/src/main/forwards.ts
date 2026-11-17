@@ -37,6 +37,10 @@ export class ForwardManager {
     this.onState(id, state)
   }
 
+  isRunning(id: string): boolean {
+    return this.running.has(id)
+  }
+
   async start(id: string): Promise<void> {
     this.stop(id, false)
     const forward = this.vault.forward(id)

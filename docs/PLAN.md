@@ -62,7 +62,7 @@ Decisions worth knowing before changing things:
 
 Automated, on every relevant change (see `.github/workflows/build.yml`):
 
-- `npm test`: 107 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
+- `npm test`: 115 unit and integration tests for the vault, sync, server, the shared app logic and the Windows Hello key store.
 - `npm run e2e`: two desktop app instances against a throwaway SSH server and
   sync server (vault, keys, hosts, sync, password and key logins, password
   change, remote sign-out, turning sync off and signing back in, lock with
@@ -178,13 +178,17 @@ already been agreed as one.
       text (control codes removed)
 - [x] Broadcast input to all terminal panes in a tab (Alt+Shift+B)
 
-### Batch 8 — Android catches up (next)
+### Batch 8 — Android catches up (done)
 
-- [ ] Port forwarding on Android
-- [ ] Start chosen forwards when the app opens
-- [ ] SFTP file browser on Android
+- [x] Port forwarding on Android: local and remote, and a SOCKS5 proxy, in the
+      Java SSH core (`ForwardSession`), tested on a JVM against a real SSH server
+- [x] Start chosen forwards when the vault is opened (desktop and Android)
+- [x] SFTP file browser on Android (`FileSession`): the server's files, with
+      downloads and uploads through Android's file picker
+- Shared: the Android connect logic (jump hosts, prompts) is now one
+  `SshConnector` used by terminals, forwards and files
 
-### Batch 9 — Files, part 2
+### Batch 9 — Files, part 2 (next)
 
 - [ ] File permissions, and editing a remote file in place (desktop and Android)
 - [ ] Android emulator tests in CI
@@ -315,15 +319,16 @@ queue above, which names the batch each open item belongs to.
       (`apps/desktop/src/main/forwards.ts`, `socks.ts`); shows live connection counts,
       refuses a port already in use with a clear error. Desktop only; listed, not
       shown in the phone's navigation
-- [ ] Port forwarding on Android (JSch `setPortForwardingL/R`; SOCKS needs a small server)
-- [ ] Start chosen forwards automatically with the app
+- [x] Port forwarding on Android (Batch 8)
+- [x] Start chosen forwards automatically with the app (Batch 8)
 - [x] SFTP browser (desktop): a Files tab per host (host panel, or the folder button
       in a terminal) with this computer and the server side by side; open, up,
       typed paths, new folder, rename, delete (folders with their contents, after
       confirming); copy with the buttons, by dragging between the sides, or by
       dropping files from the system onto the server; progress per transfer; never
       overwrites (`apps/desktop/src/main/files.ts`, `packages/ui/src/FilesTab.tsx`)
-- [ ] SFTP on Android; file permissions and editing a remote file in place
+- [x] SFTP on Android (Batch 8)
+- [ ] File permissions and editing a remote file in place (Batch 9)
 - [x] Search in scrollback (`@xterm/addon-search`; Ctrl+Shift+F, Cmd+F, or the magnifier)
 - [x] Terminal themes, fonts, per-host colour; session logs (Batch 7)
 - [x] Predictive typing: command history per host (a `history` vault item,
