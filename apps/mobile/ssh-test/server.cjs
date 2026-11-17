@@ -17,6 +17,12 @@ const server = new Server({ hostKeys: [hostKey()] }, (client) => {
     }
     ctx.reject(['publickey', 'password'])
   }).on('ready', () => {
+    // direct-tcpip, as a jump host does: open the connection asked for.
+    client.on('tcpip', (accept, reject, info) => {
+      const sock = require('net').connect(info.destPort, info.destIP)
+      sock.once('connect', () => { const ch = accept(); sock.pipe(ch).pipe(sock) })
+      sock.once('error', () => reject())
+    })
     client.on('session', (accept) => {
       const s = accept(); let size = ''
       s.on('pty', (a, r, info) => { size = `${info.cols}x${info.rows}`; a() })

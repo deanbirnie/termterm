@@ -1,7 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
-import { Braces, ChevronDown, ChevronUp, History, RotateCw, Search, X } from 'lucide-react'
+import { Braces, ChevronDown, ChevronUp, FolderOpen, History, RotateCw, Search, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectTarget, SessionStatus, SnippetView } from '@termterm/app'
 import { api, errorMessage } from './api'
@@ -76,6 +76,7 @@ export function TerminalTab({
   onClose,
   isShortcut,
   refocus = 0,
+  onOpenFiles,
 }: {
   tab: SessionTab
   active: boolean
@@ -86,6 +87,8 @@ export function TerminalTab({
   isShortcut?: (e: KeyboardEvent) => boolean
   /** Changes when the active terminal should take the keyboard back. */
   refocus?: number
+  /** Opens this host's files in a new tab, where there is a file browser. */
+  onOpenFiles?: () => void
 }) {
   const shortcutRef = useRef(isShortcut)
   shortcutRef.current = isShortcut
@@ -552,6 +555,11 @@ export function TerminalTab({
         </div>
       ) : (
         <div className="terminal-tools">
+          {onOpenFiles && (
+            <button className="icon-btn" title="Browse this host's files" aria-label="Browse files" onClick={onOpenFiles}>
+              <FolderOpen size={15} />
+            </button>
+          )}
           <button
             className="icon-btn"
             title={touch ? 'Search' : 'Search (Ctrl+Shift+F)'}

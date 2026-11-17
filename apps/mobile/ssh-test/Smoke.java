@@ -13,16 +13,17 @@ public class Smoke {
     StringBuilder out = new StringBuilder(); CountDownLatch closed = new CountDownLatch(1); CountDownLatch connected = new CountDownLatch(1);
     volatile String error; List<String> asked = new ArrayList<>(); volatile byte[] hostKey; SshSession session;
     boolean trust = true; Deque<String> passwords = new ArrayDeque<>(); String kbd; Runnable onHostKey;
+    SshSession.Config jump;
     Run start(String user, String password, String key, String passphrase) {
-      SshSession.Config c = new SshSession.Config(); c.host = "127.0.0.1"; c.port = port; c.username = user; c.password = password; c.privateKey = key; c.passphrase = passphrase; c.cols = 100; c.rows = 30;
+      SshSession.Config c = new SshSession.Config(); c.host = "127.0.0.1"; c.port = port; c.username = user; c.password = password; c.privateKey = key; c.passphrase = passphrase; c.cols = 100; c.rows = 30; c.jump = jump;
       session = new SshSession(c, new SshSession.Events() {
         public void connected() { connected.countDown(); }
         public void data(byte[] b, int n) { synchronized (out) { out.append(new String(b, 0, n, StandardCharsets.UTF_8)); } }
         public void closed(String e) { error = e; closed.countDown(); }
       }, new SshSession.Prompter() {
-        public boolean trustHostKey(byte[] blob) { hostKey = blob; asked.add("hostkey"); if (onHostKey != null) onHostKey.run(); return trust; }
-        public String password(String u, boolean retry) { asked.add("password" + (retry ? ":retry" : "")); return passwords.poll(); }
-        public String[] keyboardInteractive(String n, String i, String[] p, boolean[] e) { asked.add("kbd:" + n + ":" + p[0].trim() + ":" + e[0]); return kbd == null ? null : new String[] { kbd }; }
+        public boolean trustHostKey(int hop, byte[] blob) { hostKey = blob; asked.add("hostkey" + (hop > 0 ? "@" + hop : "")); if (onHostKey != null) onHostKey.run(); return trust; }
+        public String password(int hop, String u, boolean retry) { asked.add("password" + (retry ? ":retry" : "") + (hop > 0 ? "@" + hop : "")); return passwords.poll(); }
+        public String[] keyboardInteractive(int hop, String n, String i, String[] p, boolean[] e) { asked.add("kbd:" + n + ":" + p[0].trim() + ":" + e[0]); return kbd == null ? null : new String[] { kbd }; }
       });
       session.start(); return this;
     }
@@ -41,6 +42,13 @@ public class Smoke {
     r.session.write("echo hi\r".getBytes()); check("input reaches the shell", r.waitFor("ran:echo hi"), r.out.toString());
     r.session.resize(120, 40); r.session.write("x\r".getBytes()); check("resize is applied", r.waitFor("size:120x40"), r.out.toString());
     r.session.write("exit\r".getBytes()); check("remote exit ends the session cleanly", r.ended() && r.error == null, String.valueOf(r.error));
+
+    // Through a jump host (the same test server, reached through itself).
+    r = new Run(); r.jump = new SshSession.Config(); r.jump.host = "127.0.0.1"; r.jump.port = port; r.jump.username = "dean"; r.passwords.add("pw-ok");
+    r.start("dean", "pw-ok", null, null);
+    check("connects through a jump host", r.connected.await(15, TimeUnit.SECONDS) && r.waitFor("welcome"), r.asked + " " + r.error);
+    check("each hop's host key and login asked about on its own, the jump host first", r.asked.equals(List.of("hostkey@1", "password@1", "hostkey")), r.asked.toString());
+    r.session.write("exit\r".getBytes()); check("a session through a jump host ends cleanly", r.ended() && r.error == null, String.valueOf(r.error));
 
     r = new Run().start("dean", "pw-ok", null, null);
     check("logs in again", r.connected.await(15, TimeUnit.SECONDS), String.valueOf(r.error));

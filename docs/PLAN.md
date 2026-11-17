@@ -112,7 +112,7 @@ Agreed with the owner on 2026-11-17: four batches, done in this order, **one
 pull request per batch**. Whether a batch's PR becomes a release is the
 owner's call (see "Releasing" in the README).
 
-### Batch 1 — Everyday terminal (done; this is the PR that added this queue)
+### Batch 1 — Everyday terminal (done)
 
 - [x] Reconnect after a dropped connection (keep-alive was already on: 20 s, 3 missed)
 - [x] Search in the scrollback
@@ -120,14 +120,15 @@ owner's call (see "Releasing" in the README).
 - [x] Sync as soon as the app comes back to the foreground or the network returns
 - [x] Predictive typing: suggestions from this host's command history and snippets
 
-### Batch 2 — Connections (next)
+### Batch 2 — Connections (done)
 
-- [ ] Jump hosts (ProxyJump), saved on the host; the ~/.ssh import should then
-      bring `ProxyJump` across instead of noting it
-- [ ] Port forwarding (local, remote, dynamic), saved in the vault and synced
-- [ ] SFTP browser: two panes, drag and drop, on desktop first
+- [x] Jump hosts (ProxyJump), saved on the host, on desktop and Android; the
+      ~/.ssh import brings `ProxyJump` across when it names one host
+- [x] Port forwarding (local, remote, dynamic), saved in the vault and synced;
+      runs on desktop (Android follow-up below)
+- [x] SFTP browser: two panes, drag and drop, on desktop
 
-### Batch 3 — Reliability and housekeeping
+### Batch 3 — Reliability and housekeeping (next)
 
 - [ ] Sync: items deleted while sync was off come back after signing in again
       (keep tombstones when sync is off, or reconcile on rejoin)
@@ -216,9 +217,28 @@ owner's call (see "Releasing" in the README).
       Desktop (`ssh.ts`) and Android (`SshSession.java`) report "Connection lost"
       for a drop; `TerminalTab` does the retrying
 - [ ] Keep-alive settings, per-host startup snippet, env vars
-- [ ] Host chaining (jump hosts / ProxyJump), SOCKS/HTTP proxy
-- [ ] Port forwarding (local, remote, dynamic) as vault items
-- [ ] SFTP browser (dual pane, drag and drop)
+- [x] Jump hosts (ProxyJump): a host names another saved host to go through,
+      chains up to 5 deep, no loops (`VaultService.checkJump`). Desktop opens each
+      hop over the previous one's `forwardOut` (`apps/desktop/src/main/ssh-connect.ts`,
+      shared by terminals, forwards and files); Android tunnels through a
+      `direct-tcpip` channel as a JSch `Proxy` (`SshSession.Through`). Each hop's
+      host key and login are checked and asked about on their own (prompts say
+      "(jump host)"), and each hop only gets its own key.
+- [ ] SOCKS/HTTP proxy for reaching a host
+- [x] Port forwarding (local, remote, dynamic SOCKS5) as vault items (`forward`),
+      started and stopped on the Forwarding page, each on its own SSH connection
+      (`apps/desktop/src/main/forwards.ts`, `socks.ts`); shows live connection counts,
+      refuses a port already in use with a clear error. Desktop only; listed, not
+      shown in the phone's navigation
+- [ ] Port forwarding on Android (JSch `setPortForwardingL/R`; SOCKS needs a small server)
+- [ ] Start chosen forwards automatically with the app
+- [x] SFTP browser (desktop): a Files tab per host (host panel, or the folder button
+      in a terminal) with this computer and the server side by side; open, up,
+      typed paths, new folder, rename, delete (folders with their contents, after
+      confirming); copy with the buttons, by dragging between the sides, or by
+      dropping files from the system onto the server; progress per transfer; never
+      overwrites (`apps/desktop/src/main/files.ts`, `packages/ui/src/FilesTab.tsx`)
+- [ ] SFTP on Android; file permissions and editing a remote file in place
 - [x] Search in scrollback (`@xterm/addon-search`; Ctrl+Shift+F, Cmd+F, or the magnifier)
 - [ ] Terminal themes, fonts, per-host colour; session logs
 - [x] Predictive typing: command history per host (a `history` vault item,

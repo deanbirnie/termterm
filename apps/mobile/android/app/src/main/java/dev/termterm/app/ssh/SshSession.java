@@ -38,13 +38,17 @@ public final class SshSession {
     void closed(String error);
   }
 
-  /** Questions for the user. Each call blocks until answered; null or false means "cancel". */
+  /**
+   * Questions for the user. Each call blocks until answered; null or false
+   * means "cancel". {@code hop} says which server asks: 0 is the target, 1
+   * the jump host it is reached through, 2 that one's jump host, and so on.
+   */
   public interface Prompter {
-    boolean trustHostKey(byte[] publicKeyBlob);
+    boolean trustHostKey(int hop, byte[] publicKeyBlob);
 
-    String password(String username, boolean retry);
+    String password(int hop, String username, boolean retry);
 
-    String[] keyboardInteractive(String name, String instruction, String[] prompts, boolean[] echo);
+    String[] keyboardInteractive(int hop, String name, String instruction, String[] prompts, boolean[] echo);
   }
 
   public static final class Config {
@@ -56,6 +60,8 @@ public final class SshSession {
     /** An OpenSSH or PEM private key, or null. */
     public String privateKey;
     public String passphrase;
+    /** The server to connect through first (ssh's ProxyJump), or null to connect directly. */
+    public Config jump;
     public int cols = 80;
     public int rows = 24;
   }
@@ -67,7 +73,8 @@ public final class SshSession {
   private final Prompter prompter;
   private final Object lock = new Object();
 
-  private Session session;
+  /** Every SSH session opened: jump hosts first, the target last. */
+  private final java.util.List<Session> sessions = new java.util.ArrayList<>();
   private ChannelShell channel;
   private OutputStream toRemote;
   private volatile boolean closing;
@@ -91,30 +98,8 @@ public final class SshSession {
   private void run() {
     String error = null;
     try {
-      JSch jsch = new JSch();
-      if (config.privateKey != null && !config.privateKey.isEmpty()) {
-        byte[] passphrase =
-            config.passphrase == null || config.passphrase.isEmpty()
-                ? null
-                : config.passphrase.getBytes(StandardCharsets.UTF_8);
-        jsch.addIdentity(
-            "vault-key", config.privateKey.getBytes(StandardCharsets.UTF_8), null, passphrase);
-      }
-
-      Session s = jsch.getSession(config.username, config.host, config.port);
-      synchronized (lock) {
-        if (closing) return;
-        session = s;
-      }
-      // Our own repository decides, so anything it does not approve is refused.
-      s.setHostKeyRepository(new AskingHostKeys());
-      s.setConfig("StrictHostKeyChecking", "yes");
-      s.setConfig("PreferredAuthentications", "publickey,password,keyboard-interactive");
-      if (config.password != null && !config.password.isEmpty()) s.setPassword(config.password.getBytes(StandardCharsets.UTF_8));
-      s.setUserInfo(new Asking());
-      s.setServerAliveInterval(20_000);
-      s.setServerAliveCountMax(3);
-      s.connect(CONNECT_TIMEOUT_MS);
+      Session s = open(config, 0);
+      if (s == null) return;
 
       ChannelShell ch = (ChannelShell) s.openChannel("shell");
       int cols;
@@ -155,6 +140,83 @@ public final class SshSession {
     }
   }
 
+  /**
+   * Logs in to one server, after the ones it is reached through. Each has
+   * its own identity, so a key is only ever offered to the server it is for.
+   * Returns null if the session was closed meanwhile.
+   */
+  private Session open(Config c, int hop) throws Exception {
+    Session via = c.jump == null ? null : open(c.jump, hop + 1);
+    if (c.jump != null && via == null) return null;
+    JSch jsch = new JSch();
+    if (c.privateKey != null && !c.privateKey.isEmpty()) {
+      byte[] passphrase =
+          c.passphrase == null || c.passphrase.isEmpty() ? null : c.passphrase.getBytes(StandardCharsets.UTF_8);
+      jsch.addIdentity("vault-key", c.privateKey.getBytes(StandardCharsets.UTF_8), null, passphrase);
+    }
+    Session s = jsch.getSession(c.username, c.host, c.port);
+    synchronized (lock) {
+      if (closing) return null;
+      sessions.add(s);
+    }
+    if (via != null) s.setProxy(new Through(via));
+    // Our own repository decides, so anything it does not approve is refused.
+    s.setHostKeyRepository(new AskingHostKeys(hop));
+    s.setConfig("StrictHostKeyChecking", "yes");
+    s.setConfig("PreferredAuthentications", "publickey,password,keyboard-interactive");
+    if (c.password != null && !c.password.isEmpty()) s.setPassword(c.password.getBytes(StandardCharsets.UTF_8));
+    s.setUserInfo(new Asking(hop, c));
+    s.setServerAliveInterval(20_000);
+    s.setServerAliveCountMax(3);
+    s.connect(CONNECT_TIMEOUT_MS);
+    return s;
+  }
+
+  /**
+   * Reaches a server through an already connected jump host: a direct-tcpip
+   * channel on it stands in for the socket, so nothing listens on the phone.
+   */
+  private static final class Through implements com.jcraft.jsch.Proxy {
+    private final Session via;
+    private com.jcraft.jsch.ChannelDirectTCPIP channel;
+    private InputStream in;
+    private OutputStream out;
+
+    Through(Session via) {
+      this.via = via;
+    }
+
+    @Override
+    public void connect(com.jcraft.jsch.SocketFactory factory, String host, int port, int timeout) throws Exception {
+      channel = (com.jcraft.jsch.ChannelDirectTCPIP) via.openChannel("direct-tcpip");
+      channel.setHost(host);
+      channel.setPort(port);
+      in = channel.getInputStream();
+      out = channel.getOutputStream();
+      channel.connect(timeout);
+    }
+
+    @Override
+    public InputStream getInputStream() {
+      return in;
+    }
+
+    @Override
+    public OutputStream getOutputStream() {
+      return out;
+    }
+
+    @Override
+    public java.net.Socket getSocket() {
+      return null;
+    }
+
+    @Override
+    public void close() {
+      if (channel != null) channel.disconnect();
+    }
+  }
+
   public void write(byte[] data) {
     OutputStream out;
     synchronized (lock) {
@@ -191,17 +253,18 @@ public final class SshSession {
   }
 
   private void disconnect() {
-    Session s;
+    java.util.List<Session> all;
     ChannelShell ch;
     synchronized (lock) {
-      s = session;
+      all = new java.util.ArrayList<>(sessions);
+      sessions.clear();
       ch = channel;
-      session = null;
       channel = null;
       toRemote = null;
     }
     if (ch != null) ch.disconnect();
-    if (s != null) s.disconnect();
+    // The target first, then the jump hosts it went through.
+    for (int i = all.size() - 1; i >= 0; i--) all.get(i).disconnect();
   }
 
   private void reportClosed(String error) {
@@ -233,9 +296,15 @@ public final class SshSession {
 
   /** Asks the app about every host key instead of keeping a known-hosts file. */
   private final class AskingHostKeys implements HostKeyRepository {
+    private final int hop;
+
+    AskingHostKeys(int hop) {
+      this.hop = hop;
+    }
+
     @Override
     public int check(String host, byte[] key) {
-      if (prompter.trustHostKey(key)) return OK;
+      if (prompter.trustHostKey(hop, key)) return OK;
       if (failure == null) failure = "Host key was not trusted";
       return CHANGED;
     }
@@ -266,15 +335,22 @@ public final class SshSession {
   }
 
   private final class Asking implements UserInfo, UIKeyboardInteractive {
+    private final int hop;
+    private final Config c;
     private String password;
     private boolean askedBefore;
+
+    Asking(int hop, Config c) {
+      this.hop = hop;
+      this.c = c;
+    }
 
     @Override
     public boolean promptPassword(String message) {
       // Reached when there is no saved password, or the last one was refused.
-      boolean retry = askedBefore || (config.password != null && !config.password.isEmpty());
+      boolean retry = askedBefore || (c.password != null && !c.password.isEmpty());
       askedBefore = true;
-      password = prompter.password(config.username, retry);
+      password = prompter.password(hop, c.username, retry);
       if (password == null) failure = "Authentication cancelled";
       return password != null;
     }
@@ -288,7 +364,7 @@ public final class SshSession {
     public String[] promptKeyboardInteractive(
         String destination, String name, String instruction, String[] prompt, boolean[] echo) {
       if (prompt == null || prompt.length == 0) return new String[0];
-      String[] answers = prompter.keyboardInteractive(name, instruction, prompt, echo);
+      String[] answers = prompter.keyboardInteractive(hop, name, instruction, prompt, echo);
       if (answers == null) failure = "Authentication cancelled";
       return answers;
     }

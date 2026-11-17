@@ -1,6 +1,7 @@
-import { Braces, Fingerprint, KeyRound, RefreshCw, Server, Settings } from 'lucide-react'
+import { ArrowLeftRight, Braces, Fingerprint, KeyRound, RefreshCw, Server, Settings } from 'lucide-react'
 import { useState } from 'react'
 import type { ConnectTarget, VaultSnapshot } from '@termterm/app'
+import { ForwardingPage } from './pages/Forwarding'
 import { HostsPage } from './pages/Hosts'
 import { KeychainPage } from './pages/Keychain'
 import { KnownHostsPage } from './pages/KnownHosts'
@@ -14,6 +15,7 @@ const PAGES = [
   { id: 'keychain', label: 'Keychain', icon: KeyRound },
   { id: 'snippets', label: 'Snippets', icon: Braces },
   { id: 'known', label: 'Known Hosts', icon: Fingerprint },
+  { id: 'forwarding', label: 'Forwarding', icon: ArrowLeftRight },
   { id: 'sync', label: 'Sync', icon: RefreshCw },
   { id: 'settings', label: 'Settings', icon: Settings },
 ] as const
@@ -27,7 +29,7 @@ export function VaultView({
   onConnect,
 }: {
   snapshot: VaultSnapshot
-  onConnect: (target: ConnectTarget, title: string) => void
+  onConnect: (target: ConnectTarget, title: string, kind?: 'files') => void
 }) {
   const [page, setPage] = useState<PageId>('hosts')
   const { sync } = snapshot
@@ -37,7 +39,8 @@ export function VaultView({
   return (
     <div className="vault">
       <nav className="sidebar" aria-label="Vault">
-        {PAGES.map(({ id, label, icon: Icon }) => (
+        {/* Forwards run only in the desktop app; the phone's bottom bar is full enough. */}
+        {PAGES.filter(({ id }) => id !== 'forwarding' || info?.platform !== 'mobile').map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             className={`nav-item ${page === id ? 'active' : ''}`}
@@ -57,6 +60,7 @@ export function VaultView({
         {page === 'keychain' && <KeychainPage snapshot={snapshot} />}
         {page === 'snippets' && <SnippetsPage snapshot={snapshot} />}
         {page === 'known' && <KnownHostsPage snapshot={snapshot} />}
+        {page === 'forwarding' && <ForwardingPage snapshot={snapshot} />}
         {page === 'sync' && <SyncPage sync={sync} />}
         {page === 'settings' && <SettingsPage synced={sync.configured} />}
       </section>

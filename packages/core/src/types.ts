@@ -52,6 +52,8 @@ export interface HostData {
   password?: string
   /** id of a `key` item */
   keyId?: string
+  /** id of another `host` item to connect through (ssh's ProxyJump) */
+  jumpHostId?: string
 }
 
 export interface KeyData {
@@ -79,9 +81,28 @@ export interface KnownHostData {
   fingerprint: string
 }
 
+/**
+ * A port forward through a saved host. `local`: a port on this computer
+ * reaches dest through the server (ssh -L). `remote`: a port on the server
+ * reaches dest from this computer (ssh -R). `dynamic`: a SOCKS proxy on this
+ * computer that goes out through the server (ssh -D); it has no dest.
+ */
+export interface ForwardData {
+  label: string
+  /** id of the `host` item to forward through */
+  hostId: string
+  kind: 'local' | 'remote' | 'dynamic'
+  /** Where to listen: on this computer (local, dynamic) or on the server (remote). */
+  bindHost: string
+  bindPort: number
+  destHost?: string
+  destPort?: number
+}
+
 export interface ItemTypes {
   host: HostData
   key: KeyData
   snippet: SnippetData
   knownHost: KnownHostData
+  forward: ForwardData
 }

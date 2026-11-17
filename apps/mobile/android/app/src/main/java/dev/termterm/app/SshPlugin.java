@@ -63,6 +63,28 @@ public class SshPlugin extends Plugin {
     config.passphrase = call.getString("passphrase");
     config.cols = call.getInt("cols", 80);
     config.rows = call.getInt("rows", 24);
+    // Jump hosts, nearest first: jumps[0] is the server the target is reached through.
+    JSArray jumps = call.getArray("jumps");
+    SshSession.Config inner = config;
+    if (jumps != null) {
+      try {
+        for (int i = 0; i < jumps.length(); i++) {
+          org.json.JSONObject j = jumps.getJSONObject(i);
+          SshSession.Config hop = new SshSession.Config();
+          hop.host = j.getString("host");
+          hop.port = j.optInt("port", 22);
+          hop.username = j.getString("username");
+          hop.password = j.has("password") ? j.optString("password", null) : null;
+          hop.privateKey = j.has("privateKey") ? j.optString("privateKey", null) : null;
+          hop.passphrase = j.has("passphrase") ? j.optString("passphrase", null) : null;
+          inner.jump = hop;
+          inner = hop;
+        }
+      } catch (org.json.JSONException e) {
+        call.reject("Unreadable jump host settings");
+        return;
+      }
+    }
 
     final Live live = new Live();
     live.session =
@@ -94,17 +116,19 @@ public class SshPlugin extends Plugin {
             },
             new SshSession.Prompter() {
               @Override
-              public boolean trustHostKey(byte[] publicKeyBlob) {
+              public boolean trustHostKey(int hop, byte[] publicKeyBlob) {
                 JSObject event = new JSObject();
                 event.put("kind", "hostkey");
+                event.put("hop", hop);
                 event.put("publicKey", Base64.encodeToString(publicKeyBlob, Base64.NO_WRAP));
                 return Boolean.TRUE.equals(ask(sessionId, live, event));
               }
 
               @Override
-              public String password(String user, boolean retry) {
+              public String password(int hop, String user, boolean retry) {
                 JSObject event = new JSObject();
                 event.put("kind", "password");
+                event.put("hop", hop);
                 event.put("username", user);
                 event.put("retry", retry);
                 Object answer = ask(sessionId, live, event);
@@ -113,7 +137,7 @@ public class SshPlugin extends Plugin {
 
               @Override
               public String[] keyboardInteractive(
-                  String name, String instruction, String[] questions, boolean[] echo) {
+                  int hop, String name, String instruction, String[] questions, boolean[] echo) {
                 JSArray list = new JSArray();
                 for (int i = 0; i < questions.length; i++) {
                   JSObject question = new JSObject();
@@ -123,6 +147,7 @@ public class SshPlugin extends Plugin {
                 }
                 JSObject event = new JSObject();
                 event.put("kind", "keyboard");
+                event.put("hop", hop);
                 event.put("name", name == null ? "" : name);
                 event.put("instructions", instruction == null ? "" : instruction);
                 event.put("prompts", list);

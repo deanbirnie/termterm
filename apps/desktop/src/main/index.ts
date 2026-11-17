@@ -11,6 +11,9 @@ import { LocalTerminals } from './local-terminal'
 import { pickShell } from './local-shells'
 import { SshManager } from './ssh'
 import { readSshFiles } from './ssh-files'
+import { Prompts } from './ssh-connect'
+import { ForwardManager } from './forwards'
+import { FileSessions } from './files'
 import { FileVaultStorage } from './storage'
 import { Updater } from './updater'
 import { fakeHelloSigner } from './fake-hello'
@@ -115,11 +118,14 @@ if (!app.requestSingleInstanceLock()) {
     data: (id, data) => emit('ssh:data', id, data),
     status: (id, status) => emit('ssh:status', id, status),
   })
-  const ssh = new SshManager(vault, {
+  // Questions for the user (host keys, passwords) from terminals, forwards and file browsing.
+  const prompts = new Prompts((prompt) => emit('ssh:prompt', prompt))
+  const ssh = new SshManager(vault, prompts, {
     data: (id, data) => emit('ssh:data', id, data),
     status: (id, status) => emit('ssh:status', id, status),
-    prompt: (prompt) => emit('ssh:prompt', prompt),
   })
+  const forwards = new ForwardManager(vault, prompts, (id, state) => emit('forward:state', id, state))
+  const files = new FileSessions(vault, prompts, (t) => emit('files:transfer', t))
 
   const updater = new Updater((state) => emit('update:state', state))
 
@@ -200,10 +206,37 @@ if (!app.requestSingleInstanceLock()) {
   handle('ssh-import:apply', (aliases: string[], knownHosts: boolean) =>
     vault.applySshImport(Array.isArray(aliases) ? aliases.map(String) : [], knownHosts === true),
   )
+  handle('forward:save', (id: string | null, input) => vault.saveForward(id, input))
+  handle('forward:start', (id: string) => forwards.start(String(id)))
+  handle('forward:stop', (id: string) => forwards.stop(String(id)))
+  handle('forward:states', () => forwards.all())
+  const text = (v: unknown, name: string) => {
+    if (typeof v !== 'string' || !v) throw new Error(`${name} is required`)
+    return v
+  }
+  handle('sftp:open', (id: string, target: ConnectTarget) => files.open(text(id, 'Session'), target))
+  handle('sftp:list', (id: string, path: string) => files.list(id, text(path, 'Path')))
+  handle('sftp:mkdir', (id: string, path: string) => files.mkdir(id, text(path, 'Path')))
+  handle('sftp:rename', (id: string, from: string, to: string) => files.rename(id, text(from, 'Path'), text(to, 'Path')))
+  handle('sftp:delete', (id: string, path: string) => files.delete(id, text(path, 'Path')))
+  listen('sftp:close', (id: string) => files.close(String(id)))
+  handle('local:list', (path: string | null) => files.localList(typeof path === 'string' ? path : null))
+  handle('local:mkdir', (path: string) => files.localMkdir(text(path, 'Path')))
+  handle('local:rename', (from: string, to: string) => files.localRename(text(from, 'Path'), text(to, 'Path')))
+  handle('local:delete', (path: string) => files.localDelete(text(path, 'Path')))
+  handle('files:transfer', (id: string, direction: string, paths: string[], toFolder: string) => {
+    if (direction !== 'upload' && direction !== 'download') throw new Error('Unknown direction')
+    if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string' || !p)) throw new Error('Paths are required')
+    return files.transfer(id, direction, paths, text(toFolder, 'Folder'))
+  })
   handle('history:get', (key: string) => vault.commandHistory(key))
   handle('history:record', (key: string, commands: string[]) => vault.recordCommands(key, commands))
   handle('history:clear', () => vault.clearCommandHistory())
-  handle('item:delete', (id: string) => vault.deleteItem(id))
+  handle('item:delete', (id: string) => {
+    // A deleted forward, or one whose host is deleted, stops running too.
+    for (const f of vault.snapshot().forwards) if (f.id === id || f.hostId === id) forwards.stop(f.id)
+    vault.deleteItem(id)
+  })
   handle('sync:register', (input) => vault.syncRegister(input))
   handle('sync:signIn', (input) => vault.syncSignIn(input))
   handle('sync:reauth', (password: string) => vault.syncReauth(password))
@@ -237,6 +270,8 @@ if (!app.requestSingleInstanceLock()) {
         biometricName: useHello ? 'Windows Hello' : undefined,
         localTerminal: true,
         sshFiles: true,
+        forwards: true,
+        sftp: true,
       },
     }
   })
@@ -246,6 +281,8 @@ if (!app.requestSingleInstanceLock()) {
   handle('update:install', async () => {
     ssh.closeAll()
     local.closeAll()
+    forwards.stopAll()
+    files.closeAll()
     vault.lock({ forget: false })
     await vault.flush()
     updater.install()
@@ -264,7 +301,7 @@ if (!app.requestSingleInstanceLock()) {
     local.close(id)
     ssh.close(id)
   })
-  listen('ssh:promptReply', (promptId: string, reply) => ssh.promptReply(promptId, reply))
+  listen('ssh:promptReply', (promptId: string, reply) => prompts.reply(promptId, reply))
   listen('clipboard:write', (text: string) => clipboard.writeText(String(text)))
 
   void app.whenReady().then(async () => {
@@ -303,6 +340,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     ssh.closeAll()
     local.closeAll()
+    forwards.stopAll()
+    files.closeAll()
     vault.lock({ forget: false })
     // Let the last save reach the disk before the process goes away.
     void vault.flush().finally(() => app.quit())

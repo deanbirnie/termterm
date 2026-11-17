@@ -29,6 +29,19 @@ host yourself.
     your own computer, with a choice of the shells installed: PowerShell,
     Command Prompt, WSL and Git Bash on Windows; zsh, Bash, fish and others
     elsewhere.
+- **Jump hosts** — a host can be reached through another saved host (ssh's
+  `ProxyJump`), chained if needed: set **Jump host** in the host's details.
+  Each server's host key and login are checked on their own, and each only
+  sees its own key. The `~/.ssh` import brings `ProxyJump` across.
+- **Port forwarding** (desktop) — local (`ssh -L`), remote (`ssh -R`) and
+  dynamic SOCKS proxies (`ssh -D`), saved in the vault under **Forwarding**
+  and started or stopped there, with the number of open connections. They
+  sync to your other devices but run in the desktop app.
+- **Files** (desktop) — browse a host over SFTP beside this computer's files:
+  **Files** in a host's details, or the folder button in a terminal. Copy
+  either way with Upload / Download, by dragging between the two sides, or by
+  dropping files from your file manager onto the server's side. Folders copy
+  with their contents; nothing is overwritten (the copy stops and says so).
 - **Panes** (desktop) — split a tab into as many terminals as fit, side by side
   or stacked, like tmux. Drag a tab onto a terminal to put it beside it, drag a
   pane's title bar to move it, drag the lines between panes to resize them.

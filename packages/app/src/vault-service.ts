@@ -6,6 +6,7 @@ import {
   isInsecureUrl,
   normalizeServerUrl,
   syncVault,
+  type ForwardData,
   type HostData,
   type Item,
   type KeyData,
@@ -17,6 +18,7 @@ import type {
   AccountInput,
   AppPhase,
   DeviceView,
+  ForwardInput,
   HostInput,
   KeyImportInput,
   SshImportFiles,
@@ -311,7 +313,12 @@ export class VaultService {
           tags: data.tags,
           hasPassword: !!data.password,
           keyId: data.keyId,
+          jumpHostId: data.jumpHostId,
         }))
+        .sort(byLabel),
+      forwards: v
+        .list<ForwardData>('forward')
+        .map(({ id, data }) => ({ id, ...data }))
         .sort(byLabel),
       keys: v
         .list<KeyData>('key')
@@ -384,6 +391,8 @@ export class VaultService {
     if (input.keyId && this.v.get(input.keyId)?.type !== 'key') throw new Error('Key not found')
     const password =
       input.password === undefined ? existing?.data.password : input.password || undefined
+    const jumpHostId = input.jumpHostId === undefined ? existing?.data.jumpHostId : input.jumpHostId || undefined
+    if (jumpHostId) this.checkJump(id, jumpHostId)
     const data: HostData = {
       label: (input.label ?? '').trim().slice(0, 128) || address,
       address,
@@ -392,8 +401,57 @@ export class VaultService {
       tags: [...new Set((input.tags ?? []).map((t) => String(t).trim()).filter(Boolean))].slice(0, 32),
       ...(password ? { password } : {}),
       ...(input.keyId ? { keyId: input.keyId } : {}),
+      ...(jumpHostId ? { jumpHostId } : {}),
     }
     return this.v.put('host', data, id ?? undefined).id
+  }
+
+  /** A jump host must be another saved host, and must not lead back to this one. */
+  private checkJump(id: string | null, jumpHostId: string): void {
+    const seen = new Set<string>(id ? [id] : [])
+    let next: string | undefined = jumpHostId
+    for (let depth = 0; next; depth++) {
+      if (seen.has(next)) throw new Error('A host cannot be reached through itself')
+      if (depth >= MAX_JUMPS) throw new Error(`At most ${MAX_JUMPS} jump hosts in a row`)
+      const hop: Item<HostData> | undefined = this.v.get<HostData>(next)
+      if (hop?.type !== 'host') throw new Error('Jump host not found')
+      seen.add(next)
+      next = hop.data.jumpHostId
+    }
+  }
+
+  saveForward(id: string | null, input: ForwardInput): string {
+    if (id && this.v.get(id)?.type !== 'forward') throw new Error('Port forward not found')
+    if (this.v.get(input.hostId)?.type !== 'host') throw new Error('Choose a host to forward through')
+    const kind = input.kind
+    if (kind !== 'local' && kind !== 'remote' && kind !== 'dynamic') throw new Error('Unknown kind of forward')
+    const port = (value: unknown, name: string) => {
+      const n = Number(value)
+      if (!Number.isInteger(n) || n < 1 || n > 65535) {
+        throw new Error(`${name} must be 1-65535`)
+      }
+      return n
+    }
+    const data: ForwardData = {
+      label: '',
+      hostId: input.hostId,
+      kind,
+      bindHost: (input.bindHost ?? '').trim().slice(0, 255) || (kind === 'remote' ? 'localhost' : '127.0.0.1'),
+      bindPort: port(input.bindPort, 'Listening port'),
+    }
+    if (kind !== 'dynamic') {
+      data.destHost = required(input.destHost, 'Destination host', 255)
+      data.destPort = port(input.destPort, 'Destination port')
+    }
+    data.label =
+      (input.label ?? '').trim().slice(0, 128) ||
+      (kind === 'dynamic' ? `SOCKS on ${data.bindPort}` : `${data.bindPort} → ${data.destHost}:${data.destPort}`)
+    return this.v.put('forward', data, id ?? undefined).id
+  }
+
+  forward(id: string): Item<ForwardData> | undefined {
+    const item = this.v.get<ForwardData>(id)
+    return item?.type === 'forward' ? item : undefined
   }
 
   async generateKey(label: string, type: 'ed25519' | 'rsa'): Promise<string> {
@@ -436,6 +494,18 @@ export class VaultService {
         }
       }
     }
+    if (item.type === 'host') {
+      // Hosts that went through it connect directly; its forwards go with it.
+      for (const host of this.v.list<HostData>('host')) {
+        if (host.data.jumpHostId === id) {
+          const { jumpHostId: _removed, ...rest } = host.data
+          this.v.put('host', rest, host.id)
+        }
+      }
+      for (const forward of this.v.list<ForwardData>('forward')) {
+        if (forward.data.hostId === id) this.v.delete(forward.id)
+      }
+    }
     this.v.delete(id)
   }
 
@@ -458,8 +528,12 @@ export class VaultService {
     const counts = { add: 0, already: 0, conflicting: 0, skipped: parsed.skipped }
     for (const entry of parsed.entries) counts[this.knownHostStatus(entry)]++
     const notes: string[] = []
-    const jumps = hosts.filter((h) => h.proxyJump).map((h) => h.alias)
-    if (jumps.length) notes.push(`ProxyJump is not supported yet, so these connect directly: ${jumps.join(', ')}.`)
+    const unresolved = hosts.filter((h) => h.proxyJump && !this.jumpTargetFor(h.proxyJump, hosts)).map((h) => h.alias)
+    if (unresolved.length) {
+      notes.push(
+        `ProxyJump here is not the name of a single host in this config or your vault, so these connect directly: ${unresolved.join(', ')}.`,
+      )
+    }
     if (counts.conflicting) {
       notes.push(`${counts.conflicting} known host key(s) differ from the key termterm already trusts for that host and are left out.`)
     }
@@ -518,6 +592,22 @@ export class VaultService {
       })
       result.hosts++
     }
+    // Jump hosts: by alias in this config, or a host already in the vault with that label.
+    const imported = new Map<string, string>()
+    for (const host of v.list<HostData>('host')) imported.set(host.data.label, host.id)
+    for (const h of pending.hosts) {
+      const id = imported.get(h.alias)
+      const jump = h.proxyJump ? this.jumpTargetFor(h.proxyJump, pending.hosts) : undefined
+      const jumpId = jump ? imported.get(jump) : undefined
+      const item = id ? v.get<HostData>(id) : undefined
+      if (!item || !jumpId || jumpId === id || item.data.jumpHostId || !aliases.includes(h.alias)) continue
+      try {
+        this.checkJump(id!, jumpId)
+        v.put<HostData>('host', { ...item.data, jumpHostId: jumpId }, id)
+      } catch {
+        // a loop in the config: leave it connecting directly
+      }
+    }
     if (includeKnownHosts) {
       for (const entry of pending.known) {
         if (this.knownHostStatus(entry) !== 'add') continue
@@ -527,6 +617,14 @@ export class VaultService {
     }
     this.sshImport = null
     return result
+  }
+
+  /** The host a ProxyJump value names, if it is one plain name known here. */
+  private jumpTargetFor(proxyJump: string, hosts: ConfigHost[]): string | undefined {
+    const name = proxyJump.trim()
+    if (!name || /[,@:\s]/.test(name) || name.toLowerCase() === 'none') return undefined
+    if (hosts.some((h) => h.alias === name)) return name
+    return this.v.list<HostData>('host').some((h) => h.data.label === name) ? name : undefined
   }
 
   private keyFileFor(h: ConfigHost): string | undefined {
@@ -740,6 +838,8 @@ interface HistoryData {
 }
 
 const HISTORY_LIMIT = 500
+/** Jump hosts in a row, at most: deeper chains are almost certainly a mistake. */
+export const MAX_JUMPS = 5
 
 /** Removes repeats, keeping each command's latest position. */
 function dedupeKeepLast(list: string[]): string[] {
