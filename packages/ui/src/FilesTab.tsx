@@ -12,6 +12,7 @@ import {
 import type { FileEntry, FolderListing, TransferState } from '@termterm/app'
 import { api, errorMessage } from './api'
 import { Button, ErrorText, Field, Modal, useAction } from './ui'
+import { useAppInfo } from './Update'
 import type { SessionTab } from './Workspace'
 
 /**
@@ -29,6 +30,14 @@ export function FilesTab({ tab, active, onClose }: { tab: SessionTab; active: bo
   const [refreshRemote, setRefreshRemote] = useState(0)
   const localRef = useRef<PaneHandle>(null)
   const remoteRef = useRef<PaneHandle>(null)
+  // On a phone there is no file system to browse beside the server's: files
+  // are saved and picked through the system's own file picker instead.
+  const localFiles = useAppInfo()?.capabilities.localFiles ?? true
+  const [pickError, setPickError] = useState<string | null>(null)
+  const viaPicker = (work: () => Promise<unknown>) => {
+    setPickError(null)
+    void work().catch((e) => setPickError(errorMessage(e)))
+  }
 
   useEffect(() => {
     let current = true
@@ -90,6 +99,56 @@ export function FilesTab({ tab, active, onClose }: { tab: SessionTab; active: bo
     )
   }
 
+  const remotePane = (
+    <FilePane
+      ref={remoteRef}
+      side="remote"
+      title={tab.title}
+      start={home}
+      active={active}
+      refresh={refreshRemote}
+      tapToOpen={!localFiles}
+      ops={{
+        list: (p) => api.sftpList(tab.id, p ?? home),
+        mkdir: (p) => api.sftpMkdir(tab.id, p),
+        rename: (a, b) => api.sftpRename(tab.id, a, b),
+        remove: (p) => api.sftpDelete(tab.id, p),
+        join: (dir, name) => (dir.endsWith('/') ? dir + name : `${dir}/${name}`),
+      }}
+      copyLabel="Download"
+      onCopy={(entries) =>
+        localFiles
+          ? copy('download', entries.map((e) => e.path))
+          : viaPicker(async () => {
+              for (const e of entries) {
+                if (e.type === 'dir') throw new Error('Open a folder to download the files in it')
+                if (!(await api.sftpDownloadPicked?.(tab.id, e.path, e.name, e.size))) break
+              }
+            })
+      }
+      onUploadHere={
+        localFiles
+          ? undefined
+          : (folder) =>
+              viaPicker(async () => {
+                if (await api.sftpUploadPicked?.(tab.id, folder)) setRefreshRemote((n) => n + 1)
+              })
+      }
+      onDropFrom={(paths, folder) => copy('upload', paths, folder)}
+      onDropFiles={localFiles ? (paths, folder) => copy('upload', paths, folder) : undefined}
+    />
+  )
+
+  if (!localFiles) {
+    return (
+      <div className="files-tab">
+        <div className="files-panes single">{remotePane}</div>
+        <ErrorText error={pickError} />
+        <TransferList transfers={transfers} />
+      </div>
+    )
+  }
+
   return (
     <div className="files-tab">
       <div className="files-panes">
@@ -108,51 +167,38 @@ export function FilesTab({ tab, active, onClose }: { tab: SessionTab; active: bo
             join: (dir, name) => joinLocal(dir, name),
           }}
           copyLabel="Upload"
-          onCopy={(paths) => copy('upload', paths)}
+          onCopy={(entries) => copy('upload', entries.map((e) => e.path))}
           onDropFrom={(paths, folder) => copy('download', paths, folder)}
           onDropFiles={undefined}
         />
-        <FilePane
-          ref={remoteRef}
-          side="remote"
-          title={tab.title}
-          start={home}
-          active={active}
-          refresh={refreshRemote}
-          ops={{
-            list: (p) => api.sftpList(tab.id, p ?? home),
-            mkdir: (p) => api.sftpMkdir(tab.id, p),
-            rename: (a, b) => api.sftpRename(tab.id, a, b),
-            remove: (p) => api.sftpDelete(tab.id, p),
-            join: (dir, name) => (dir.endsWith('/') ? dir + name : `${dir}/${name}`),
-          }}
-          copyLabel="Download"
-          onCopy={(paths) => copy('download', paths)}
-          onDropFrom={(paths, folder) => copy('upload', paths, folder)}
-          onDropFiles={(paths, folder) => copy('upload', paths, folder)}
-        />
+        {remotePane}
       </div>
-      {transfers.length > 0 && (
-        <ul className="transfers" aria-label="Transfers">
-          {transfers.map((t) => (
-            <li key={t.id} className={t.state}>
-              {t.direction === 'upload' ? <ArrowUpFromLine size={14} /> : <ArrowDownToLine size={14} />}
-              <span className="transfer-name">{t.name}</span>
-              {t.state === 'error' ? (
-                <span className="error">{t.error}</span>
-              ) : (
-                <>
-                  <progress max={t.total || 1} value={t.state === 'done' ? t.total || 1 : t.done} />
-                  <span className="transfer-size">
-                    {t.state === 'done' ? `Done · ${size(t.total)}` : `${size(t.done)} of ${size(t.total)}`}
-                  </span>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <TransferList transfers={transfers} />
     </div>
+  )
+}
+
+function TransferList({ transfers }: { transfers: TransferState[] }) {
+  if (transfers.length === 0) return null
+  return (
+    <ul className="transfers" aria-label="Transfers">
+      {transfers.map((t) => (
+        <li key={t.id} className={t.state}>
+          {t.direction === 'upload' ? <ArrowUpFromLine size={14} /> : <ArrowDownToLine size={14} />}
+          <span className="transfer-name">{t.name}</span>
+          {t.state === 'error' ? (
+            <span className="error">{t.error}</span>
+          ) : (
+            <>
+              <progress max={t.total || 1} value={t.state === 'done' ? t.total || 1 : t.done} />
+              <span className="transfer-size">
+                {t.state === 'done' ? `Done · ${size(t.total)}` : `${size(t.done)} of ${size(t.total)}`}
+              </span>
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -199,13 +245,17 @@ const FilePane = forwardRef<
     refresh: number
     ops: PaneOps
     copyLabel: 'Upload' | 'Download'
-    onCopy: (paths: string[]) => void
+    onCopy: (entries: FileEntry[]) => void
+    /** Without this device's files beside it: an Upload button that picks files to copy here. */
+    onUploadHere?: (folder: string) => void
+    /** A tap on a folder opens it (touch screens, where double-tap is unreliable). */
+    tapToOpen?: boolean
     /** Paths dragged in from the other side, to copy into `folder`. */
     onDropFrom: (paths: string[], folder: string) => void
     /** Files dropped from the system's file manager (server side only). */
     onDropFiles?: (paths: string[], folder: string) => void
   }
->(function FilePane({ side, title, start, refresh, ops, copyLabel, onCopy, onDropFrom, onDropFiles }, ref) {
+>(function FilePane({ side, title, start, refresh, ops, copyLabel, onCopy, onUploadHere, tapToOpen, onDropFrom, onDropFiles }, ref) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [path, setPath] = useState<string | null>(start)
   const [typed, setTyped] = useState('')
@@ -244,6 +294,7 @@ const FilePane = forwardRef<
   const chosen = listing?.entries.filter((e) => selected.has(e.path)) ?? []
 
   const click = (e: MouseEvent, entry: FileEntry) => {
+    if (tapToOpen && entry.type === 'dir') return open(entry)
     if (e.shiftKey && anchor && listing) {
       const names = listing.entries.map((x) => x.path)
       const [a, b] = [names.indexOf(anchor), names.indexOf(entry.path)].sort((x, y) => x - y)
@@ -342,7 +393,7 @@ const FilePane = forwardRef<
           </button>
           <Button
             disabled={chosen.length === 0}
-            onClick={() => onCopy(chosen.map((c) => c.path))}
+            onClick={() => onCopy(chosen)}
             title={copyLabel === 'Upload' ? 'Copy to the server, into the folder open there' : 'Copy to this computer, into the folder open there'}
           >
             {copyLabel === 'Upload' ? (
@@ -355,6 +406,11 @@ const FilePane = forwardRef<
               </>
             )}
           </Button>
+          {onUploadHere && listing && (
+            <Button onClick={() => onUploadHere(listing.path)} title="Pick files on this device to copy into this folder">
+              Upload… <ArrowUpFromLine size={14} />
+            </Button>
+          )}
         </span>
       </header>
       <form

@@ -39,8 +39,7 @@ export function VaultView({
   return (
     <div className="vault">
       <nav className="sidebar" aria-label="Vault">
-        {/* Forwards run only in the desktop app; the phone's bottom bar is full enough. */}
-        {PAGES.filter(({ id }) => id !== 'forwarding' || info?.platform !== 'mobile').map(({ id, label, icon: Icon }) => (
+        {PAGES.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             className={`nav-item ${page === id ? 'active' : ''}`}

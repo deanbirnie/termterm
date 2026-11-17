@@ -7,10 +7,12 @@ import { Capacitor } from '@capacitor/core'
 import {
   VaultService,
   type AppPhase,
+  type ForwardState,
   type SessionStatus,
   type Settings,
   type SshPrompt,
   type TermtermApi,
+  type TransferState,
   type UpdateState,
   type VaultSnapshot,
 } from '@termterm/app'
@@ -105,13 +107,33 @@ export function createApi(): TermtermApi {
   const sshData = new Emitter<[string, Uint8Array]>()
   const sshStatus = new Emitter<[string, SessionStatus]>()
   const sshPrompt = new Emitter<[SshPrompt]>()
+  const forwardState = new Emitter<[string, ForwardState]>()
+  const transfer = new Emitter<[TransferState]>()
   const ssh = NATIVE
     ? createSsh(vault, {
         data: (id, data) => sshData.emit(id, data),
         status: (id, status) => sshStatus.emit(id, status),
         prompt: (prompt) => sshPrompt.emit(prompt),
+        forwardState: (id, state) => forwardState.emit(id, state),
+        transfer: (t) => transfer.emit(t),
       })
     : null
+  const needSsh = () => {
+    if (!ssh) throw new Error(SSH_UNAVAILABLE)
+    return ssh
+  }
+
+  // Like the desktop app: forwards keep running while the vault is locked (as
+  // open terminals do), and the ones marked to start automatically start
+  // whenever it is opened.
+  phase.on((p) => {
+    if (!ssh) return
+    if (p === 'unlocked') {
+      for (const f of vault.snapshot().forwards) {
+        if (f.autoStart && !ssh.runningForwards().includes(f.id)) void ssh.forwardStart(f.id).catch(() => undefined)
+      }
+    }
+  })
 
   // Auto-lock: a phone has no idle timer worth trusting, so lock when the app
   // has been in the background for longer than the chosen time.
@@ -211,27 +233,27 @@ export function createApi(): TermtermApi {
     saveTextFile: (name, text) => saveExportFile(name, text),
     vaultImport: (text, password) => vault.importVault(text, password),
     renameGroup: async (from, to) => vault.renameGroup(from, to),
-    // Port forwards are saved (and sync) here, but run only in the desktop app.
     saveForward: async (id, input) => vault.saveForward(id, input),
-    forwardStart: async () => {
-      throw new Error('Port forwards run in the desktop app')
-    },
-    forwardStop: async () => undefined,
-    forwardStates: async () => ({}),
-    onForwardState: () => () => undefined,
-    // The file browser is desktop-only for now.
-    sftpOpen: notOnPhone,
-    sftpList: notOnPhone,
-    sftpMkdir: notOnPhone,
-    sftpRename: notOnPhone,
-    sftpDelete: notOnPhone,
-    sftpClose: () => undefined,
+    forwardStart: (id) => needSsh().forwardStart(id),
+    forwardStop: async (id) => ssh?.forwardStop(id),
+    forwardStates: async () => ssh?.forwardStates() ?? {},
+    onForwardState: forwardState.on,
+    // The server's files; this phone's own files are reached through Android's
+    // file picker (sftpDownloadPicked / sftpUploadPicked), not browsed.
+    sftpOpen: (sessionId, target) => needSsh().sftpOpen(sessionId, target),
+    sftpList: (sessionId, path) => needSsh().sftpList(sessionId, path),
+    sftpMkdir: (sessionId, path) => needSsh().sftpMkdir(sessionId, path),
+    sftpRename: (sessionId, from, to) => needSsh().sftpRename(sessionId, from, to),
+    sftpDelete: (sessionId, path) => needSsh().sftpDelete(sessionId, path),
+    sftpClose: (sessionId) => ssh?.sftpClose(sessionId),
+    sftpDownloadPicked: (sessionId, path, name, size) => needSsh().sftpDownload(sessionId, path, name, size),
+    sftpUploadPicked: (sessionId, folder) => needSsh().sftpUpload(sessionId, folder),
     localList: notOnPhone,
     localMkdir: notOnPhone,
     localRename: notOnPhone,
     localDelete: notOnPhone,
     transfer: notOnPhone,
-    onTransfer: () => () => undefined,
+    onTransfer: transfer.on,
     pathForFile: () => '',
     // A phone has no ~/.ssh: only pasted text.
     sshImportScan: async (paste) => {
@@ -275,7 +297,7 @@ export function createApi(): TermtermApi {
       version: __APP_VERSION__,
       packaged: Capacitor.isNativePlatform(),
       platform: 'mobile',
-      capabilities: { ssh: NATIVE, keys: NATIVE, biometricUnlock: true },
+      capabilities: { ssh: NATIVE, keys: NATIVE, biometricUnlock: true, forwards: NATIVE, sftp: NATIVE, localFiles: false },
     }),
     localShells: async () => [],
     updateState: async () => updateState,

@@ -12,10 +12,13 @@ import {
   keyTypeOfBlob,
   MAX_JUMPS,
   type ConnectTarget,
+  type FolderListing,
+  type ForwardState,
   type KeyTools,
   type SessionStatus,
   type SshPrompt,
   type SshPromptReply,
+  type TransferState,
   type VaultService,
 } from '@termterm/app'
 import { DEFAULT_KEEPALIVE_SECONDS, fromBase64, toBase64 } from '@termterm/core'
@@ -34,32 +37,56 @@ type NativePrompt = { promptId: string; sessionId: string; hop?: number } & (
   | { kind: 'keyboard'; name: string; instructions: string; prompts: Array<{ prompt: string; echo: boolean }> }
 )
 
-interface SshPluginApi {
-  connect(options: {
-    sessionId: string
+/** Where and how to connect, as SshPlugin's configFrom reads it. */
+interface ConnectOptions {
+  host: string
+  port: number
+  username: string
+  password?: string
+  privateKey?: string
+  passphrase?: string
+  /** Seconds between keep-alives; 0 = none. */
+  keepAlive: number
+  /** Environment variables for the shell. */
+  env?: Record<string, string>
+  /** Jump hosts, nearest first. */
+  jumps?: Array<{
     host: string
     port: number
     username: string
     password?: string
     privateKey?: string
     passphrase?: string
-    /** Seconds between keep-alives; 0 = none. */
     keepAlive: number
-    /** Environment variables for the shell. */
-    env?: Record<string, string>
-    /** Jump hosts, nearest first. */
-    jumps?: Array<{
-      host: string
-      port: number
-      username: string
-      password?: string
-      privateKey?: string
-      passphrase?: string
-      keepAlive: number
-    }>
-    cols: number
-    rows: number
-  }): Promise<void>
+  }>
+}
+
+interface SshPluginApi {
+  forwardStart(
+    options: ConnectOptions & {
+      forwardId: string
+      kind: 'local' | 'remote' | 'dynamic'
+      bindHost: string
+      bindPort: number
+      destHost?: string
+      destPort?: number
+    },
+  ): Promise<void>
+  forwardStop(options: { forwardId: string }): Promise<void>
+  sftpOpen(options: ConnectOptions & { sessionId: string }): Promise<{ home: string }>
+  sftpList(options: { sessionId: string; path: string }): Promise<FolderListing>
+  sftpMkdir(options: { sessionId: string; path: string }): Promise<void>
+  sftpRename(options: { sessionId: string; from: string; to: string }): Promise<void>
+  sftpDelete(options: { sessionId: string; path: string }): Promise<void>
+  sftpClose(options: { sessionId: string }): Promise<void>
+  sftpDownload(options: { sessionId: string; path: string; name: string; size: number }): Promise<{ saved: boolean }>
+  sftpUpload(options: { sessionId: string; folder: string }): Promise<{ count: number }>
+  addListener(
+    event: 'forwardState',
+    cb: (e: { forwardId: string; state: 'starting' | 'active' | 'stopped' | 'error'; error?: string; connections?: number }) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(event: 'transfer', cb: (t: TransferState) => void): Promise<PluginListenerHandle>
+  connect(options: ConnectOptions & { sessionId: string; cols: number; rows: number }): Promise<void>
   write(options: { sessionId: string; data: string }): Promise<void>
   resize(options: { sessionId: string; cols: number; rows: number }): Promise<void>
   close(options: { sessionId: string }): Promise<void>
@@ -117,6 +144,8 @@ export interface SshEvents {
   data(sessionId: string, data: Uint8Array): void
   status(sessionId: string, status: SessionStatus): void
   prompt(prompt: SshPrompt): void
+  forwardState(forwardId: string, state: ForwardState): void
+  transfer(t: TransferState): void
 }
 
 export function createSsh(vault: VaultService, events: SshEvents) {
@@ -124,6 +153,113 @@ export function createSsh(vault: VaultService, events: SshEvents) {
   const pending = new Map<string, (reply: SshPromptReply) => void>()
   /** Where each session connects, hop by hop (0 is the target), for host key decisions and prompt titles. */
   const targets = new Map<string, { hops: Array<{ address: string; port: number; label: string }>; failure?: string }>()
+  const forwardStates = new Map<string, ForwardState>()
+
+  /** Plugin calls reject with the native message; pass it on as a plain Error. */
+  const call = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn()
+    } catch (e) {
+      throw new Error(messageOf(e))
+    }
+  }
+
+  /**
+   * How to reach a target: the server, its credentials and settings, and the
+   * jump hosts before it (nearest first), as the native side takes them; and
+   * each hop's address and label, for host key decisions and prompt titles.
+   */
+  function plan(target: ConnectTarget) {
+    if ('local' in target) throw new Error('A local terminal is not available on a phone')
+    type Hop = {
+      address: string
+      port: number
+      username: string
+      password?: string
+      privateKey?: string
+      passphrase?: string
+      keepAlive: number
+    }
+    let env: Record<string, string> | undefined
+    // The target first, then each jump host it is reached through.
+    const hops: Hop[] = []
+    if ('hostId' in target) {
+      const seen = new Set<string>()
+      let id: string | undefined = target.hostId
+      while (id) {
+        if (seen.has(id)) throw new Error('A host cannot be reached through itself')
+        if (hops.length > MAX_JUMPS) throw new Error(`At most ${MAX_JUMPS} jump hosts in a row`)
+        seen.add(id)
+        const host = vault.host(id)
+        if (host?.type !== 'host') throw new Error(hops.length ? 'Jump host not found' : 'Host not found')
+        const hop: Hop = {
+          address: host.data.address,
+          port: host.data.port,
+          username: host.data.username,
+          password: host.data.password,
+          keepAlive: host.data.keepAlive ?? DEFAULT_KEEPALIVE_SECONDS,
+        }
+        // Environment variables are for the target's shell only.
+        if (hops.length === 0) env = host.data.env
+        if (host.data.keyId) {
+          const key = vault.key(host.data.keyId)
+          if (key?.type === 'key') {
+            hop.privateKey = key.data.privateKey
+            hop.passphrase = key.data.passphrase
+          }
+        }
+        if (!hop.username) {
+          throw new Error(`${host.data.label} has no username. Add one to the host${hops.length ? '' : ', or connect as user@host'}.`)
+        }
+        hops.push(hop)
+        id = host.data.jumpHostId
+      }
+    } else {
+      if (!target.username) {
+        throw new Error('This host has no username. Add one to the host, or connect as user@host.')
+      }
+      hops.push({ address: target.address, port: target.port, username: target.username, keepAlive: DEFAULT_KEEPALIVE_SECONDS })
+    }
+    const label = (h: Hop, i: number) => {
+      const where = h.port === 22 ? h.address : `${h.address}:${h.port}`
+      return i > 0 ? `${where} (jump host)` : where
+    }
+    const [first, ...jumps] = hops
+    return {
+      labels: hops.map((h, i) => ({ address: h.address, port: h.port, label: label(h, i) })),
+      options: {
+        host: first!.address,
+        port: first!.port,
+        username: first!.username,
+        password: first!.password,
+        privateKey: first!.privateKey,
+        passphrase: first!.passphrase,
+        keepAlive: first!.keepAlive,
+        ...(env ? { env } : {}),
+        jumps: jumps.map((h) => ({
+          host: h.address,
+          port: h.port,
+          username: h.username,
+          keepAlive: h.keepAlive,
+          ...(h.password ? { password: h.password } : {}),
+          ...(h.privateKey ? { privateKey: h.privateKey, passphrase: h.passphrase } : {}),
+        })),
+      },
+    }
+  }
+
+  void Ssh.addListener('forwardState', (e) => {
+    const target = targets.get(e.forwardId)
+    const state: ForwardState =
+      e.state === 'error'
+        ? { state: 'error', error: target?.failure ?? e.error ?? 'Failed' }
+        : { state: e.state, ...(e.connections !== undefined ? { connections: e.connections } : {}) }
+    if (e.state === 'stopped' || e.state === 'error') targets.delete(e.forwardId)
+    forwardStates.set(e.forwardId, state)
+    events.forwardState(e.forwardId, state)
+  })
+
+  void Ssh.addListener('transfer', (t) => events.transfer(t))
 
   void Ssh.addListener('data', (e) => events.data(e.sessionId, fromBase64(e.data)))
 
@@ -217,81 +353,12 @@ export function createSsh(vault: VaultService, events: SshEvents) {
 
   return {
     async connect(sessionId: string, target: ConnectTarget, cols: number, rows: number): Promise<void> {
-      if ('local' in target) throw new Error('A local terminal is not available on a phone')
-      // The target first, then each jump host it is reached through.
-      type Hop = {
-        address: string
-        port: number
-        username: string
-        password?: string
-        privateKey?: string
-        passphrase?: string
-        keepAlive: number
-      }
-      let env: Record<string, string> | undefined
-      const hops: Hop[] = []
-      if ('hostId' in target) {
-        const seen = new Set<string>()
-        let id: string | undefined = target.hostId
-        while (id) {
-          if (seen.has(id)) throw new Error('A host cannot be reached through itself')
-          if (hops.length > MAX_JUMPS) throw new Error(`At most ${MAX_JUMPS} jump hosts in a row`)
-          seen.add(id)
-          const host = vault.host(id)
-          if (host?.type !== 'host') throw new Error(hops.length ? 'Jump host not found' : 'Host not found')
-          const hop: Hop = {
-            address: host.data.address,
-            port: host.data.port,
-            username: host.data.username,
-            password: host.data.password,
-            keepAlive: host.data.keepAlive ?? DEFAULT_KEEPALIVE_SECONDS,
-          }
-          // Environment variables are for the target's shell only.
-          if (hops.length === 0) env = host.data.env
-          if (host.data.keyId) {
-            const key = vault.key(host.data.keyId)
-            if (key?.type === 'key') {
-              hop.privateKey = key.data.privateKey
-              hop.passphrase = key.data.passphrase
-            }
-          }
-          if (!hop.username) {
-            throw new Error(`${host.data.label} has no username. Add one to the host${hops.length ? '' : ', or connect as user@host'}.`)
-          }
-          hops.push(hop)
-          id = host.data.jumpHostId
-        }
-      } else {
-        if (!target.username) {
-          throw new Error('This host has no username. Add one to the host, or connect as user@host.')
-        }
-        hops.push({ address: target.address, port: target.port, username: target.username, keepAlive: DEFAULT_KEEPALIVE_SECONDS })
-      }
-      const label = (h: Hop, i: number) => {
-        const where = h.port === 22 ? h.address : `${h.address}:${h.port}`
-        return i > 0 ? `${where} (jump host)` : where
-      }
-      targets.set(sessionId, { hops: hops.map((h, i) => ({ address: h.address, port: h.port, label: label(h, i) })) })
-      const [first, ...jumps] = hops
+      const { options, labels } = plan(target)
+      targets.set(sessionId, { hops: labels })
       try {
         await Ssh.connect({
           sessionId,
-          host: first!.address,
-          port: first!.port,
-          username: first!.username,
-          password: first!.password,
-          privateKey: first!.privateKey,
-          passphrase: first!.passphrase,
-          keepAlive: first!.keepAlive,
-          ...(env ? { env } : {}),
-          jumps: jumps.map((h) => ({
-            host: h.address,
-            port: h.port,
-            username: h.username,
-            keepAlive: h.keepAlive,
-            ...(h.password ? { password: h.password } : {}),
-            ...(h.privateKey ? { privateKey: h.privateKey, passphrase: h.passphrase } : {}),
-          })),
+          ...options,
           cols: Math.max(1, Math.floor(cols) || 80),
           rows: Math.max(1, Math.floor(rows) || 24),
         })
@@ -300,6 +367,71 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         throw new Error(messageOf(e))
       }
     },
+
+    // ---- port forwards ----
+
+    async forwardStart(forwardId: string): Promise<void> {
+      const forward = vault.forward(forwardId)
+      if (!forward) throw new Error('Port forward not found')
+      const { options, labels } = plan({ hostId: forward.data.hostId })
+      targets.set(forwardId, { hops: labels })
+      forwardStates.set(forwardId, { state: 'starting' })
+      events.forwardState(forwardId, { state: 'starting' })
+      const { kind, bindHost, bindPort, destHost, destPort } = forward.data
+      try {
+        await Ssh.forwardStart({
+          forwardId,
+          ...options,
+          kind,
+          bindHost,
+          bindPort,
+          ...(destHost ? { destHost } : {}),
+          ...(destPort ? { destPort } : {}),
+        })
+      } catch (e) {
+        targets.delete(forwardId)
+        const failed: ForwardState = { state: 'error', error: messageOf(e) }
+        forwardStates.set(forwardId, failed)
+        events.forwardState(forwardId, failed)
+        throw new Error(messageOf(e))
+      }
+    },
+
+    async forwardStop(forwardId: string): Promise<void> {
+      await Ssh.forwardStop({ forwardId })
+    },
+
+    forwardStates: (): Record<string, ForwardState> => Object.fromEntries(forwardStates),
+
+    /** Forwards running now, to stop when the vault locks. */
+    runningForwards: () => [...forwardStates].filter(([, s]) => s.state === 'starting' || s.state === 'active').map(([id]) => id),
+
+    // ---- files (SFTP) ----
+
+    async sftpOpen(sessionId: string, target: ConnectTarget): Promise<{ home: string }> {
+      const { options, labels } = plan(target)
+      targets.set(sessionId, { hops: labels })
+      try {
+        return await Ssh.sftpOpen({ sessionId, ...options })
+      } catch (e) {
+        const reason = targets.get(sessionId)?.failure
+        targets.delete(sessionId)
+        throw new Error(reason ?? messageOf(e))
+      }
+    },
+    sftpList: (sessionId: string, path: string) => call(() => Ssh.sftpList({ sessionId, path })),
+    sftpMkdir: (sessionId: string, path: string) => call(() => Ssh.sftpMkdir({ sessionId, path })),
+    sftpRename: (sessionId: string, from: string, to: string) => call(() => Ssh.sftpRename({ sessionId, from, to })),
+    sftpDelete: (sessionId: string, path: string) => call(() => Ssh.sftpDelete({ sessionId, path })),
+    sftpClose(sessionId: string) {
+      targets.delete(sessionId)
+      void Ssh.sftpClose({ sessionId })
+    },
+    /** Saves a server file where the user picks. False if they cancel. */
+    sftpDownload: async (sessionId: string, path: string, name: string, size: number) =>
+      (await call(() => Ssh.sftpDownload({ sessionId, path, name, size }))).saved,
+    /** Copies files the user picks into a server folder. How many were copied. */
+    sftpUpload: async (sessionId: string, folder: string) => (await call(() => Ssh.sftpUpload({ sessionId, folder }))).count,
 
     write: (sessionId: string, data: string) => void Ssh.write({ sessionId, data }),
 

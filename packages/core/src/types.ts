@@ -143,6 +143,8 @@ export interface ForwardData {
   bindPort: number
   destHost?: string
   destPort?: number
+  /** Started by itself whenever the app opens the vault (on each device that can run it). */
+  autoStart?: boolean
 }
 
 export interface ItemTypes {

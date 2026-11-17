@@ -54,6 +54,8 @@ export interface ForwardView {
   bindPort: number
   destHost?: string
   destPort?: number
+  /** Starts by itself whenever the vault is opened. */
+  autoStart?: boolean
 }
 
 export type ForwardInput = Omit<ForwardView, 'id'>
@@ -181,8 +183,13 @@ export interface AppInfo {
     sshFiles?: boolean
     /** Can run port forwards (desktop). */
     forwards?: boolean
-    /** Has the SFTP file browser (desktop). */
+    /** Has the SFTP file browser. */
     sftp?: boolean
+    /**
+     * The file browser shows this device's files beside the server's (desktop).
+     * Without it (Android), files are copied through the system file picker.
+     */
+    localFiles?: boolean
   }
 }
 
@@ -360,7 +367,10 @@ export interface TermtermApi {
   /** Renames a group of hosts, or (with an empty name) ungroups them. */
   renameGroup(from: string, to: string): Promise<void>
   saveForward(id: string | null, input: ForwardInput): Promise<string>
-  /** Runs a saved port forward on this device until stopped, the app quits or the vault locks. */
+  /**
+   * Runs a saved port forward on this device until stopped or the app quits.
+   * Locking the vault leaves it running, as it does open terminals.
+   */
   forwardStart(id: string): Promise<void>
   forwardStop(id: string): Promise<void>
   forwardStates(): Promise<Record<string, ForwardState>>
@@ -374,6 +384,10 @@ export interface TermtermApi {
   /** Removes a file, or a folder with everything in it. */
   sftpDelete(sessionId: string, path: string): Promise<void>
   sftpClose(sessionId: string): void
+  /** Without `localFiles`: saves a server file where the user picks. False if they cancel. */
+  sftpDownloadPicked?(sessionId: string, path: string, name: string, size: number): Promise<boolean>
+  /** Without `localFiles`: copies files the user picks into a server folder; how many. */
+  sftpUploadPicked?(sessionId: string, folder: string): Promise<number>
   /** The same operations on this computer's files. */
   localList(path: string | null): Promise<FolderListing>
   localMkdir(path: string): Promise<void>

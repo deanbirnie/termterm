@@ -6,12 +6,12 @@ import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, useAction } from '../ui'
 
 const KINDS = [
-  { value: 'local', label: 'Local', hint: 'A port on this computer reaches a destination through the server (ssh -L).' },
-  { value: 'remote', label: 'Remote', hint: 'A port on the server reaches a destination from this computer (ssh -R).' },
+  { value: 'local', label: 'Local', hint: 'A port on this device reaches a destination through the server (ssh -L).' },
+  { value: 'remote', label: 'Remote', hint: 'A port on the server reaches a destination from this device (ssh -R).' },
   {
     value: 'dynamic',
     label: 'Dynamic (SOCKS)',
-    hint: 'A SOCKS5 proxy on this computer that reaches anything through the server (ssh -D). Point a browser or tool at it.',
+    hint: 'A SOCKS5 proxy on this device that reaches anything through the server (ssh -D). Point a browser or tool at it.',
   },
 ] as const
 
@@ -48,14 +48,14 @@ export function ForwardingPage({ snapshot }: { snapshot: VaultSnapshot }) {
           </Button>
         </div>
         {!canRun && snapshot.forwards.length > 0 && (
-          <p className="hint-box">Port forwards run in the desktop app. They are saved here and sync with your vault.</p>
+          <p className="hint-box">Port forwards run in the installed apps. They are saved here and sync with your vault.</p>
         )}
         <ErrorText error={error} />
         {snapshot.forwards.length === 0 ? (
           <Empty icon={<ArrowLeftRight size={28} />} title="No port forwards yet">
             {snapshot.hosts.length === 0
               ? 'Add a host first: a port forward goes through one of your hosts.'
-              : 'Reach a service on a server as if it were on this computer, or the other way round, or browse through a server with a SOCKS proxy.'}
+              : 'Reach a service on a server as if it were on this device, or the other way round, or browse through a server with a SOCKS proxy.'}
           </Empty>
         ) : (
           <>
@@ -76,6 +76,7 @@ export function ForwardingPage({ snapshot }: { snapshot: VaultSnapshot }) {
                       <span className="card-text">
                         <strong>{f.label}</strong>
                         <small className="mono">{describe(f, hostLabel(f.hostId))}</small>
+                        {f.autoStart && <small className="forward-state">Starts automatically</small>}
                         {state && state.state !== 'stopped' && (
                           <small className={state.state === 'error' ? 'error' : 'forward-state'} role="status">
                             {state.state === 'starting'
@@ -135,6 +136,7 @@ function ForwardPanel({
     bindPort: String(forward?.bindPort ?? ''),
     destHost: forward?.destHost ?? '',
     destPort: String(forward?.destPort ?? ''),
+    autoStart: forward?.autoStart ?? false,
   })
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }))
   const { busy, error, run } = useAction()
@@ -146,6 +148,7 @@ function ForwardPanel({
     bindHost: form.bindHost,
     bindPort: Number(form.bindPort),
     ...(form.kind === 'dynamic' ? {} : { destHost: form.destHost, destPort: Number(form.destPort) }),
+    autoStart: form.autoStart,
   })
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -180,8 +183,8 @@ function ForwardPanel({
         </Field>
         <div className="row">
           <Field
-            label={form.kind === 'remote' ? 'Listen on the server' : 'Listen on this computer'}
-            hint={form.kind === 'remote' ? 'Default localhost' : 'Default 127.0.0.1: only this computer can use it'}
+            label={form.kind === 'remote' ? 'Listen on the server' : 'Listen on this device'}
+            hint={form.kind === 'remote' ? 'Default localhost' : 'Default 127.0.0.1: only this device can use it'}
           >
             <input
               placeholder={form.kind === 'remote' ? 'localhost' : '127.0.0.1'}
@@ -203,7 +206,7 @@ function ForwardPanel({
           <div className="row">
             <Field
               label="Destination host"
-              hint={form.kind === 'local' ? 'As the server sees it, e.g. localhost or 10.0.0.5' : 'As this computer sees it, e.g. localhost'}
+              hint={form.kind === 'local' ? 'As the server sees it, e.g. localhost or 10.0.0.5' : 'As this device sees it, e.g. localhost'}
             >
               <input placeholder="localhost" value={form.destHost} onChange={(e) => set({ destHost: e.target.value })} />
             </Field>
@@ -221,6 +224,11 @@ function ForwardPanel({
         <Field label="Label" hint="Optional">
           <input value={form.label} onChange={(e) => set({ label: e.target.value })} />
         </Field>
+        <label className="check">
+          <input type="checkbox" checked={form.autoStart} onChange={(e) => set({ autoStart: e.target.checked })} />
+          <span>Start automatically when the vault is opened</span>
+        </label>
+        <p className="field-hint">On every device that runs port forwards. It keeps running while the vault is locked, until stopped or the app quits.</p>
         <ErrorText error={error} />
         <div className="panel-actions">
           <Button variant="primary" type="submit" disabled={busy || !form.hostId || !form.bindPort}>
