@@ -370,14 +370,16 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The workflow runs the tests, then:
+The workflow runs every test (unit, desktop and mobile end-to-end, and the
+Android SSH core), then:
 
 1. builds the Windows installer, the Linux AppImage and the signed Android APK, all stamped with that version;
 2. pushes `ghcr.io/deanbirnie/termterm-server` tagged `0.2.0`, `0.2` and `latest`;
 3. creates the GitHub release `v0.2.0` with the installers and the update
    metadata the in-app updater reads.
 
-Use [semantic versioning](https://semver.org). A version with a suffix, such as
+Use [semantic versioning](https://semver.org): anything else, such as `01.2.0`
+or `1.2`, is refused before anything is built. A version with a suffix, such as
 `0.3.0-beta.1`, is published as a pre-release: it gets its own image tag but
 does not move `latest`, and installed apps are not offered it.
 

@@ -11,8 +11,15 @@ LABEL org.opencontainers.image.title="termterm sync server" \
       org.opencontainers.image.source="https://github.com/deanbirnie/termterm" \
       org.opencontainers.image.version="${VERSION}"
 WORKDIR /app
+# Takes the base image's fixes that came out after it was built, and removes
+# the package managers it ships with: the server needs none, and each is code
+# (with dependencies of its own) that could otherwise need security updates.
+RUN apk upgrade --no-cache \
+ && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
+      /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* \
+ && mkdir /data && chown node:node /data
 COPY apps/server/src ./
-RUN echo '{"type":"module"}' > package.json && mkdir /data && chown node:node /data
+RUN echo '{"type":"module"}' > package.json
 # Starts as root only long enough to take ownership of /data, then drops to
 # PUID:PGID (default 1000:1000) before serving. See src/privileges.ts.
 VOLUME /data

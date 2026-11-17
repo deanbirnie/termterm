@@ -9,6 +9,7 @@ import {
   syncVault,
   type HostData,
 } from '../../../packages/core/src/index.ts'
+import { VaultService, type Platform } from '../../../packages/app/src/index.ts'
 import { createApp } from '../src/app.ts'
 
 const host = (label: string, password = 'pw'): HostData => ({
@@ -305,6 +306,57 @@ describe('accounts', () => {
     }
   })
 
+  it('keeps deletions made while sync was off, unless the item was edited later elsewhere', async () => {
+    const a = await firstDevice('dean', 'master')
+    const doomed = a.put('host', host('doomed'))
+    const contested = a.put('host', host('contested'))
+    const justBefore = a.put('host', host('deleted just before sync was turned off'))
+    await syncVault(a)
+    const b = await newDevice('dean', 'master')
+    await syncVault(b)
+
+    a.delete(justBefore.id) // not yet sent when sync is turned off
+    a.clearSync()
+    a.delete(doomed.id)
+    a.delete(contested.id)
+    await new Promise((r) => setTimeout(r, 5)) // B's edit is later than A's deletion
+    b.put('host', host('contested-edited-later'), contested.id)
+    await syncVault(b)
+
+    const api = new SyncApi(url)
+    const kdf = await api.prelogin('dean')
+    const { authKey } = await deriveKeys('master', kdf)
+    const { token, wrappedVaultKey } = await api.login('dean', authKey)
+    await a.joinAccount(kdf, wrappedVaultKey, 'master')
+    a.setSync(url, 'dean', token)
+    await syncVault(a)
+    await syncVault(a)
+    await syncVault(b)
+
+    for (const v of [a, b]) {
+      expect(v.get(doomed.id)).toBeUndefined()
+      expect(v.get(justBefore.id)).toBeUndefined()
+      expect(v.get<HostData>(contested.id)?.data.label).toBe('contested-edited-later')
+      expect(v.dirtyItems()).toHaveLength(0)
+    }
+  })
+
+  it('a new account does not receive deletions from an earlier one', async () => {
+    const a = await firstDevice('dean', 'master')
+    const gone = a.put('host', host('gone'))
+    a.put('host', host('kept'))
+    await syncVault(a)
+    a.clearSync()
+    a.delete(gone.id)
+
+    const api = new SyncApi(url)
+    const token = await api.register('dean2', a.kdf, await a.authKeyFor('master'), a.wrappedVaultKey)
+    a.setSync(url, 'dean2', token, { newAccount: true })
+    await syncVault(a)
+    const pulled = await new SyncApi(url, token).pull(0)
+    expect(pulled.items.map((i) => i.id)).toEqual([a.list('host')[0]!.id])
+  })
+
   it('merges an unrelated local vault into an existing account', async () => {
     const account = await firstDevice('dean', 'account-pw')
     const theirs = account.put('host', host('from-account'))
@@ -345,5 +397,111 @@ describe('accounts', () => {
       new SyncApi(closedUrl).register('x-user', vault.kdf, new Uint8Array(32), vault.wrappedVaultKey),
     ).rejects.toMatchObject({ status: 403 })
     await new Promise<void>((r) => closed.server.close(() => r()))
+  })
+})
+
+/** A VaultService on an in-memory device, for testing what survives a restart. */
+function serviceDevice() {
+  let file: string | null = null
+  const platform: Platform = {
+    storage: { read: async () => file, write: async (data) => void (file = data) },
+    deviceKey: { available: async () => false, has: async () => false, save: async () => {}, load: async () => null, clear: () => {} },
+    keys: {
+      generate: () => {
+        throw new Error('not used')
+      },
+      import: () => {
+        throw new Error('not used')
+      },
+    },
+    deviceName: () => 'test device',
+    rememberDevice: () => false,
+  }
+  const open = () => new VaultService(platform, () => undefined, () => undefined)
+  return { open, file: () => JSON.parse(file!), raw: () => file, setRaw: (data: string | null) => void (file = data) }
+}
+
+/** Makes the next password-change request fail with no answer, after (or instead of) reaching the server. */
+function loseNextPasswordChange(reachServer: boolean, onSent = () => {}) {
+  const real = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    if (!String(input).endsWith('/password')) return real(input, init)
+    globalThis.fetch = real
+    if (reachServer) await real(input, init)
+    onSent()
+    throw new TypeError('fetch failed')
+  }
+  return () => void (globalThis.fetch = real)
+}
+
+describe('an interrupted password change', () => {
+  it('finishes on the next sync when the server took it', async () => {
+    const d = serviceDevice()
+    let s = d.open()
+    await s.create('old-master-pw')
+    await s.syncRegister({ serverUrl: url, username: 'dean', password: 'old-master-pw' })
+
+    // The app dies as the server accepts the change: what is on disk then is
+    // what the next launch finds.
+    let onDisk: string | null = null
+    const restore = loseNextPasswordChange(true, () => void (onDisk = d.raw()))
+    try {
+      await expect(s.changePassword('old-master-pw', 'new-master-pw')).rejects.toThrow('fetch failed')
+    } finally {
+      restore()
+    }
+    s.lock()
+    await s.flush()
+    d.setRaw(onDisk)
+    expect(d.file().pendingRekey).toBeDefined()
+
+    // The app restarts. The password the vault was saved with still opens it,
+    // and a wrong one says why the new password does not work yet.
+    s = d.open()
+    await expect(s.unlock('new-master-pw')).rejects.toThrow(/password change was interrupted/)
+    await s.unlock('old-master-pw')
+    await s.syncNow()
+    await s.flush()
+    expect(d.file().pendingRekey).toBeUndefined()
+
+    s.lock()
+    await expect(s.unlock('old-master-pw')).rejects.toBeInstanceOf(WrongPasswordError)
+    await s.unlock('new-master-pw')
+    await expect(newDevice('dean', 'new-master-pw')).resolves.toBeDefined()
+  })
+
+  it('is dropped when the server never got it', async () => {
+    const d = serviceDevice()
+    const s = d.open()
+    await s.create('old-master-pw')
+    await s.syncRegister({ serverUrl: url, username: 'dean', password: 'old-master-pw' })
+
+    const restore = loseNextPasswordChange(false)
+    try {
+      await expect(s.changePassword('old-master-pw', 'new-master-pw')).rejects.toThrow('fetch failed')
+    } finally {
+      restore()
+    }
+    await s.syncNow()
+    await s.flush()
+    expect(d.file().pendingRekey).toBeUndefined()
+    s.lock()
+    await s.unlock('old-master-pw')
+    await expect(newDevice('dean', 'old-master-pw')).resolves.toBeDefined()
+  })
+
+  it('is not noted when the server refuses it', async () => {
+    const d = serviceDevice()
+    const s = d.open()
+    await s.create('old-master-pw')
+    await s.syncRegister({ serverUrl: url, username: 'dean', password: 'old-master-pw' })
+    await expect(s.changePassword('not-the-password', 'new-master-pw')).rejects.toBeInstanceOf(WrongPasswordError)
+    // Refused by the server: the account changed password elsewhere.
+    const other = await newDevice('dean', 'old-master-pw')
+    const rekey = await other.prepareRekey('old-master-pw', 'elsewhere-pw')
+    await new SyncApi(url, other.syncToken()).changePassword(rekey.currentAuthKey, rekey.newAuthKey, rekey.kdf, rekey.wrappedVaultKey)
+    await expect(s.changePassword('old-master-pw', 'new-master-pw')).rejects.toBeInstanceOf(SyncError)
+    await s.flush()
+    expect(d.file().pendingRekey).toBeUndefined()
   })
 })

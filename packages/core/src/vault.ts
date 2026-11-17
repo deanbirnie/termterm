@@ -150,6 +150,24 @@ export class Vault {
   commitRekey(kdf: KdfParams, wrappedVaultKey: string): void {
     this.file.kdf = kdf
     this.file.wrappedVaultKey = wrappedVaultKey
+    delete this.file.pendingRekey
+    this.emit()
+  }
+
+  /** Notes a password change about to be sent, so it survives a crash before the answer. */
+  beginRekey(kdf: KdfParams, wrappedVaultKey: string): void {
+    this.file.pendingRekey = { kdf, wrappedVaultKey }
+    this.emit()
+  }
+
+  get pendingRekey(): { kdf: KdfParams; wrappedVaultKey: string } | undefined {
+    return this.file.pendingRekey
+  }
+
+  /** The change did not happen (the server refused it, or still has the old password). */
+  cancelRekey(): void {
+    if (!this.file.pendingRekey) return
+    delete this.file.pendingRekey
     this.emit()
   }
 
@@ -284,7 +302,8 @@ export class Vault {
     if (!stored || stored.deleted) return
     this.cache.delete(id)
     if (stored.seq === 0 && !this.file.sync) {
-      // Never left this device and nothing to sync with: no tombstone needed.
+      // Never reached an account and nothing to sync with: no tombstone needed.
+      // (An item that did keeps its seq when sync is turned off, so it gets one.)
       delete this.file.items[id]
     } else {
       this.file.items[id] = {
@@ -322,16 +341,24 @@ export class Vault {
     return this.file.sync
   }
 
-  setSync(serverUrl: string, username: string, token: string): void {
+  /**
+   * Starts syncing with an account. Everything is offered to it again,
+   * including deletions made while sync was off, which win or lose against
+   * the account's copies by time like any other change. A brand-new account
+   * (`newAccount`) has nothing to delete, so those are dropped instead.
+   */
+  setSync(serverUrl: string, username: string, token: string, options: { newAccount?: boolean } = {}): void {
     this.file.sync = {
       serverUrl,
       username,
       tokenBlob: seal(this.vaultKey, utf8(token), 'termterm:token'),
       cursor: 0,
     }
-    // Deletions made before sync existed left no tombstones, and everything
-    // else must be offered to the new server.
-    for (const stored of Object.values(this.file.items)) {
+    for (const [id, stored] of Object.entries(this.file.items)) {
+      if (stored.deleted && options.newAccount) {
+        delete this.file.items[id]
+        continue
+      }
       stored.seq = 0
       stored.dirty = true
     }
@@ -345,11 +372,13 @@ export class Vault {
     this.emit()
   }
 
+  /**
+   * Stops syncing. Deletions not yet sent are kept (as are those made from
+   * now on, for items the account has), so signing in to the same account
+   * again deletes them there rather than bringing them back.
+   */
   clearSync(): void {
     this.file.sync = null
-    for (const [id, stored] of Object.entries(this.file.items)) {
-      if (stored.deleted) delete this.file.items[id]
-    }
     this.emit()
   }
 

@@ -42,7 +42,7 @@ jobs:
       contents: read
       actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build artifacts
         run: .github/scripts/cleanup.sh artifacts
       - name: Workflow runs and logs
@@ -56,7 +56,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: .github/scripts/cleanup.sh releases
 
   images:
@@ -67,7 +67,7 @@ jobs:
     steps:
       # Understands multi-architecture images, so removing an old version
       # never strips the per-platform layers out from under one that is kept.
-      - uses: dataaxiom/ghcr-cleanup-action@v1
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           package: termterm-server
           exclude-tags: latest,edge

@@ -2,6 +2,7 @@ import {
   SyncApi,
   SyncError,
   Vault,
+  WrongPasswordError,
   deriveKeys,
   isInsecureUrl,
   normalizeServerUrl,
@@ -134,7 +135,19 @@ export class VaultService {
 
   async unlock(password: string): Promise<void> {
     if (this.vault) return
-    const vault = await Vault.unlock(await this.readFile(), password)
+    const file = await this.readFile()
+    let vault: Vault
+    try {
+      vault = await Vault.unlock(file, password)
+    } catch (e) {
+      if (e instanceof WrongPasswordError && file.pendingRekey) {
+        throw new Error(
+          'Incorrect master password. A password change was interrupted on this device: ' +
+            'enter the password you had before it. The change finishes once the app reaches the sync server.',
+        )
+      }
+      throw e
+    }
     if (!this.vault) this.adopt(vault)
   }
 
@@ -231,15 +244,49 @@ export class VaultService {
     if (next === current) throw new Error('The new password is the same as the current one')
     const rekey = await v.prepareRekey(current, next)
     if (v.sync) {
-      // Server first: if this fails nothing has changed anywhere.
-      await new SyncApi(v.sync.serverUrl, v.syncToken()).changePassword(
-        rekey.currentAuthKey,
-        rekey.newAuthKey,
-        rekey.kdf,
-        rekey.wrappedVaultKey,
-      )
+      // Server first. The change is noted on disk before it is sent: if the
+      // app dies after the server accepts it, the next sync finishes it here.
+      v.beginRekey(rekey.kdf, rekey.wrappedVaultKey)
+      this.save()
+      await this.flush()
+      try {
+        await new SyncApi(v.sync.serverUrl, v.syncToken()).changePassword(
+          rekey.currentAuthKey,
+          rekey.newAuthKey,
+          rekey.kdf,
+          rekey.wrappedVaultKey,
+        )
+      } catch (e) {
+        // A refusal means nothing changed. With no answer at all the server
+        // may have taken it: keep the note, and let the next sync find out.
+        if (e instanceof SyncError) {
+          v.cancelRekey()
+          this.save()
+        }
+        throw e
+      }
     }
     v.commitRekey(rekey.kdf, rekey.wrappedVaultKey)
+    this.save()
+  }
+
+  /**
+   * Finishes a password change interrupted after it was sent: if the server
+   * now holds the new password, this device takes it too; if it still holds
+   * the old one, the change never happened. Without an answer, it waits.
+   */
+  private async finishPasswordChange(v: Vault): Promise<void> {
+    const pending = v.pendingRekey
+    if (!pending || !v.sync) return
+    let salt: string
+    try {
+      salt = (await new SyncApi(v.sync.serverUrl).prelogin(v.sync.username)).salt
+    } catch {
+      return // try again on the next sync
+    }
+    if (salt === pending.kdf.salt) v.commitRekey(pending.kdf, pending.wrappedVaultKey)
+    else if (salt === v.kdf.salt) v.cancelRekey()
+    else return // changed again elsewhere: signing in again sorts it out
     this.save()
   }
 
@@ -683,7 +730,7 @@ export class VaultService {
     const username = checkUsername(input.username)
     const authKey = await v.authKeyFor(input.password)
     const token = await new SyncApi(serverUrl).register(username, v.kdf, authKey, v.wrappedVaultKey)
-    v.setSync(serverUrl, username, token)
+    v.setSync(serverUrl, username, token, { newAccount: true })
     void this.labelDevice()
     await this.syncNow()
   }
@@ -810,6 +857,7 @@ export class VaultService {
     this.syncState = { state: 'syncing', needsSignIn: false }
     this.onSnapshot(this.snapshot())
     try {
+      await this.finishPasswordChange(vault)
       await syncVault(vault)
       this.syncState = { state: 'idle', needsSignIn: false }
     } catch (e) {
