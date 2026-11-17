@@ -13,8 +13,8 @@ import {
 import { TOMBSTONE, type Item, type StoredItem, type SyncState, type VaultFile } from './types.ts'
 
 export class WrongPasswordError extends Error {
-  constructor() {
-    super('Incorrect master password')
+  constructor(message = 'Incorrect master password') {
+    super(message)
     this.name = 'WrongPasswordError'
   }
 }

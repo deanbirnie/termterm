@@ -505,3 +505,41 @@ describe('an interrupted password change', () => {
     expect(d.file().pendingRekey).toBeUndefined()
   })
 })
+
+describe('deleting an account', () => {
+  it('needs the master password, then removes everything and signs every device out', async () => {
+    const a = await firstDevice('dean', 'master-pw')
+    a.put('host', host('kept locally'))
+    await syncVault(a)
+    const b = await newDevice('dean', 'master-pw')
+    await syncVault(b)
+
+    const api = new SyncApi(url, a.syncToken())
+    await expect(api.deleteAccount(new Uint8Array(32))).rejects.toMatchObject({ status: 401 })
+    await expect(new SyncApi(url).deleteAccount(await a.authKeyFor('master-pw'))).rejects.toMatchObject({ status: 401 })
+    await api.deleteAccount(await a.authKeyFor('master-pw'))
+
+    // Both devices are signed out, the account is gone, and the name is free again.
+    await expect(syncVault(a)).rejects.toMatchObject({ status: 401 })
+    await expect(syncVault(b)).rejects.toMatchObject({ status: 401 })
+    await expect(newDevice('dean', 'master-pw')).rejects.toMatchObject({ status: 401 })
+    const again = await firstDevice('dean', 'other-pw')
+    await syncVault(again)
+    expect(again.list('host')).toHaveLength(0)
+    const row = app.db.prepare('SELECT COUNT(*) AS n FROM items').get() as { n: number }
+    expect(row.n).toBe(0)
+  })
+
+  it('leaves this device with its vault and sync turned off', async () => {
+    const d = serviceDevice()
+    const s = d.open()
+    await s.create('master-pw-1')
+    await s.syncRegister({ serverUrl: url, username: 'dean', password: 'master-pw-1' })
+    s.saveHost(null, { label: 'h', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null })
+    await s.syncNow()
+    await expect(s.syncDeleteAccount('wrong-password')).rejects.toBeInstanceOf(WrongPasswordError)
+    await s.syncDeleteAccount('master-pw-1')
+    expect(s.snapshot().sync.configured).toBe(false)
+    expect(s.snapshot().hosts).toHaveLength(1)
+  })
+})

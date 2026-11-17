@@ -187,6 +187,13 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .searchbar input { padding: 10px 12px; background: var(--bg-raised); }
 .toolbar { display: flex; gap: 8px; margin-bottom: 18px; }
 .section-title { font-size: 14px; font-weight: 650; margin-bottom: 10px; }
+/* Each group of hosts after the first section sits a little apart. */
+section + section > .section-title, section + section > .group-rename { margin-top: 22px; }
+.group-heading { display: flex; align-items: center; gap: 4px; }
+.group-heading .icon-btn { width: 24px; height: 24px; }
+.group-rename { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.group-rename input { flex: 1 1 160px; min-width: 0; }
+.group-rename .error { flex-basis: 100%; }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
 .card {

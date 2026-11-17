@@ -9,7 +9,10 @@ import {
   syncVault,
   type ForwardData,
   type HostData,
+  type IdentityData,
   type Item,
+  decryptExport,
+  encryptExport,
   type KeyData,
   type KnownHostData,
   type SnippetData,
@@ -21,6 +24,8 @@ import type {
   DeviceView,
   ForwardInput,
   HostInput,
+  IdentityInput,
+  ImportResult,
   KeyImportInput,
   SshImportFiles,
   SshImportPreview,
@@ -34,6 +39,9 @@ import type { Platform } from './platform.ts'
 
 const SYNC_DEBOUNCE_MS = 1500
 const SYNC_INTERVAL_MS = 60_000
+
+/** What an export file carries. */
+const EXPORTED_TYPES = ['host', 'key', 'identity', 'snippet', 'knownHost', 'forward'] as const
 
 const byLabel = <T extends { label: string }>(a: T, b: T) => a.label.localeCompare(b.label)
 
@@ -361,6 +369,18 @@ export class VaultService {
           hasPassword: !!data.password,
           keyId: data.keyId,
           jumpHostId: data.jumpHostId,
+          identityId: data.identityId,
+          group: data.group,
+        }))
+        .sort(byLabel),
+      identities: v
+        .list<IdentityData>('identity')
+        .map(({ id, data }) => ({
+          id,
+          label: data.label,
+          username: data.username,
+          hasPassword: !!data.password,
+          keyId: data.keyId,
         }))
         .sort(byLabel),
       forwards: v
@@ -406,8 +426,21 @@ export class VaultService {
 
   // ---- used by the SSH layer (main process only) -------------------------------
 
+  /**
+   * A host as it is connected to: with its identity's username, password and
+   * key in place of its own when it uses one.
+   */
   host(id: string): Item<HostData> | undefined {
-    return this.v.get<HostData>(id)
+    const host = this.v.get<HostData>(id)
+    if (host?.type !== 'host' || !host.data.identityId) return host
+    const identity = this.v.get<IdentityData>(host.data.identityId)
+    if (identity?.type !== 'identity') return host
+    const { password: _p, keyId: _k, ...own } = host.data
+    const { username, password, keyId } = identity.data
+    return {
+      ...host,
+      data: { ...own, username: username || own.username, ...(password ? { password } : {}), ...(keyId ? { keyId } : {}) },
+    }
   }
 
   key(id: string): Item<KeyData> | undefined {
@@ -440,6 +473,9 @@ export class VaultService {
       input.password === undefined ? existing?.data.password : input.password || undefined
     const jumpHostId = input.jumpHostId === undefined ? existing?.data.jumpHostId : input.jumpHostId || undefined
     if (jumpHostId) this.checkJump(id, jumpHostId)
+    const identityId = input.identityId === undefined ? existing?.data.identityId : input.identityId || undefined
+    if (identityId && this.v.get(identityId)?.type !== 'identity') throw new Error('Identity not found')
+    const group = (input.group === undefined ? (existing?.data.group ?? '') : String(input.group)).trim().slice(0, 64)
     const data: HostData = {
       label: (input.label ?? '').trim().slice(0, 128) || address,
       address,
@@ -449,6 +485,8 @@ export class VaultService {
       ...(password ? { password } : {}),
       ...(input.keyId ? { keyId: input.keyId } : {}),
       ...(jumpHostId ? { jumpHostId } : {}),
+      ...(identityId ? { identityId } : {}),
+      ...(group ? { group } : {}),
     }
     return this.v.put('host', data, id ?? undefined).id
   }
@@ -529,16 +567,55 @@ export class VaultService {
     return this.v.put('snippet', data, id ?? undefined).id
   }
 
+  saveIdentity(id: string | null, input: IdentityInput): string {
+    const existing = id ? this.v.get<IdentityData>(id) : undefined
+    if (id && existing?.type !== 'identity') throw new Error('Identity not found')
+    if (input.keyId && this.v.get(input.keyId)?.type !== 'key') throw new Error('Key not found')
+    const username = required(input.username, 'Username', 128)
+    const password = input.password === undefined ? existing?.data.password : input.password || undefined
+    const data: IdentityData = {
+      label: (input.label ?? '').trim().slice(0, 128) || username,
+      username,
+      ...(password ? { password } : {}),
+      ...(input.keyId ? { keyId: input.keyId } : {}),
+    }
+    return this.v.put('identity', data, id ?? undefined).id
+  }
+
+  renameGroup(from: string, to: string): void {
+    const name = String(to ?? '').trim().slice(0, 64)
+    for (const host of this.v.list<HostData>('host')) {
+      if (host.data.group !== from) continue
+      const { group: _old, ...rest } = host.data
+      this.v.put('host', name ? { ...rest, group: name } : rest, host.id)
+    }
+  }
+
   deleteItem(id: string): void {
     const item = this.v.get(id)
     if (!item) return
     if (item.type === 'key') {
-      // Hosts must not keep pointing at a key that no longer exists.
+      // Hosts and identities must not keep pointing at a key that no longer exists.
       for (const host of this.v.list<HostData>('host')) {
         if (host.data.keyId === id) {
           const { keyId: _removed, ...rest } = host.data
           this.v.put('host', rest, host.id)
         }
+      }
+      for (const identity of this.v.list<IdentityData>('identity')) {
+        if (identity.data.keyId === id) {
+          const { keyId: _removed, ...rest } = identity.data
+          this.v.put('identity', rest, identity.id)
+        }
+      }
+    }
+    if (item.type === 'identity') {
+      // Hosts that used it keep working: they get its login as their own.
+      const { username, password, keyId } = (item as Item<IdentityData>).data
+      for (const host of this.v.list<HostData>('host')) {
+        if (host.data.identityId !== id) continue
+        const { identityId: _i, password: _p, keyId: _k, ...rest } = host.data
+        this.v.put('host', { ...rest, username, ...(password ? { password } : {}), ...(keyId ? { keyId } : {}) }, host.id)
       }
     }
     if (item.type === 'host') {
@@ -554,6 +631,144 @@ export class VaultService {
       }
     }
     this.v.delete(id)
+  }
+
+  // ---- export and import ---------------------------------------------------------
+
+  /**
+   * The vault's hosts, keys, identities, snippets, known hosts and port
+   * forwards as an encrypted file, readable with `password`. Command history
+   * stays out: it is per device and can hold things typed by mistake.
+   */
+  async exportVault(password: string): Promise<{ text: string; count: number }> {
+    if (typeof password !== 'string' || password.length < 8) {
+      throw new Error('The export password must be at least 8 characters')
+    }
+    const items = this.v.list().filter((i) => EXPORTED_TYPES.includes(i.type as (typeof EXPORTED_TYPES)[number]))
+    return { text: await encryptExport(items, password), count: items.length }
+  }
+
+  /**
+   * Adds the items of an export file to this vault. Each gets a new id, and
+   * references between them (a host's key, identity and jump host, a
+   * forward's host) follow. Something already here (the same key, a host with
+   * the same label, address, port and user, ...) is not added twice: references to it point
+   * at the copy already in the vault, which is left as it is.
+   */
+  async importVault(text: string, password: string): Promise<ImportResult> {
+    const items = await decryptExport(text, password)
+    const v = this.v
+    const result: ImportResult = { added: 0, existing: 0, skipped: 0 }
+    const ids = new Map<string, string>()
+    const of = <T>(type: string) => items.filter((i) => i.type === type) as Array<{ id: string; data: T }>
+    const str = (x: unknown, max = 64 * 1024) => (typeof x === 'string' && x.length <= max ? x : undefined)
+    const port = (x: unknown) => (Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 65535 ? (x as number) : undefined)
+    const ref = (x: unknown) => (typeof x === 'string' ? ids.get(x) : undefined)
+    const add = <T>(from: string, type: string, data: T, same: (existing: Item<T>) => boolean) => {
+      const existing = v.list<T>(type).find(same)
+      if (existing) {
+        ids.set(from, existing.id)
+        result.existing++
+      } else {
+        ids.set(from, v.put(type, data).id)
+        result.added++
+      }
+    }
+
+    for (const { id, data } of of<KeyData>('key')) {
+      const privateKey = str(data.privateKey)
+      const publicKey = str(data.publicKey, 16 * 1024)
+      if (!privateKey || !publicKey) { result.skipped++; continue }
+      const key: KeyData = {
+        label: str(data.label, 128) || 'Imported key',
+        privateKey,
+        publicKey,
+        keyType: str(data.keyType, 64) || publicKey.split(' ')[0] || '',
+        ...(str(data.passphrase, 1024) ? { passphrase: data.passphrase } : {}),
+      }
+      add(id, 'key', key, (k) => k.data.publicKey.trim() === publicKey.trim())
+    }
+    for (const { id, data } of of<IdentityData>('identity')) {
+      const username = str(data.username, 128)
+      if (!username) { result.skipped++; continue }
+      const keyId = ref(data.keyId)
+      const identity: IdentityData = {
+        label: str(data.label, 128) || username,
+        username,
+        ...(str(data.password, 1024) ? { password: data.password } : {}),
+        ...(keyId ? { keyId } : {}),
+      }
+      add(id, 'identity', identity, (i) =>
+        i.data.label === identity.label && i.data.username === username && i.data.keyId === identity.keyId)
+    }
+    // Hosts in two passes: a jump host may come after the host that uses it.
+    const hosts = of<HostData>('host')
+    const added: Array<[string, string]> = []
+    for (const { id, data } of hosts) {
+      const address = str(data.address, 255)
+      const p = port(data.port)
+      if (!address || !p) { result.skipped++; continue }
+      const keyId = ref(data.keyId)
+      const identityId = ref(data.identityId)
+      const host: HostData = {
+        label: str(data.label, 128) || address,
+        address,
+        port: p,
+        username: str(data.username, 128) ?? '',
+        tags: Array.isArray(data.tags) ? data.tags.filter((t): t is string => typeof t === 'string').slice(0, 32) : [],
+        ...(str(data.password, 1024) ? { password: data.password } : {}),
+        ...(keyId ? { keyId } : {}),
+        ...(identityId ? { identityId } : {}),
+        ...(str(data.group, 64) ? { group: data.group } : {}),
+      }
+      const before = result.added
+      // Several hosts can share an address (different users, identities or
+      // purposes), so the label has to match as well.
+      add(id, 'host', host, (h) =>
+        h.data.address === address && h.data.port === p && h.data.username === host.username && h.data.label === host.label)
+      if (result.added > before && typeof data.jumpHostId === 'string') added.push([ids.get(id)!, data.jumpHostId])
+    }
+    for (const [newId, jumpFrom] of added) {
+      const jumpHostId = ids.get(jumpFrom)
+      const host = v.get<HostData>(newId)
+      if (jumpHostId && host && jumpHostId !== newId) v.put('host', { ...host.data, jumpHostId }, newId)
+    }
+    for (const { id, data } of of<ForwardData>('forward')) {
+      const hostId = ref(data.hostId)
+      const bindPort = port(data.bindPort)
+      const kind = data.kind
+      if (!hostId || !bindPort || (kind !== 'local' && kind !== 'remote' && kind !== 'dynamic')) { result.skipped++; continue }
+      const forward: ForwardData = {
+        label: str(data.label, 128) || '',
+        hostId,
+        kind,
+        bindHost: str(data.bindHost, 255) || (kind === 'remote' ? 'localhost' : '127.0.0.1'),
+        bindPort,
+        ...(kind !== 'dynamic' && str(data.destHost, 255) && port(data.destPort)
+          ? { destHost: data.destHost, destPort: data.destPort }
+          : {}),
+      }
+      if (kind !== 'dynamic' && !forward.destHost) { result.skipped++; continue }
+      add(id, 'forward', forward, (f) => f.data.hostId === hostId && f.data.kind === kind && f.data.bindPort === bindPort)
+    }
+    for (const { id, data } of of<SnippetData>('snippet')) {
+      const script = str(data.script)
+      if (!script) { result.skipped++; continue }
+      const snippet: SnippetData = { label: str(data.label, 128) || 'Snippet', script }
+      add(id, 'snippet', snippet, (x) => x.data.label === snippet.label && x.data.script === script)
+    }
+    for (const { id, data } of of<KnownHostData>('knownHost')) {
+      const host = str(data.host, 255)
+      const p = port(data.port)
+      const publicKey = str(data.publicKey, 16 * 1024)
+      const keyType = str(data.keyType, 64)
+      if (!host || !p || !publicKey || !keyType) { result.skipped++; continue }
+      const known: KnownHostData = { host, port: p, keyType, publicKey, fingerprint: str(data.fingerprint, 128) ?? '' }
+      add(id, 'knownHost', known, (k) =>
+        k.data.host === host && k.data.port === p && k.data.keyType === keyType && k.data.publicKey === publicKey)
+    }
+    result.skipped += items.filter((i) => !EXPORTED_TYPES.includes(i.type as (typeof EXPORTED_TYPES)[number])).length
+    return result
   }
 
   // ---- importing from OpenSSH's files ------------------------------------------
@@ -814,6 +1029,22 @@ export class VaultService {
     const v = this.v
     if (!v.sync) throw new Error('Sync is not set up')
     await new SyncApi(v.sync.serverUrl, v.syncToken()).revokeSession(String(id))
+  }
+
+  /**
+   * Deletes the sync account on the server: every device's copy there and
+   * every sign-in. This device keeps its vault, with sync turned off. Other
+   * devices keep theirs too and are told they are signed out.
+   */
+  async syncDeleteAccount(password: string): Promise<void> {
+    const v = this.v
+    if (!v.sync) throw new Error('Sync is not set up')
+    const authKey = await v.authKeyFor(password)
+    await new SyncApi(v.sync.serverUrl, v.syncToken()).deleteAccount(authKey)
+    v.clearSync()
+    this.syncState = { state: 'idle', needsSignIn: false }
+    this.save()
+    this.onSnapshot(this.snapshot())
   }
 
   async syncDisconnect(): Promise<void> {

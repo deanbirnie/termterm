@@ -1,30 +1,40 @@
-import { Check, Copy, KeyRound, Plus, Upload, X } from 'lucide-react'
+import { Check, Copy, KeyRound, Plus, Upload, UserRound, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import type { KeyView, VaultSnapshot } from '@termterm/app'
+import type { IdentityView, KeyView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
 
-type Mode = { kind: 'generate' } | { kind: 'import' } | { kind: 'view'; id: string }
+type Mode =
+  | { kind: 'generate' }
+  | { kind: 'import' }
+  | { kind: 'view'; id: string }
+  | { kind: 'identity'; id: string | null }
 
 export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
   const [mode, setMode] = useState<Mode | null>(null)
   const canManage = useAppInfo()?.capabilities.keys ?? true
   const viewed = mode?.kind === 'view' ? snapshot.keys.find((k) => k.id === mode.id) : undefined
+  const identity = mode?.kind === 'identity' && mode.id ? snapshot.identities.find((i) => i.id === mode.id) : undefined
 
   return (
     <div className="split">
       <div className="split-main">
-        {canManage && (
-          <div className="toolbar">
-            <Button onClick={() => setMode({ kind: 'generate' })}>
-              <Plus size={15} /> Generate key
-            </Button>
-            <Button onClick={() => setMode({ kind: 'import' })}>
-              <Upload size={15} /> Import key
-            </Button>
-          </div>
-        )}
+        <div className="toolbar">
+          {canManage && (
+            <>
+              <Button onClick={() => setMode({ kind: 'generate' })}>
+                <Plus size={15} /> Generate key
+              </Button>
+              <Button onClick={() => setMode({ kind: 'import' })}>
+                <Upload size={15} /> Import key
+              </Button>
+            </>
+          )}
+          <Button onClick={() => setMode({ kind: 'identity', id: null })} title="A login that several hosts can share">
+            <UserRound size={15} /> New identity
+          </Button>
+        </div>
         {snapshot.keys.length === 0 ? (
           <Empty icon={<KeyRound size={28} />} title="No keys yet">
             {canManage
@@ -54,7 +64,42 @@ export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
             </ul>
           </>
         )}
+        {snapshot.identities.length > 0 && (
+          <>
+            <h2 className="section-title spaced">Identities</h2>
+            <ul className="cards">
+              {snapshot.identities.map((i) => (
+                <li key={i.id}>
+                  <button
+                    className={`card ${identity?.id === i.id ? 'selected' : ''}`}
+                    onClick={() => setMode({ kind: 'identity', id: i.id })}
+                  >
+                    <span className="card-icon">
+                      <UserRound size={18} />
+                    </span>
+                    <span className="card-text">
+                      <strong>{i.label}</strong>
+                      <small>
+                        {[i.username, i.keyId && 'key', i.hasPassword && 'password'].filter(Boolean).join(', ')}
+                      </small>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
+      {mode?.kind === 'identity' && (mode.id === null || identity) && (
+        <IdentityPanel
+          key={mode.id ?? 'new'}
+          item={identity}
+          keys={snapshot.keys}
+          usedBy={identity ? snapshot.hosts.filter((h) => h.identityId === identity.id).map((h) => h.label) : []}
+          onClose={() => setMode(null)}
+          onSaved={(id) => setMode({ kind: 'identity', id })}
+        />
+      )}
       {mode?.kind === 'generate' && (
         <GeneratePanel onClose={() => setMode(null)} onDone={(id) => setMode({ kind: 'view', id })} />
       )}
@@ -65,7 +110,10 @@ export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
         <KeyPanel
           key={viewed.id}
           item={viewed}
-          usedBy={snapshot.hosts.filter((h) => h.keyId === viewed.id).map((h) => h.label)}
+          usedBy={[
+            ...snapshot.hosts.filter((h) => h.keyId === viewed.id && !h.identityId).map((h) => h.label),
+            ...snapshot.identities.filter((i) => i.keyId === viewed.id).map((i) => `${i.label} (identity)`),
+          ]}
           onClose={() => setMode(null)}
         />
       )}
@@ -191,7 +239,7 @@ function KeyPanel({ item, usedBy, onClose }: { item: KeyView; usedBy: string[]; 
           <dt>Private key</dt>
           <dd>Stored encrypted{item.hasPassphrase ? ', with passphrase' : ''}</dd>
           <dt>Used by</dt>
-          <dd>{usedBy.length ? usedBy.join(', ') : 'No hosts'}</dd>
+          <dd>{usedBy.length ? usedBy.join(', ') : 'Nothing yet'}</dd>
         </dl>
         <ErrorText error={error} />
         <div className="panel-actions">
@@ -200,13 +248,128 @@ function KeyPanel({ item, usedBy, onClose }: { item: KeyView; usedBy: string[]; 
           </Button>
           {confirmDelete ? (
             <Button variant="danger" onClick={() => void run(() => api.deleteItem(item.id))}>
-              {usedBy.length ? `Delete and detach from ${usedBy.length} host${usedBy.length > 1 ? 's' : ''}` : 'Confirm delete'}
+              {usedBy.length ? `Delete and detach from ${usedBy.length} place${usedBy.length > 1 ? 's' : ''}` : 'Confirm delete'}
             </Button>
           ) : (
             <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
               Delete
             </Button>
           )}
+        </div>
+      </form>
+    </PanelShell>
+  )
+}
+
+function IdentityPanel({
+  item,
+  keys,
+  usedBy,
+  onClose,
+  onSaved,
+}: {
+  item?: IdentityView
+  keys: KeyView[]
+  usedBy: string[]
+  onClose: () => void
+  onSaved: (id: string) => void
+}) {
+  const [label, setLabel] = useState(item?.label ?? '')
+  const [username, setUsername] = useState(item?.username ?? '')
+  const [keyId, setKeyId] = useState(item?.keyId ?? '')
+  const [password, setPassword] = useState('')
+  const [clearPassword, setClearPassword] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const { busy, error, run } = useAction()
+  const dirty =
+    !item ||
+    label !== item.label ||
+    username !== item.username ||
+    keyId !== (item.keyId ?? '') ||
+    !!password ||
+    clearPassword
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    void run(async () => {
+      const id = await api.saveIdentity(item?.id ?? null, {
+        label,
+        username,
+        keyId: keyId || null,
+        password: password ? password : clearPassword ? null : undefined,
+      })
+      setPassword('')
+      setClearPassword(false)
+      onSaved(id)
+    })
+  }
+  return (
+    <PanelShell title={item ? 'Identity' : 'New identity'} onClose={onClose}>
+      <form className="panel-body" onSubmit={submit}>
+        <p className="field-hint">
+          A username with a key and/or password that several hosts can log in with. Change it
+          here and every host using it follows.
+        </p>
+        <Field label="Username">
+          <input autoFocus={!item} placeholder="root" value={username} onChange={(e) => setUsername(e.target.value)} />
+        </Field>
+        <Field label="Label">
+          <input placeholder={username || 'Ops login'} value={label} onChange={(e) => setLabel(e.target.value)} />
+        </Field>
+        <Field label="Key">
+          <select value={keyId} onChange={(e) => setKeyId(e.target.value)}>
+            <option value="">No key</option>
+            {keys.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label="Password"
+          hint={
+            item?.hasPassword && !clearPassword ? (
+              <>
+                A password is saved.{' '}
+                <button type="button" className="link" onClick={() => { setClearPassword(true); setPassword('') }}>
+                  Remove it
+                </button>
+              </>
+            ) : clearPassword ? (
+              'The saved password will be removed when you save.'
+            ) : (
+              'Optional. Leave empty to be asked when connecting.'
+            )
+          }
+        >
+          <PasswordInput
+            autoComplete="new-password"
+            placeholder={item?.hasPassword && !clearPassword ? '•••••••• (unchanged)' : ''}
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setClearPassword(false) }}
+          />
+        </Field>
+        {item && (
+          <dl className="facts">
+            <dt>Used by</dt>
+            <dd>{usedBy.length ? usedBy.join(', ') : 'No hosts yet. Choose it under Login in a host.'}</dd>
+          </dl>
+        )}
+        <ErrorText error={error} />
+        <div className="panel-actions">
+          <Button type="submit" disabled={busy || !dirty || !username.trim()}>
+            {item ? 'Save changes' : 'Save identity'}
+          </Button>
+          {item &&
+            (confirmDelete ? (
+              <Button variant="danger" onClick={() => void run(() => api.deleteItem(item.id)).then(onClose)}>
+                {usedBy.length ? 'Delete: its hosts keep this login' : 'Confirm delete'}
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+                Delete
+              </Button>
+            ))}
         </div>
       </form>
     </PanelShell>
