@@ -447,3 +447,4 @@ a.btn, a.update-pill { text-decoration: none; }
 .swatch.none { border: 1px dashed var(--border); }
 .swatch[aria-checked='true'] { border-color: var(--text); }
 .env-input { font-family: var(--mono, monospace); font-size: 12px; }
+.theme-preview { margin: -4px 0 14px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; line-height: 1.4; white-space: pre; overflow-x: auto; }

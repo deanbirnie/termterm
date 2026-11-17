@@ -8,30 +8,8 @@ import { api, errorMessage } from './api'
 import { LineTracker, suggest, wasEchoed, type Suggestion } from './suggest'
 import type { SessionTab } from './Workspace'
 import { defaultFontSize, getTerminalPrefs, onTerminalPrefs, setTerminalPrefs } from './terminal-prefs'
+import { fontStack, themeById } from './terminal-themes'
 import { Button } from './ui'
-
-const THEME = {
-  background: '#0d1117',
-  foreground: '#d6deeb',
-  cursor: '#5eead4',
-  selectionBackground: '#2b4a66',
-  black: '#1b2230',
-  red: '#f47067',
-  green: '#6bd68a',
-  yellow: '#e3b341',
-  blue: '#6cb6ff',
-  magenta: '#d2a8ff',
-  cyan: '#56d4dd',
-  white: '#c9d1d9',
-  brightBlack: '#6e7681',
-  brightRed: '#ff938a',
-  brightGreen: '#8ddb8c',
-  brightYellow: '#f0c674',
-  brightBlue: '#96d0ff',
-  brightMagenta: '#e2c5ff',
-  brightCyan: '#76e3ea',
-  brightWhite: '#f0f6fc',
-}
 
 const SEARCH_DECORATIONS = {
   matchBackground: '#2b4a66',
@@ -100,6 +78,8 @@ export function TerminalTab({
   const snippetsRef = useRef(snippets)
   snippetsRef.current = snippets
   const rootRef = useRef<HTMLDivElement>(null)
+  // The area around the text takes the theme's background too.
+  const [background, setBackground] = useState(() => themeById(getTerminalPrefs().theme).theme.background)
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -238,11 +218,11 @@ export function TerminalTab({
     const prefs = getTerminalPrefs()
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: '"Cascadia Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
+      fontFamily: fontStack(prefs.fontFamily),
       fontSize: prefs.fontSize ?? defaultFontSize(touch),
       lineHeight: prefs.lineHeight,
       scrollback: 10_000,
-      theme: THEME,
+      theme: themeById(prefs.theme).theme,
       allowProposedApi: true, // search highlights use decorations
     })
     const fit = new FitAddon()
@@ -336,6 +316,9 @@ export function TerminalTab({
       onTerminalPrefs((next) => {
         term.options.fontSize = next.fontSize ?? defaultFontSize(touch)
         term.options.lineHeight = next.lineHeight
+        term.options.fontFamily = fontStack(next.fontFamily)
+        term.options.theme = themeById(next.theme).theme
+        setBackground(themeById(next.theme).theme.background)
         if (hostRef.current?.offsetParent) fit.fit()
         if (!next.suggestions) setSuggestions([])
       }),
@@ -479,7 +462,7 @@ export function TerminalTab({
   const lostBecause = status.state === 'closed' && status.error && status.error !== 'Connection lost' ? `Connection lost (${status.error})` : 'Connection lost'
 
   return (
-    <div className="terminal-tab" ref={rootRef}>
+    <div className="terminal-tab" ref={rootRef} style={{ background }}>
       <div className="terminal-host" ref={hostRef} />
       {touch && status.state === 'connected' && (
         // preventDefault on pointer down keeps focus in the terminal, so the
