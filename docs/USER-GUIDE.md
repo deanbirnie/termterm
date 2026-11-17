@@ -327,6 +327,10 @@ server. You can run the server yourself; see the README.
   - an existing vault: go to **Sync → Sign in to existing account**.
     Everything already on that device is kept and merged in.
 
+**Stored on server.** The Sync page shows how many items your account keeps
+on the server, out of the most it allows, and their size. Deleted items count
+until every device has caught up with the deletion.
+
 **Devices.** The Sync page lists every device signed in to your account, with
 when each was last active. **Sign out** stops a device from syncing; it keeps
 its own copy of the vault. If a device is lost, sign it out and also change

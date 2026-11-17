@@ -333,6 +333,44 @@ Once your account exists, set `TERMTERM_ALLOW_REGISTRATION` to `false`,
 especially if the server is reachable from the internet; otherwise anyone who
 finds the address can create accounts on it.
 
+### Backups
+
+The server's database (`termterm.db` in the data volume) holds every
+account: usernames, login hashes and the encrypted vault items. Back it up
+while the server runs; there is no need to stop it:
+
+```bash
+docker exec termterm-sync node --disable-warning=ExperimentalWarning backup.ts
+```
+
+This writes a consistent copy to `backups/termterm-<date and time>.db` in the
+data volume, checks it, and prints how many accounts and items it holds. Give
+a path as the last argument to put it somewhere else inside the container.
+Copy the backups off the machine (for example with your usual file backup, or
+`docker cp`), and keep them private: the items are ciphertext, but the login
+hashes are worth protecting.
+
+To restore:
+
+1. Stop the container.
+2. In the data volume, move `termterm.db`, and any `termterm.db-wal` and
+   `termterm.db-shm` next to it, out of the way.
+3. Copy the backup in as `termterm.db`.
+4. Start the container.
+
+Devices keep working afterwards. A device that synced after the backup was
+taken notices that the server is behind what it has seen, and sends its newer
+copies back, so recent changes are not lost as long as one device still has
+them. The app shows a notice about it on the Sync page.
+
+CI checks this on every server change: it backs up a running container,
+restores into a new one, and signs in to find the data
+(`.github/scripts/check-backup-restore.sh`).
+
+Each account can see what it stores under **Sync → Stored on server**.
+Operators can list it per account with the command under "Removing an
+account" below.
+
 ### Removing an account
 
 Users can delete their own account in the app: **Sync → Delete account**, with
@@ -389,7 +427,9 @@ git push origin v0.2.0
 ```
 
 The workflow runs every test (unit, desktop and mobile end-to-end, and the
-Android SSH core), then:
+Android SSH core), checks that the APK is signed by the release key with the
+right version, and checks that every file and the update metadata agree before
+anything is published. In order, it:
 
 1. builds the Windows installer, the Linux AppImage and the signed Android APK, all stamped with that version;
 2. pushes `ghcr.io/deanbirnie/termterm-server` tagged `0.2.0`, `0.2` and `latest`;

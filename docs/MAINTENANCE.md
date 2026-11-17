@@ -215,20 +215,30 @@ whether platform/release verification is still outstanding.
 These are follow-up implementation tasks, not checks supplied by this policy
 edit. Mark them complete only when their implementation and evidence exist.
 
-- [ ] Previous-release synthetic vault fixtures and mixed-version sync tests.
-- [ ] Automated server backup/restore verification.
+- [x] Previous-release fixtures and mixed-version sync tests
+      (`apps/server/test/compat.test.ts`): vault files and server databases
+      written by 0.1.0, 0.5.0 and 0.9.0's own code, and 0.9.0's client and
+      server frozen to sync against today's. Add fixtures for a release that
+      changes the vault or sync format (`compat/make-fixtures.sh <tag>`), and
+      move the frozen release forward when the protocol changes.
+- [x] Automated server backup/restore verification
+      (`.github/scripts/check-backup-restore.sh`, in the server image job).
 - [ ] Native Android device/emulator smoke coverage and targeted Windows
       credential-store and installed-upgrade coverage.
 - [x] Mobile browser and Java SSH tests in the release workflow (its `test`
       job, which every build and publish job waits for).
-- [ ] Expected-asset, signing and update-metadata validation in the release workflow.
+- [x] Expected-asset, signing and update-metadata validation in the release
+      workflow (`check-release-files.mjs` before publishing, `check-apk.sh`
+      on the signed APK; the APK check also runs on every PR's debug build).
 - [x] Version normalisation trims surrounding whitespace only, and validation
       is strict semantic versioning (no leading zeros, no empty pre-release parts).
-- [ ] Automated tests for that version step.
+- [x] Automated tests for that version step (`release-version.sh`,
+      `test-release-version.sh`, run on every PR).
 - [x] Scheduled dependency proposals (`.github/dependabot.yml`: npm, Actions,
       Gradle, Docker) and Action SHA pins with version comments.
-- [ ] Workflow and shell validation (actionlint, shellcheck), and Maven and
-      container image scans.
+- [x] Workflow and shell validation: actionlint (pinned, checksum verified)
+      and shellcheck on every PR ("Workflow and script checks").
+- [ ] Maven and container image scans (Batch 11).
 
 Prioritize platform verification, existing-data compatibility and release
 checks. Preserve an explicit manual verification path until automation lands.

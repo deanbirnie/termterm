@@ -1,0 +1,455 @@
+import { fromUtf8, randomId, utf8 } from './bytes.ts'
+import {
+  DecryptError,
+  VAULT_KEY_AAD,
+  deriveKeys,
+  generateVaultKey,
+  itemAad,
+  newKdfParams,
+  open,
+  seal,
+  type KdfParams,
+} from './crypto.ts'
+import { TOMBSTONE, type Item, type StoredItem, type SyncState, type VaultFile } from './types.ts'
+
+export class WrongPasswordError extends Error {
+  constructor(message = 'Incorrect master password') {
+    super(message)
+    this.name = 'WrongPasswordError'
+  }
+}
+
+const KEY_CHECK = 'termterm'
+const KEY_CHECK_AAD = 'termterm:keycheck'
+
+interface Payload {
+  type: string
+  updatedAt: number
+  data: unknown
+}
+
+/**
+ * An unlocked vault. Holds the vault key and a decrypted view of the items in
+ * memory; `toFile()` yields the encrypted form for disk. All mutation goes
+ * through here so every change is re-encrypted and flagged for sync.
+ */
+export class Vault {
+  private cache = new Map<string, Item>()
+  private listeners = new Set<() => void>()
+
+  private constructor(
+    private file: VaultFile,
+    private vaultKey: Uint8Array,
+  ) {
+    file.keyCheck ??= seal(vaultKey, utf8(KEY_CHECK), KEY_CHECK_AAD)
+    for (const [id, stored] of Object.entries(file.items)) {
+      if (stored.deleted) continue
+      const p = this.openPayload(id, stored.blob)
+      this.cache.set(id, { id, type: p.type, updatedAt: p.updatedAt, data: p.data })
+    }
+  }
+
+  static async create(password: string): Promise<Vault> {
+    const kdf = newKdfParams()
+    const { wrapKey } = await deriveKeys(password, kdf)
+    const vaultKey = generateVaultKey()
+    const file: VaultFile = {
+      format: 1,
+      kdf,
+      wrappedVaultKey: seal(wrapKey, vaultKey, VAULT_KEY_AAD),
+      items: {},
+      sync: null,
+    }
+    return new Vault(file, vaultKey)
+  }
+
+  static async unlock(file: VaultFile, password: string): Promise<Vault> {
+    if (file.format !== 1) throw new Error(`Unsupported vault format: ${String(file.format)}`)
+    const { wrapKey } = await deriveKeys(password, file.kdf)
+    let vaultKey: Uint8Array
+    try {
+      vaultKey = open(wrapKey, file.wrappedVaultKey, VAULT_KEY_AAD)
+    } catch (e) {
+      if (e instanceof DecryptError) throw new WrongPasswordError()
+      throw e
+    }
+    return new Vault(structuredClone(file), vaultKey)
+  }
+
+  /**
+   * Unlocks with the vault key itself rather than the master password, for a
+   * key the device has kept in its OS keychain. Throws if the key is not the
+   * one this vault was sealed with.
+   */
+  static unlockWithKey(file: VaultFile, vaultKey: Uint8Array): Vault {
+    if (file.format !== 1) throw new Error(`Unsupported vault format: ${String(file.format)}`)
+    if (!file.keyCheck) throw new DecryptError('Vault has no key check; unlock with the password')
+    if (fromUtf8(open(vaultKey, file.keyCheck, KEY_CHECK_AAD)) !== KEY_CHECK) throw new DecryptError()
+    return new Vault(structuredClone(file), vaultKey.slice())
+  }
+
+  /** A copy of the vault key, for storing in the OS keychain. Handle with care. */
+  exportKey(): Uint8Array {
+    return this.vaultKey.slice()
+  }
+
+  /** Encrypts a small piece of device metadata (e.g. a device name) for the sync server. */
+  sealText(text: string, context: string): string {
+    return seal(this.vaultKey, utf8(text), `termterm:${context}`)
+  }
+
+  openText(box: string, context: string): string {
+    return fromUtf8(open(this.vaultKey, box, `termterm:${context}`))
+  }
+
+  /** Builds an empty local vault for an existing sync account (new device sign-in). */
+  static async fromAccount(
+    kdf: KdfParams,
+    wrappedVaultKey: string,
+    password: string,
+  ): Promise<Vault> {
+    return Vault.unlock({ format: 1, kdf, wrappedVaultKey, items: {}, sync: null }, password)
+  }
+
+  /** Re-derives the auth key, verifying the password against this vault first. */
+  async authKeyFor(password: string): Promise<Uint8Array> {
+    const { wrapKey, authKey } = await deriveKeys(password, this.file.kdf)
+    try {
+      open(wrapKey, this.file.wrappedVaultKey, VAULT_KEY_AAD)
+    } catch {
+      throw new WrongPasswordError()
+    }
+    return authKey
+  }
+
+  /**
+   * First half of a master password change: verifies the current password and
+   * builds the new key material without applying it, so a synced vault can
+   * update the server before committing locally with `commitRekey`.
+   */
+  async prepareRekey(
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{
+    kdf: KdfParams
+    wrappedVaultKey: string
+    currentAuthKey: Uint8Array
+    newAuthKey: Uint8Array
+  }> {
+    const currentAuthKey = await this.authKeyFor(currentPassword)
+    const kdf = newKdfParams()
+    const { wrapKey, authKey } = await deriveKeys(newPassword, kdf)
+    return {
+      kdf,
+      wrappedVaultKey: seal(wrapKey, this.vaultKey, VAULT_KEY_AAD),
+      currentAuthKey,
+      newAuthKey: authKey,
+    }
+  }
+
+  commitRekey(kdf: KdfParams, wrappedVaultKey: string): void {
+    this.file.kdf = kdf
+    this.file.wrappedVaultKey = wrappedVaultKey
+    delete this.file.pendingRekey
+    this.emit()
+  }
+
+  /** Notes a password change about to be sent, so it survives a crash before the answer. */
+  beginRekey(kdf: KdfParams, wrappedVaultKey: string): void {
+    this.file.pendingRekey = { kdf, wrappedVaultKey }
+    this.emit()
+  }
+
+  get pendingRekey(): { kdf: KdfParams; wrappedVaultKey: string } | undefined {
+    return this.file.pendingRekey
+  }
+
+  /** The change did not happen (the server refused it, or still has the old password). */
+  cancelRekey(): void {
+    if (!this.file.pendingRekey) return
+    delete this.file.pendingRekey
+    this.emit()
+  }
+
+  /**
+   * The master password was changed on another device. Given the account's
+   * current key material and the new password, confirm it wraps this same
+   * vault key and adopt it, so this device unlocks with the new password too.
+   */
+  async adoptAccountKeys(
+    kdf: KdfParams,
+    wrappedVaultKey: string,
+    password: string,
+  ): Promise<Uint8Array> {
+    const { wrapKey, authKey } = await deriveKeys(password, kdf)
+    let key: Uint8Array
+    try {
+      key = open(wrapKey, wrappedVaultKey, VAULT_KEY_AAD)
+    } catch {
+      throw new WrongPasswordError()
+    }
+    const same = key.length === this.vaultKey.length && key.every((b, i) => b === this.vaultKey[i])
+    key.fill(0)
+    if (!same) throw new Error('That account holds a different vault than this device')
+    this.commitRekey(kdf, wrappedVaultKey)
+    return authKey
+  }
+
+  /**
+   * Connects this vault to an existing sync account, given the account's key
+   * material and master password.
+   *
+   * If the account holds this same vault (the device was synced before), only
+   * the password wrapping is adopted. If it holds a different vault, this
+   * vault's items are re-encrypted under the account's key so they can be
+   * uploaded into it; from then on this device unlocks with the account's
+   * master password. Either way nothing is deleted locally.
+   */
+  async joinAccount(
+    kdf: KdfParams,
+    wrappedVaultKey: string,
+    password: string,
+  ): Promise<{ authKey: Uint8Array; merged: boolean }> {
+    if (this.file.sync) throw new Error('Sync is already set up')
+    const { wrapKey, authKey } = await deriveKeys(password, kdf)
+    let accountKey: Uint8Array
+    try {
+      accountKey = open(wrapKey, wrappedVaultKey, VAULT_KEY_AAD)
+    } catch {
+      throw new WrongPasswordError()
+    }
+    const same =
+      accountKey.length === this.vaultKey.length && accountKey.every((b, i) => b === this.vaultKey[i])
+    if (same) {
+      accountKey.fill(0)
+    } else {
+      this.vaultKey.fill(0)
+      this.vaultKey = accountKey
+      this.file.keyCheck = seal(accountKey, utf8(KEY_CHECK), KEY_CHECK_AAD)
+      // Every item gets a fresh ciphertext under the new key; old tombstones
+      // mean nothing to the account being joined.
+      this.file.items = {}
+      for (const item of this.cache.values()) {
+        this.file.items[item.id] = {
+          blob: this.sealPayload(item.id, item),
+          seq: 0,
+          dirty: true,
+          deleted: false,
+        }
+      }
+    }
+    this.commitRekey(kdf, wrappedVaultKey)
+    return { authKey, merged: !same }
+  }
+
+  get kdf(): KdfParams {
+    return this.file.kdf
+  }
+
+  get wrappedVaultKey(): string {
+    return this.file.wrappedVaultKey
+  }
+
+  toFile(): VaultFile {
+    return structuredClone(this.file)
+  }
+
+  /** Wipes key material; the instance is unusable afterwards. */
+  lock(): void {
+    this.vaultKey.fill(0)
+    this.cache.clear()
+    this.listeners.clear()
+  }
+
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn)
+    return () => this.listeners.delete(fn)
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn()
+  }
+
+  // ---- items ---------------------------------------------------------------
+
+  list<T = unknown>(type?: string): Item<T>[] {
+    const all = [...this.cache.values()] as Item<T>[]
+    return type ? all.filter((i) => i.type === type) : all
+  }
+
+  get<T = unknown>(id: string): Item<T> | undefined {
+    return this.cache.get(id) as Item<T> | undefined
+  }
+
+  put<T>(type: string, data: T, id: string = randomId()): Item<T> {
+    if (type === TOMBSTONE) throw new Error('Reserved item type')
+    const existing = this.cache.get(id)
+    if (existing && existing.type !== type) throw new Error('Item type cannot change')
+    const item: Item<T> = { id, type, updatedAt: this.nextTimestamp(id), data }
+    this.file.items[id] = {
+      blob: this.sealPayload(id, item),
+      seq: this.file.items[id]?.seq ?? 0,
+      dirty: true,
+      deleted: false,
+    }
+    this.cache.set(id, item)
+    this.emit()
+    return item
+  }
+
+  delete(id: string): void {
+    const stored = this.file.items[id]
+    if (!stored || stored.deleted) return
+    this.cache.delete(id)
+    if (stored.seq === 0 && !this.file.sync) {
+      // Never reached an account and nothing to sync with: no tombstone needed.
+      // (An item that did keeps its seq when sync is turned off, so it gets one.)
+      delete this.file.items[id]
+    } else {
+      this.file.items[id] = {
+        blob: this.sealPayload(id, { type: TOMBSTONE, updatedAt: this.nextTimestamp(id), data: null }),
+        seq: stored.seq,
+        dirty: true,
+        deleted: true,
+      }
+    }
+    this.emit()
+  }
+
+  /** Strictly increasing per item so a later local edit always wins over the one it replaced. */
+  private nextTimestamp(id: string): number {
+    const prev = this.cache.get(id)?.updatedAt ?? 0
+    return Math.max(Date.now(), prev + 1)
+  }
+
+  private sealPayload(id: string, p: Payload): string {
+    const { type, updatedAt, data } = p
+    return seal(this.vaultKey, utf8(JSON.stringify({ type, updatedAt, data })), itemAad(id))
+  }
+
+  private openPayload(id: string, blob: string): Payload {
+    const p = JSON.parse(fromUtf8(open(this.vaultKey, blob, itemAad(id)))) as Payload
+    if (typeof p.type !== 'string' || typeof p.updatedAt !== 'number') {
+      throw new DecryptError('Malformed item')
+    }
+    return p
+  }
+
+  // ---- sync bookkeeping (used by SyncClient) ---------------------------------
+
+  get sync(): SyncState | null {
+    return this.file.sync
+  }
+
+  /**
+   * Starts syncing with an account. Everything is offered to it again,
+   * including deletions made while sync was off, which win or lose against
+   * the account's copies by time like any other change. A brand-new account
+   * (`newAccount`) has nothing to delete, so those are dropped instead.
+   */
+  setSync(serverUrl: string, username: string, token: string, options: { newAccount?: boolean } = {}): void {
+    this.file.sync = {
+      serverUrl,
+      username,
+      tokenBlob: seal(this.vaultKey, utf8(token), 'termterm:token'),
+      cursor: 0,
+    }
+    for (const [id, stored] of Object.entries(this.file.items)) {
+      if (stored.deleted && options.newAccount) {
+        delete this.file.items[id]
+        continue
+      }
+      stored.seq = 0
+      stored.dirty = true
+    }
+    this.emit()
+  }
+
+  /** Replaces the session token after signing in again; keeps cursor and item state. */
+  setSyncToken(token: string): void {
+    if (!this.file.sync) throw new Error('Sync is not configured')
+    this.file.sync.tokenBlob = seal(this.vaultKey, utf8(token), 'termterm:token')
+    this.emit()
+  }
+
+  /**
+   * Stops syncing. Deletions not yet sent are kept (as are those made from
+   * now on, for items the account has), so signing in to the same account
+   * again deletes them there rather than bringing them back.
+   */
+  clearSync(): void {
+    this.file.sync = null
+    this.emit()
+  }
+
+  syncToken(): string {
+    if (!this.file.sync) throw new Error('Sync is not configured')
+    return fromUtf8(open(this.vaultKey, this.file.sync.tokenBlob, 'termterm:token'))
+  }
+
+  setCursor(cursor: number): void {
+    if (this.file.sync) {
+      this.file.sync.cursor = cursor
+      this.file.sync.lastSyncAt = Date.now()
+    }
+  }
+
+  dirtyItems(): Array<{ id: string } & StoredItem> {
+    return Object.entries(this.file.items)
+      .filter(([, s]) => s.dirty)
+      .map(([id, s]) => ({ id, ...s }))
+  }
+
+  /** The server accepted our copy of `id` (identified by `blob`) at `seq`. */
+  markSynced(id: string, blob: string, seq: number): void {
+    const stored = this.file.items[id]
+    if (!stored) return
+    stored.seq = seq
+    // If the item was edited while the push was in flight, keep it dirty.
+    if (stored.blob !== blob) return
+    if (stored.deleted) delete this.file.items[id]
+    else stored.dirty = false
+  }
+
+  /**
+   * Merges a server copy into the vault. Returns true if local state changed.
+   * A clean local copy is simply replaced; a dirty one is resolved
+   * last-writer-wins on the encrypted `updatedAt`. When local wins it is
+   * rebased onto the server's sequence so the next push is accepted.
+   */
+  applyRemote(remote: { id: string; seq: number; blob: string }): boolean {
+    const { id, seq, blob } = remote
+    const local = this.file.items[id]
+    if (local && local.blob === blob) {
+      local.seq = seq
+      return false
+    }
+    // Throws DecryptError if the server tampered with or misrouted the blob.
+    const incoming = this.openPayload(id, blob)
+
+    if (local?.dirty) {
+      const mine = this.openPayload(id, local.blob)
+      if (mine.updatedAt >= incoming.updatedAt) {
+        local.seq = seq
+        return false
+      }
+    } else if (local && seq <= local.seq) {
+      return false // stale replay of something we already have
+    }
+
+    if (incoming.type === TOMBSTONE) {
+      delete this.file.items[id]
+      this.cache.delete(id)
+    } else {
+      this.file.items[id] = { blob, seq, dirty: false, deleted: false }
+      this.cache.set(id, {
+        id,
+        type: incoming.type,
+        updatedAt: incoming.updatedAt,
+        data: incoming.data,
+      })
+    }
+    this.emit()
+    return true
+  }
+}

@@ -188,6 +188,7 @@ if (!app.requestSingleInstanceLock()) {
     return deviceKey.available()
   })
   handle('sync:devices', () => vault.syncDevices())
+  handle('sync:usage', () => vault.syncUsage())
   handle('sync:revokeDevice', (id: string) => vault.syncRevokeDevice(id))
   handle('vault:snapshot', () => vault.snapshot())
   handle('host:save', (id: string | null, input) => vault.saveHost(id, input))

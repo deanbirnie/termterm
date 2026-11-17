@@ -1,0 +1,125 @@
+{
+  "tag": "v0.5.0",
+  "password": "fixture v0.5.0 password",
+  "username": "fixture",
+  "local": {
+    "items": [
+      {
+        "id": "200b5ecf-c201-4c24-967b-0ce88c1693f3",
+        "type": "knownHost",
+        "data": {
+          "host": "bastion.example",
+          "port": 22,
+          "keyType": "ssh-ed25519",
+          "publicKey": "AAAAhostkey",
+          "fingerprint": "SHA256:fixture"
+        }
+      },
+      {
+        "id": "263f5294-ea37-4a16-9183-191ebbc836c7",
+        "type": "snippet",
+        "data": {
+          "label": "uptime",
+          "script": "uptime"
+        }
+      },
+      {
+        "id": "5ae9e8a9-bfc3-44c7-9930-7125f8df783a",
+        "type": "host",
+        "data": {
+          "label": "bastion",
+          "address": "bastion.example",
+          "port": 22,
+          "username": "ops",
+          "tags": [
+            "edge"
+          ],
+          "keyId": "9253f99e-0c32-44e1-ba0f-96c520392698"
+        }
+      },
+      {
+        "id": "9253f99e-0c32-44e1-ba0f-96c520392698",
+        "type": "key",
+        "data": {
+          "label": "fixture key",
+          "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nnot a real key\n-----END OPENSSH PRIVATE KEY-----\n",
+          "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureFixtureFixtureFixtureFixtureFixture fixture",
+          "keyType": "ssh-ed25519"
+        }
+      },
+      {
+        "id": "f7c8c857-04b9-40c8-a558-622db1bb27de",
+        "type": "host",
+        "data": {
+          "label": "web",
+          "address": "10.0.0.5",
+          "port": 2222,
+          "username": "deploy",
+          "tags": [],
+          "password": "web-pw"
+        }
+      }
+    ],
+    "deletedId": "eabf93a0-59dc-4b64-807b-a1c90883807e"
+  },
+  "synced": {
+    "items": [
+      {
+        "id": "835edd2f-330e-4fcc-b573-2055c5a8ee89",
+        "type": "host",
+        "data": {
+          "label": "bastion",
+          "address": "bastion.example",
+          "port": 22,
+          "username": "ops",
+          "tags": [
+            "edge"
+          ],
+          "keyId": "93064703-af52-436f-b1f9-9fdfded0c2aa"
+        }
+      },
+      {
+        "id": "8a6e2c6e-6d19-47b1-8b2e-924b6fdb83b1",
+        "type": "snippet",
+        "data": {
+          "label": "uptime",
+          "script": "uptime"
+        }
+      },
+      {
+        "id": "93064703-af52-436f-b1f9-9fdfded0c2aa",
+        "type": "key",
+        "data": {
+          "label": "fixture key",
+          "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nnot a real key\n-----END OPENSSH PRIVATE KEY-----\n",
+          "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureFixtureFixtureFixtureFixtureFixture fixture",
+          "keyType": "ssh-ed25519"
+        }
+      },
+      {
+        "id": "9b7fecc4-7031-4144-880d-e0f9cbf91a74",
+        "type": "knownHost",
+        "data": {
+          "host": "bastion.example",
+          "port": 22,
+          "keyType": "ssh-ed25519",
+          "publicKey": "AAAAhostkey",
+          "fingerprint": "SHA256:fixture"
+        }
+      },
+      {
+        "id": "b9081915-9206-41d7-8bb6-b9f115983713",
+        "type": "host",
+        "data": {
+          "label": "web",
+          "address": "10.0.0.5",
+          "port": 2222,
+          "username": "deploy",
+          "tags": [],
+          "password": "web-pw"
+        }
+      }
+    ],
+    "deletedId": "604f5bef-ccfc-45cc-aebc-5eceab8c9db9"
+  }
+}

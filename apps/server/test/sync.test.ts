@@ -640,3 +640,58 @@ describe('rollback protection', () => {
     expect(s.snapshot().sync.rollback).toBeUndefined()
   })
 })
+
+describe('storage usage', () => {
+  it('reports the account’s items and ciphertext size, and only its own', async () => {
+    const a = await firstDevice('dean', 'master-pw')
+    a.put('host', host('one'))
+    const two = a.put('host', host('two'))
+    await syncVault(a)
+    a.delete(two.id)
+    await syncVault(a)
+    const usage = await new SyncApi(url, a.syncToken()).usage()
+    const rows = app.db.prepare('SELECT blob FROM items').all() as Array<{ blob: string }>
+    expect(usage).toEqual({ items: 2, bytes: rows.reduce((n, r) => n + r.blob.length, 0), maxItems: 20_000 })
+    const other = await firstDevice('someone', 'master-pw')
+    expect(await new SyncApi(url, other.syncToken()).usage()).toMatchObject({ items: 0, bytes: 0 })
+    await expect(new SyncApi(url).usage()).rejects.toMatchObject({ status: 401 })
+  })
+})
+
+describe('backups', () => {
+  it('copies a running server’s database, and a server started from the copy has everything', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { backup } = await import('../src/backup.ts')
+    const dir = mkdtempSync(join(tmpdir(), 'termterm-backup-'))
+    try {
+      const live = createApp({ dbPath: join(dir, 'live.db') })
+      await new Promise<void>((r) => live.server.listen(0, '127.0.0.1', r))
+      const liveUrl = `http://127.0.0.1:${(live.server.address() as AddressInfo).port}`
+      const vault = await Vault.create('master-pw')
+      const api = new SyncApi(liveUrl)
+      vault.setSync(liveUrl, 'dean', await api.register('dean', vault.kdf, await vault.authKeyFor('master-pw'), vault.wrappedVaultKey))
+      const h = vault.put('host', host('backed up'))
+      await syncVault(vault)
+
+      expect(backup(join(dir, 'live.db'), join(dir, 'copy', 'backup.db'))).toMatchObject({ users: 1, items: 1 })
+      expect(() => backup(join(dir, 'live.db'), join(dir, 'copy', 'backup.db'))).toThrow('already exists')
+      await new Promise<void>((r) => live.server.close(() => r()))
+
+      const restored = createApp({ dbPath: join(dir, 'copy', 'backup.db') })
+      await new Promise<void>((r) => restored.server.listen(0, '127.0.0.1', r))
+      const restoredUrl = `http://127.0.0.1:${(restored.server.address() as AddressInfo).port}`
+      const kdf = await new SyncApi(restoredUrl).prelogin('dean')
+      const { authKey } = await deriveKeys('master-pw', kdf)
+      const { token, wrappedVaultKey } = await new SyncApi(restoredUrl).login('dean', authKey)
+      const device = await Vault.fromAccount(kdf, wrappedVaultKey, 'master-pw')
+      device.setSync(restoredUrl, 'dean', token)
+      await syncVault(device)
+      expect(device.get<HostData>(h.id)?.data.label).toBe('backed up')
+      await new Promise<void>((r) => restored.server.close(() => r()))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

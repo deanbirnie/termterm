@@ -1,0 +1,51 @@
+{
+  "format": 1,
+  "kdf": {
+    "alg": "argon2id",
+    "m": 65536,
+    "t": 3,
+    "p": 1,
+    "salt": "cmDLc2oxxiIvpNnuYOgk9g=="
+  },
+  "wrappedVaultKey": "Ab6HQXF3Kwhn/5vtBZkGS9/8TNEGB3gMKx90CZxgGLY9HrpkiZ1d8inzp31VrXh3PVeB6X+mrLj4oTHrJpcFvrXnX0cfvhPSxA==",
+  "items": {
+    "f4c44cc7-b66f-4c72-bfda-db025c669fae": {
+      "blob": "Acg65SnsDrUhPP8eAqKUGkel+byajc1rFnZb64tKse/8Y4syEgkVvDg7C0b0gXP81wOabHrRNyU93e1aCL2fPz3HaQH9fhYwUKX8Z8SfoJoZLvO/FOilfyMfpuOpzRedkZFRspVEqADEzi0PhCtspSmaOyB8spdcGIgbesdWBKozEJxBE/16y37W8qYgLieH457Hr9ed0qbHFYfGX9GqqOhBe3faoqojwgSwHMykc1Du4OrYetu/cXnlux0JUBT5LFp+FP2ztea2gpBlzEim6nA9g74tIxBFZXRzIRwRS0RFf4VaSUw/+wmWmaIpfB+lfCUic6ZmNABkH6dR012hqMoMSSSc9hHYLxc435FCF9+c4oNmZcY/gFzBFqjDm6qrdJQJbpTN13mUtBZ224njZk7jasIXmT2zQMLUeU0n2sIx4BfaPHd4hv5c8D2dcIlLYiorBRhY",
+      "seq": 1,
+      "dirty": false,
+      "deleted": false
+    },
+    "7f251d2b-4a1f-4721-93a3-5710f29cebff": {
+      "blob": "AfIuy1UP/fiSj/4K5zrObYdcFXSPUZbeN378nV/gx2nebRLERxN+h5WcwKJaXZdqOaxF0hOWPzWRkpdQcYmYcSYwG7z6GDMtu3QaB+NlPLwg3UjKJXk9NRhc17FDJaR00iXYAiEV2wW099/VXrqePN9D/dOEx6vmalWYBYOeKLIC+1W6xzXiQfLAwumCx4ncJRUtrqEeplCdAWMzNCmO2rGEVZnr9Jnfncf5bO8eTtZoYPn2c86sDeFZ1nQAKdKzmvfHu4iQlhupytVKHXBH1ZhnJXeVT5juOZ6z1MSDWsFJur4=",
+      "seq": 2,
+      "dirty": false,
+      "deleted": false
+    },
+    "78c1bfe2-d0cb-4fac-a6b9-ec1ca2a8a380": {
+      "blob": "AVx1QV2zMBZcsiJmcIeBUQEhiJAT2sr6xB6G5Mc7RWbfLAcBYA0mSCo8Gv+T9qVZzYW8YY3Fj2k6vSAYGc0Xe0CKh9yqmklmqSNN4Jv8r67a5/K8LigqroWxBfQbss9/+gAeX1CC5+CM7PxlubMhR+CXx+mL8DKABg6dIZSs4vy6ee+2cALznf4vgszq/gOcBp+k43l5tc9Aanf+nVDTDdEJm/O/zQA22Db1bfCrZHqIywarwPqcTrIQ6tU=",
+      "seq": 3,
+      "dirty": false,
+      "deleted": false
+    },
+    "9f9b39a0-dc8d-4e3a-bb42-3b3df7bb5d43": {
+      "blob": "AXKC4GYX2oRDQ90C0Rj+Z7BqMrNn/SCucxdzd5907ZMQUijG0Px0/qDi9bejnKhWsUVaYjq17QjPCX8EOnv3AvjERvfEueKHjPCxjzlN3fkKav7dlu99MKtQfAO5uvzgnGNStKcLVCB1Hfk7G5nkmivJMLReeCb9Yy6br9k/A3av",
+      "seq": 4,
+      "dirty": false,
+      "deleted": false
+    },
+    "0238389c-9a80-4d37-9096-36fb69c3b2b8": {
+      "blob": "AT6KtNKcAIZzLjBMzjZMUBAlVkGVsicDKBPhGYmyPJemJIxsIwKvFD8o2jJ3TI28lA613yxMVvXgep6+1kb9z7SduV3ZTndM54YjZgkjwEvxBETJyGdm6mfP/7AOEp/ElcgK8TCN3m4HgTgxBxTJy0UMJ234gQjS+bGoWrleUWpelMCqgs4nJXibiHiyqXJUZPoRkJ8Qff0LVNSJo304pyAvYDRQHfxdtQfl/QV22KMjLinpF13maPdLXi2KQszCqmnpH03Fm7cnCfbMN/lwTRj9hD0=",
+      "seq": 5,
+      "dirty": false,
+      "deleted": false
+    }
+  },
+  "sync": {
+    "serverUrl": "http://127.0.0.1:36153",
+    "username": "fixture",
+    "tokenBlob": "AbWFn1vARZvDB0EfBsmNVrGqlb+uOrEB+HLj3Ag9BXMFLH7q8ZR3yGf8oWPF6OL8mC6++xSJPlFwuwRJxVARoyBFOE5PDFzMwUVG7sJC90F7vg6f",
+    "cursor": 0,
+    "lastSyncAt": 1794952806388
+  },
+  "keyCheck": "ARnF2y++Sy/OiJBgIETNNs6jp8UFoEVluBnvivE1Sxb/H2mfi4SJl4Fg7rGms2DDww=="
+}

@@ -146,6 +146,11 @@ export class SyncApi {
     return this.call('POST', '/account/delete', { authKey: toBase64(authKey) })
   }
 
+  /** What the account stores on the server: item count (deletions included) and ciphertext size. */
+  usage(): Promise<{ items: number; bytes: number; maxItems: number }> {
+    return this.call('GET', '/usage')
+  }
+
   async sessions(): Promise<RemoteSession[]> {
     return (await this.call<{ sessions: RemoteSession[] }>('GET', '/sessions')).sessions
   }
