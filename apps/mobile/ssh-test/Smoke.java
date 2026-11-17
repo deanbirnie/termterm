@@ -1,3 +1,5 @@
+import dev.termterm.app.ssh.FileSession;
+import dev.termterm.app.ssh.ForwardSession;
 import dev.termterm.app.ssh.SshKeys;
 import dev.termterm.app.ssh.SshSession;
 import java.nio.charset.StandardCharsets;
@@ -113,8 +115,108 @@ public class Smoke {
     }
     try { SshKeys.inspect("not a key", null); check("garbage is refused", false, "accepted"); } catch (SshKeys.KeyException e) { check("garbage is refused", true, ""); }
 
+    forwardsAndFiles(a.length > 3 ? Paths.get(a[3]) : null);
+
     port = 1; r = new Run().start("dean", "x", null, null);
     check("closed port reports connection refused", r.ended() && "Connection refused".equals(r.error), String.valueOf(r.error));
     System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED"); System.exit(failures == 0 ? 0 : 1);
   }
+
+  // ---- port forwards and SFTP ----
+
+  static final SshSession.Prompter TRUSTING = new SshSession.Prompter() {
+    public boolean trustHostKey(int hop, byte[] blob) { return true; }
+    public String password(int hop, String u, boolean retry) { return null; }
+    public String[] keyboardInteractive(int hop, String n, String i, String[] p, boolean[] e) { return null; }
+  };
+  static SshSession.Config cfg() { SshSession.Config c = new SshSession.Config(); c.host = "127.0.0.1"; c.port = port; c.username = "dean"; c.password = "pw-ok"; return c; }
+
+  /** A TCP echo server: every byte sent comes back. */
+  static java.net.ServerSocket echo() throws Exception {
+    java.net.ServerSocket ss = new java.net.ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress());
+    Thread t = new Thread(() -> { while (true) { try { java.net.Socket s = ss.accept(); new Thread(() -> { try { s.getInputStream().transferTo(s.getOutputStream()); s.close(); } catch (Exception e) {} }).start(); } catch (Exception e) { return; } } });
+    t.setDaemon(true); t.start(); return ss;
+  }
+  static int freePort() throws Exception { try (java.net.ServerSocket ss = new java.net.ServerSocket(0)) { return ss.getLocalPort(); } }
+
+  static class Fwd implements ForwardSession.Events {
+    CountDownLatch active = new CountDownLatch(1), closed = new CountDownLatch(1); volatile String error = "not closed"; List<Integer> counts = Collections.synchronizedList(new ArrayList<>());
+    public void active() { active.countDown(); }
+    public void connections(int n) { counts.add(n); }
+    public void closed(String e) { error = e; closed.countDown(); }
+  }
+  static ForwardSession forward(String kind, String bindHost, int bindPort, String destHost, int destPort, Fwd events) {
+    ForwardSession.Spec spec = new ForwardSession.Spec(); spec.kind = kind; spec.bindHost = bindHost; spec.bindPort = bindPort; spec.destHost = destHost; spec.destPort = destPort;
+    ForwardSession f = new ForwardSession(cfg(), spec, events, TRUSTING); f.start(); return f;
+  }
+  static String roundTrip(java.net.Socket s, String text) throws Exception {
+    s.setSoTimeout(10000); s.getOutputStream().write(text.getBytes()); s.getOutputStream().flush();
+    byte[] buf = new byte[text.length()]; new java.io.DataInputStream(s.getInputStream()).readFully(buf); return new String(buf);
+  }
+
+  static void forwardsAndFiles(Path filesRoot) throws Exception {
+    java.net.ServerSocket target = echo();
+
+    int local = freePort(); Fwd fl = new Fwd();
+    ForwardSession f = forward("local", "127.0.0.1", local, "127.0.0.1", target.getLocalPort(), fl);
+    check("local forward starts listening", fl.active.await(15, TimeUnit.SECONDS), fl.error);
+    try (java.net.Socket s = new java.net.Socket("127.0.0.1", local)) {
+      check("local forward carries traffic to the destination", "ping-local".equals(roundTrip(s, "ping-local")), "");
+      check("local forward counts its open connection", fl.counts.contains(1), fl.counts.toString());
+    }
+    Fwd busy = new Fwd(); forward("local", "127.0.0.1", local, "127.0.0.1", target.getLocalPort(), busy);
+    check("a port already in use is reported as such", busy.closed.await(15, TimeUnit.SECONDS) && busy.error != null && busy.error.contains("already in use"), busy.error);
+    f.stop();
+    check("stopping a forward reports no error", fl.closed.await(5, TimeUnit.SECONDS) && fl.error == null, fl.error);
+    boolean freed = false; for (int i = 0; i < 20 && !freed; i++) { try (java.net.ServerSocket ss = new java.net.ServerSocket(local, 50, java.net.InetAddress.getLoopbackAddress())) { freed = true; } catch (Exception e) { Thread.sleep(100); } }
+    check("a stopped forward frees its port", freed, "");
+
+    int socks = freePort(); Fwd fd = new Fwd();
+    ForwardSession d = forward("dynamic", "127.0.0.1", socks, null, 0, fd);
+    check("SOCKS proxy starts listening", fd.active.await(15, TimeUnit.SECONDS), fd.error);
+    try (java.net.Socket s = new java.net.Socket("127.0.0.1", socks)) {
+      s.setSoTimeout(10000);
+      java.io.OutputStream o = s.getOutputStream(); java.io.DataInputStream in = new java.io.DataInputStream(s.getInputStream());
+      o.write(new byte[] { 5, 1, 0 }); byte[] greet = new byte[2]; in.readFully(greet);
+      byte[] host = "localhost".getBytes(); int p = target.getLocalPort();
+      java.io.ByteArrayOutputStream req = new java.io.ByteArrayOutputStream(); req.write(new byte[] { 5, 1, 0, 3, (byte) host.length }); req.write(host); req.write(p >> 8); req.write(p & 255);
+      o.write(req.toByteArray()); byte[] reply = new byte[10]; in.readFully(reply);
+      check("SOCKS proxy accepts a CONNECT by name", greet[1] == 0 && reply[1] == 0, Arrays.toString(reply));
+      check("SOCKS proxy carries traffic through the server", "ping-socks".equals(roundTrip(s, "ping-socks")), "");
+    }
+    d.stop();
+
+    int remote = freePort(); Fwd fr = new Fwd();
+    ForwardSession rf = forward("remote", "127.0.0.1", remote, "127.0.0.1", target.getLocalPort(), fr);
+    check("remote forward is accepted by the server", fr.active.await(15, TimeUnit.SECONDS), fr.error);
+    try (java.net.Socket s = new java.net.Socket("127.0.0.1", remote)) {
+      check("remote forward carries traffic back to this side", "ping-remote".equals(roundTrip(s, "ping-remote")), "");
+    }
+    rf.stop();
+    check("stopping a remote forward reports no error", fr.closed.await(5, TimeUnit.SECONDS) && fr.error == null, fr.error);
+    target.close();
+
+    if (filesRoot == null) return;
+    FileSession files = new FileSession(cfg(), TRUSTING);
+    String home = files.open();
+    check("SFTP opens in the home folder", "/home/dean".equals(home), home);
+    FileSession.Listing l = files.list(home);
+    check("folders are listed first, then files", l.entries.size() == 2 && l.entries.get(0).name.equals("docs") && l.entries.get(0).type.equals("dir") && l.entries.get(1).name.equals("notes.txt") && l.parent.equals("/home"), describe(l));
+    java.io.ByteArrayOutputStream got = new java.io.ByteArrayOutputStream();
+    files.download(home + "/notes.txt", got, null);
+    check("a file downloads intact", got.toString().equals("remote notes\n"), got.toString());
+    byte[] big = new byte[300_000]; new Random(7).nextBytes(big); long[] seen = { 0 };
+    files.upload(new java.io.ByteArrayInputStream(big), home + "/docs", "photo.jpg", (done) -> { seen[0] = done; return true; });
+    check("a file uploads intact, with progress", Arrays.equals(Files.readAllBytes(filesRoot.resolve("home/dean/docs/photo.jpg")), big) && seen[0] == big.length, seen[0] + "");
+    try { files.upload(new java.io.ByteArrayInputStream(new byte[1]), home + "/docs", "photo.jpg", null); check("an upload never overwrites", false, "overwrote"); }
+    catch (Exception e) { check("an upload never overwrites", e.getMessage().contains("already there") && Files.size(filesRoot.resolve("home/dean/docs/photo.jpg")) == big.length, e.getMessage()); }
+    files.mkdir(home + "/docs/new");
+    files.rename(home + "/docs/new", home + "/docs/renamed");
+    check("folders can be made and renamed", Files.isDirectory(filesRoot.resolve("home/dean/docs/renamed")), "");
+    files.delete(home + "/docs");
+    check("a folder is deleted with everything in it", !Files.exists(filesRoot.resolve("home/dean/docs")), "");
+    try { files.delete("/"); check("deleting / is refused", false, "deleted"); } catch (Exception e) { check("deleting / is refused", true, ""); }
+    files.close();
+  }
+  static String describe(FileSession.Listing l) { StringBuilder b = new StringBuilder(l.path + " parent " + l.parent + ":"); for (FileSession.Entry e : l.entries) b.append(' ').append(e.name).append('/').append(e.type); return b.toString(); }
 }
