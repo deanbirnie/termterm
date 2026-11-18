@@ -218,9 +218,10 @@ certificate is affordable.
       platforms' SSH code (`npm run check:openssh -w @termterm/desktop`, the
       JVM test and the desktop e2e)
 
-### Batch 11 — Hardware keys and scanning (next)
+### Batch 11 — Scanning (done)
 
-- [ ] FIDO2 / security-key keys
+FIDO2 security keys moved to the back burner (agreed 2026-11-18).
+
 - [x] Scans of the Android libraries and the server image (OSV-Scanner in CI
       and before every release; deferrals recorded in `osv-scanner.toml`)
 
@@ -237,6 +238,9 @@ certificate is affordable.
 - [ ] macOS build, with Touch ID unlock and self-update (signing and notarisation)
 - [ ] iOS app
 - [ ] Mosh, Telnet, serial
+- [ ] FIDO2 / security-key keys. Neither SSH library (ssh2, JSch) supports
+      them, so it means our own CTAP2 code for Windows, Linux and Android, and
+      a physical key to test with (CI cannot)
 
 On-device checks, for the owner when convenient (not batch work): Windows Hello
 unlock and "Open unlocked on this device" on Windows; fingerprint unlock,
@@ -297,7 +301,7 @@ queue above, which names the batch each open item belongs to.
 - [x] Identities (reusable username + credential shared across hosts), host groups (Batch 4)
 - [x] SSH certificates and agent forwarding (Batch 10)
 - [x] Proxies: SOCKS5 and HTTP (Batch 10)
-- [ ] FIDO2 / security-key keys (Batch 11)
+- [ ] FIDO2 / security-key keys (back burner)
 - [x] Account deletion from the app (Batch 4: Sync → Delete account)
 - [x] Server-side storage usage reporting, server backups doc (Batch 6)
 
