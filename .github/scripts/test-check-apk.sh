@@ -23,6 +23,9 @@ expect() { # <name> <pass|fail> <args...>
 printf 'Signer #1 certificate DN: CN=termterm\nSigner #1 certificate SHA-256 digest: %s\nSigner #1 certificate SHA-1 digest: 1234\n' "$cert" > "$tools/numbered"
 printf 'Signer (minSdkVersion=24, maxSdkVersion=2147483647) certificate DN: CN=termterm\nSigner (minSdkVersion=24, maxSdkVersion=2147483647) certificate SHA-256 digest: %s\n' "$cert" > "$tools/ranged"
 printf 'Signer #1 certificate SHA-256 digest: %s\n' "$other" > "$tools/wrong"
+# The form apksigner printed in the 0.11.0 release run.
+printf 'V2 Signer: certificate DN: CN=termterm\nV2 Signer: certificate SHA-256 digest: %s\nV2 Signer: certificate SHA-1 digest: 1234\nV3 Signer: certificate SHA-256 digest: %s\n' "$cert" "$cert" > "$tools/schemes"
+printf 'V2 Signer: certificate SHA-256 digest: %s\nSource Stamp Signer: certificate SHA-256 digest: %s\n' "$cert" "$other" > "$tools/stamped"
 printf 'Verifies\n' > "$tools/none"
 
 fake "$tools/numbered" 0.11.0 11000
@@ -31,6 +34,10 @@ expect 'certificate given with colons and capitals' pass x.apk 0.11.0 "$(echo "$
 expect 'wrong version name' fail x.apk 0.12.0 "$cert"
 fake "$tools/ranged" 0.11.0 11000
 expect '"Signer (minSdkVersion=...)" form' pass x.apk 0.11.0 "$cert"
+fake "$tools/schemes" 0.11.0 11000
+expect '"V2 Signer:" form, one certificate for every scheme' pass x.apk 0.11.0 "$cert"
+fake "$tools/stamped" 0.11.0 11000
+expect 'a source stamp signer is not the app certificate' pass x.apk 0.11.0 "$cert"
 fake "$tools/wrong" 0.11.0 11000
 expect 'another certificate' fail x.apk 0.11.0 "$cert"
 expect 'no certificate check asked for (debug builds)' pass x.apk 0.11.0
