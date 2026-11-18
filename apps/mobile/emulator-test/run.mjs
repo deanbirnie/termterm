@@ -76,6 +76,11 @@ try {
     await page.evaluate(() => document.activeElement?.blur())
     await page.waitForTimeout(1000)
   }
+  // Nothing may make the page wider than the screen: what is past the edge cannot be tapped.
+  const fitsScreen = async (where) => {
+    const [page_, screen] = await page.evaluate(() => [innerWidth, Math.round(visualViewport.width * visualViewport.scale)])
+    assert.ok(page_ <= screen + 1, `${where}: the page is ${page_}px wide on a ${screen}px screen`)
+  }
   const nav = (name) => page.getByRole('navigation').getByRole('button', { name, exact: true })
 
   await page.getByLabel('Master password', { exact: true }).fill(MASTER)
@@ -83,6 +88,7 @@ try {
   await page.getByRole('button', { name: 'Create vault' }).click()
   await page.getByText('No hosts yet').waitFor()
   await dismissUpdate()
+  await fitsScreen('Hosts')
   step('the installed app starts and creates a vault')
 
   // ---- a terminal over the app's own SSH ----
@@ -135,6 +141,7 @@ try {
     throw new Error(`typed text did not reach the server. Seen: ${seen}. Terminal shows:\n${shown}`, { cause: e })
   }
   await page.screenshot({ path: join(shots, 'emulator-terminal.png') })
+  await fitsScreen('Terminal')
   step('a terminal logs in with the saved password and runs a command')
 
   // ---- a port forward on the phone ----
@@ -180,6 +187,7 @@ try {
   const row = (name) => files.getByRole('option', { name, exact: true })
   await row('notes.txt').waitFor()
   await row('docs').waitFor()
+  await fitsScreen('Files')
   await row('notes.txt').click()
   await files.getByRole('button', { name: 'Permissions' }).click()
   const perms = page.getByRole('dialog', { name: 'Permissions of notes.txt' })
