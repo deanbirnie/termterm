@@ -262,7 +262,8 @@ section + section > .section-title, section + section > .group-rename { margin-t
 
 /* ---- modal ---- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(5, 8, 12, 0.66); display: grid; place-items: center; padding: 20px; z-index: 50; }
-.modal { width: min(460px, 100%); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+/* Never taller than the screen (a phone's keyboard takes half of it): scroll inside instead. */
+.modal { width: min(460px, 100%); max-height: 100%; overflow-y: auto; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
 .modal.danger { border-color: var(--danger); }
 .modal.wide { width: min(980px, 100%); height: min(760px, 100%); }
 .modal.wide .editor { flex: 1; min-height: 200px; resize: none; font-family: var(--mono); font-size: 13px; line-height: 1.45; white-space: pre; tab-size: 4; }
