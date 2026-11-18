@@ -434,6 +434,10 @@ a.btn, a.update-pill { text-decoration: none; }
 .transfers li.done svg { color: var(--accent); }
 .transfer-name { min-width: 120px; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transfers progress { flex: 1; height: 6px; accent-color: var(--accent); }
+.transfers li.transfers-head { justify-content: flex-end; padding: 0; }
+.transfers .icon-btn { margin-left: auto; flex: 0 0 auto; }
+.files-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg-raised); font-size: 13px; }
+.files-head .muted { font-size: 12px; }
 .transfer-size { color: var(--text-muted); white-space: nowrap; }
 
 /* ---- host colours: a mark on the host's card, tabs and panes ---- */

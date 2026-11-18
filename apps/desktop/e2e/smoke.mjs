@@ -539,6 +539,15 @@ try {
     await row(local, 'upload-me.txt').click()
     await local.getByRole('button', { name: /Upload/ }).click()
     await page.getByRole('list', { name: 'Transfers' }).getByText('"upload-me.txt" is already there. Rename or delete it first.').waitFor()
+    // Finished transfers can be dismissed one at a time, or all at once.
+    const transfers = page.getByRole('list', { name: 'Transfers' })
+    const finished = await transfers.getByRole('button', { name: /^Dismiss / }).count()
+    assert.ok(finished >= 3, `finished transfers: ${finished}`)
+    await transfers.getByRole('button', { name: 'Dismiss notes.txt' }).click()
+    await assertCount(transfers.getByRole('button', { name: /^Dismiss / }), finished - 1)
+    await transfers.getByRole('button', { name: 'Clear finished' }).click()
+    await assertCount(transfers, 0)
+    step('finished transfers are dismissed one at a time, or all at once with Clear finished')
     assert.equal(readFileSync(join(remoteHome, 'upload-me.txt'), 'utf8'), 'from this computer\n')
 
     // Folders: open and go back up; new folder, rename, delete.
@@ -625,11 +634,19 @@ try {
     step('a server file is edited in place; changes made on the server meanwhile are not overwritten silently; binary files are refused')
     await page.getByRole('button', { name: 'Close Test box' }).last().click()
 
-    // A terminal to a host opens its files too.
-    await page.getByRole('tab', { name: /Test box/ }).first().click()
+    // A terminal to a host opens its files too, in a tab of its own; Close
+    // files goes back to that terminal.
+    const terminalTab = page.getByRole('tab', { name: /Test box/ }).first()
+    await terminalTab.click()
+    const tabsBefore = await page.getByRole('tab').count()
     await page.getByRole('button', { name: 'Browse files' }).click()
     await row(server, 'notes.txt').waitFor()
-    await page.getByRole('button', { name: 'Close Test box' }).last().click()
+    await page.getByText('in its own tab; your other tabs stay open').waitFor()
+    await assertCount(page.getByRole('tab'), tabsBefore + 1)
+    await page.getByRole('button', { name: 'Close files' }).click()
+    await assertCount(page.getByRole('tab'), tabsBefore)
+    assert.equal(await terminalTab.getAttribute('aria-selected'), 'true')
+    await assertCount(server, 0)
     logins.splice(loginsBefore)
     step('folders open and go back up; new folder, rename and delete work; nothing is overwritten; a terminal opens its host\'s files')
   }

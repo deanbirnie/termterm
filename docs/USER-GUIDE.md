@@ -269,7 +269,12 @@ Choose which shell opens by default under **Settings → Terminal**.
 ## Files
 
 Browse a server's files over SFTP. Open it with **Files** in a host's
-details, or with the folder button at the top right of a terminal.
+details, or with the folder button at the top right of a terminal. Files
+opens in a tab of its own; your terminal stays open. **Close files** (top
+right) closes that tab and takes you back to where you opened it.
+
+The transfer list at the bottom shows each copy's progress. Dismiss a
+finished one with its **×**, or all of them with **Clear finished**.
 
 **On desktop** the server's files are shown beside your own computer's:
 
