@@ -100,7 +100,7 @@ try {
   await page.getByLabel('Password', { exact: true }).fill('pw-ok')
   await page.getByRole('button', { name: 'Save host' }).click()
   await page.getByText('A password is saved.').waitFor()
-  await page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+  await page.getByRole('complementary', { name: 'Host details' }).getByRole('button', { name: 'Connect', exact: true }).click()
   await page.getByRole('dialog', { name: 'Trust this host?' }).waitFor()
   await page.getByRole('button', { name: 'Trust and connect' }).click()
   const term = page.locator('.pane:not([hidden]) .xterm-rows')

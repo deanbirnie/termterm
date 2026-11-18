@@ -853,7 +853,7 @@ try {
     const before = authorizedKey
     authorizedKey = usable.public
     await c.page.locator('.card', { hasText: 'imported-box' }).click()
-    await c.page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+    await c.page.getByRole('complementary', { name: 'Host details' }).getByRole('button', { name: 'Connect', exact: true }).click()
     await c.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
     assert.equal(await c.page.getByRole('dialog').count(), 0) // no "Trust this host?"
     assert.equal(logins.pop(), 'publickey') // (taken off: later checks count device A's and B's logins)
@@ -863,7 +863,7 @@ try {
     await c.page.locator('.card', { hasText: 'behind-bastion' }).click()
     assert.equal(await c.page.getByLabel('Jump host').locator('option:checked').innerText(), 'imported-box')
     const loginsBefore = logins.length
-    await c.page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+    await c.page.getByRole('complementary', { name: 'Host details' }).getByRole('button', { name: 'Connect', exact: true }).click()
     await assertCount(c.page.getByRole('tab', { name: /behind-bastion/ }), 1)
     await c.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
     assert.deepEqual(logins.splice(loginsBefore), ['publickey', 'publickey']) // the jump host, then the target
@@ -1077,6 +1077,24 @@ try {
     await assertCount(d.page.getByRole('region', { name: 'Workshop' }).locator('.card'), 2)
     step('an identity logged two grouped hosts in with its password; the group renamed across its hosts')
 
+    // With the details closed, a double-click connects without opening them
+    // (they would move the cards under the second click); one click opens them.
+    const details = d.page.getByRole('complementary', { name: 'Host details' })
+    if (await details.count()) await details.getByRole('button', { name: 'Close' }).click()
+    const tabsNow = await d.page.getByRole('tab').count()
+    await d.page.locator('.card', { hasText: 'Loose box' }).dblclick()
+    await assertCount(d.page.getByRole('tab'), tabsNow + 1)
+    await d.page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
+    await d.page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await d.page.waitForTimeout(600)
+    await assertCount(details, 0)
+    await d.page.locator('.card', { hasText: 'Loose box' }).click()
+    await details.waitFor()
+    await d.page.getByRole('button', { name: 'Close Loose box' }).click()
+    await assertCount(d.page.getByRole('tab'), tabsNow)
+    logins.splice(loginsBefore)
+    step('a double-click on a host connects without opening its details; a single click opens them')
+
     // ---- per-host session settings, logs, broadcast, themes ----
     const saveDir = join(tmp, 'logs')
     mkdirSync(saveDir, { recursive: true })
@@ -1284,7 +1302,7 @@ try {
       await shot(page, '24-proxy-agent')
       await page.getByRole('button', { name: 'Save host' }).click()
       await page.getByRole('button', { name: 'Save changes' }).waitFor()
-      await page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+      await page.getByRole('complementary', { name: 'Host details' }).getByRole('button', { name: 'Connect', exact: true }).click()
       await page.getByText(/refused the username or password/).waitFor()
       step('a wrong proxy password is reported as such')
 
@@ -1292,7 +1310,7 @@ try {
       await page.locator('.card', { hasText: 'CA box' }).click()
       await page.getByLabel('Proxy password').fill('proxy-pass')
       await page.getByRole('button', { name: 'Save changes' }).click()
-      await page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+      await page.getByRole('complementary', { name: 'Host details' }).getByRole('button', { name: 'Connect', exact: true }).click()
       await page.getByRole('button', { name: 'Trust and connect' }).click()
       const term = page.locator('.pane:not([hidden]) .xterm-rows')
       await page.waitForTimeout(800)

@@ -1,11 +1,14 @@
 import { FileInput, FolderOpen, KeyRound, Pencil, Plus, Server, UserRound, X } from 'lucide-react'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { HOST_COLORS, type ConnectTarget, type HostInput, type HostView, type VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { LocalTerminalButton } from '../LocalTerminalButton'
 import { SshImportDialog } from '../SshImport'
 import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
+
+/** How long a click waits for a second one before opening a host's details. */
+const DOUBLE_CLICK_MS = 400
 
 /** Parses `ssh user@host -p 2222`, `user@host:2222` or a bare hostname. */
 export function parseQuickConnect(input: string): ConnectTarget | null {
@@ -76,6 +79,24 @@ export function HostsPage({
   const identityOf = (h: HostView) => snapshot.identities.find((i) => i.id === h.identityId)
 
   const open = (h: HostView) => onConnect({ hostId: h.id }, h.label)
+
+  // Opening the details panel narrows the list and moves the cards, so a
+  // double-click's second click could land on another card. While the panel
+  // is closed, a click waits long enough to see whether it is the start of a
+  // double-click (which connects instead). With the panel already open,
+  // nothing moves, so a click selects at once; so does the keyboard.
+  const pendingSelect = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(pendingSelect.current), [])
+  const clickCard = (e: ReactMouseEvent, h: HostView) => {
+    window.clearTimeout(pendingSelect.current)
+    if (e.detail > 1) return // the second click of a double-click
+    if (editing || !canConnect || e.detail === 0) return setEditing({ id: h.id })
+    pendingSelect.current = window.setTimeout(() => setEditing({ id: h.id }), DOUBLE_CLICK_MS)
+  }
+  const doubleClickCard = (h: HostView) => {
+    window.clearTimeout(pendingSelect.current)
+    open(h)
+  }
   const browse = (h: HostView) => onConnect({ hostId: h.id }, h.label, 'files')
   const canBrowse = info?.capabilities.sftp ?? false
   const quickConnect = () => {
@@ -147,8 +168,8 @@ export function HostsPage({
                     <li key={h.id}>
                       <button
                         className={`card ${editing?.id === h.id ? 'selected' : ''} ${h.color ? `host-${h.color}` : ''}`}
-                        onClick={() => setEditing({ id: h.id })}
-                        onDoubleClick={canConnect ? () => open(h) : undefined}
+                        onClick={(e) => clickCard(e, h)}
+                        onDoubleClick={canConnect ? () => doubleClickCard(h) : undefined}
                         title={canConnect ? 'Double-click to connect' : undefined}
                       >
                         <span className="card-icon">
@@ -359,6 +380,8 @@ function HostPanel({
     if (ok && id) {
       setPassword('')
       setClearPassword(false)
+      setProxyPassword('')
+      setClearProxyPassword(false)
       onSaved(id)
     }
     return ok ? id : null
