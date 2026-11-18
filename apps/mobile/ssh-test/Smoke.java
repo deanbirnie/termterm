@@ -210,6 +210,28 @@ public class Smoke {
     check("a file uploads intact, with progress", Arrays.equals(Files.readAllBytes(filesRoot.resolve("home/dean/docs/photo.jpg")), big) && seen[0] == big.length, seen[0] + "");
     try { files.upload(new java.io.ByteArrayInputStream(new byte[1]), home + "/docs", "photo.jpg", null); check("an upload never overwrites", false, "overwrote"); }
     catch (Exception e) { check("an upload never overwrites", e.getMessage().contains("already there") && Files.size(filesRoot.resolve("home/dean/docs/photo.jpg")) == big.length, e.getMessage()); }
+    java.nio.file.Path notes = filesRoot.resolve("home/dean/notes.txt");
+    Files.setPosixFilePermissions(notes, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+    l = files.list(home);
+    check("listings carry permissions", l.entries.get(1).mode == 0644, Integer.toOctalString(l.entries.get(1).mode));
+    files.chmod(home + "/notes.txt", 0750);
+    check("chmod sets permissions", java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(notes)).equals("rwxr-x---"), "");
+    FileSession.Text t = files.readText(home + "/notes.txt");
+    check("a text file reads for editing", t.text.equals("remote notes\n") && t.size == 13, t.text);
+    FileSession.Text after = files.writeText(home + "/notes.txt", "héllo edited\n", t.modified, t.size);
+    check("an edit saves in place, keeping permissions", Files.readString(notes).equals("héllo edited\n") && after.size == 14
+        && java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(notes)).equals("rwxr-x---"), Files.readString(notes));
+    Files.writeString(notes, "changed by someone else\n");
+    try { files.writeText(home + "/notes.txt", "mine\n", after.modified, after.size); check("a save over a changed file is refused", false, "saved"); }
+    catch (Exception e) { check("a save over a changed file is refused", e.getMessage().contains("changed on the server") && Files.readString(notes).startsWith("changed"), e.getMessage()); }
+    files.writeText(home + "/notes.txt", "mine\n", -1, -1);
+    check("overwriting on purpose saves", Files.readString(notes).equals("mine\n"), "");
+    Files.write(filesRoot.resolve("home/dean/blob.bin"), new byte[] { 0x7f, 'E', 'L', 'F', 0, 1 });
+    try { files.readText(home + "/blob.bin"); check("binary files are refused for editing", false, "read"); }
+    catch (Exception e) { check("binary files are refused for editing", e.getMessage().contains("binary"), e.getMessage()); }
+    Files.write(filesRoot.resolve("home/dean/latin1.txt"), new byte[] { 'c', 'a', 'f', (byte) 0xe9 });
+    try { files.readText(home + "/latin1.txt"); check("non-UTF-8 files are refused for editing", false, "read"); }
+    catch (Exception e) { check("non-UTF-8 files are refused for editing", e.getMessage().contains("UTF-8"), e.getMessage()); }
     files.mkdir(home + "/docs/new");
     files.rename(home + "/docs/new", home + "/docs/renamed");
     check("folders can be made and renamed", Files.isDirectory(filesRoot.resolve("home/dean/docs/renamed")), "");

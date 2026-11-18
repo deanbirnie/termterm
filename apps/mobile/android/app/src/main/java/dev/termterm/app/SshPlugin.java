@@ -333,6 +333,7 @@ public class SshPlugin extends Plugin {
             o.put("type", e.type);
             o.put("size", e.size);
             o.put("modified", e.modified);
+            o.put("mode", e.mode);
             entries.put(o);
           }
           out.put("entries", entries);
@@ -356,6 +357,46 @@ public class SshPlugin extends Plugin {
   public void sftpDelete(PluginCall call) {
     FileSession f = filesFor(call);
     if (f != null) background(call, () -> { f.delete(call.getString("path")); return null; });
+  }
+
+  @PluginMethod
+  public void sftpChmod(PluginCall call) {
+    FileSession f = filesFor(call);
+    if (f != null) background(call, () -> { f.chmod(call.getString("path"), call.getInt("mode", -1)); return null; });
+  }
+
+  @PluginMethod
+  public void sftpReadText(PluginCall call) {
+    FileSession f = filesFor(call);
+    if (f == null) return;
+    background(
+        call,
+        () -> {
+          FileSession.Text t = f.readText(call.getString("path"));
+          JSObject out = new JSObject();
+          out.put("text", t.text);
+          out.put("modified", t.modified);
+          out.put("size", t.size);
+          return out;
+        });
+  }
+
+  @PluginMethod
+  public void sftpWriteText(PluginCall call) {
+    FileSession f = filesFor(call);
+    if (f == null) return;
+    background(
+        call,
+        () -> {
+          JSObject expected = call.getObject("expected");
+          long modified = expected == null ? -1 : expected.getLong("modified");
+          long size = expected == null ? -1 : expected.getLong("size");
+          FileSession.Text t = f.writeText(call.getString("path"), call.getString("text", ""), modified, size);
+          JSObject out = new JSObject();
+          out.put("modified", t.modified);
+          out.put("size", t.size);
+          return out;
+        });
   }
 
   @PluginMethod

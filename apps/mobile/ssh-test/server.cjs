@@ -86,6 +86,6 @@ function serveSftp(sftp, root) {
   sftp.on('RMDIR', (id, p) => ok(id, () => fs.rmdirSync(disk(p))))
   sftp.on('REMOVE', (id, p) => ok(id, () => fs.unlinkSync(disk(p))))
   sftp.on('RENAME', (id, a, b) => ok(id, () => fs.renameSync(disk(a), disk(b))))
-  sftp.on('SETSTAT', (id) => sftp.status(id, S.OK))
+  sftp.on('SETSTAT', (id, p, a) => { try { if (a.mode !== undefined) fs.chmodSync(disk(p), a.mode & 0o7777); sftp.status(id, S.OK) } catch (e) { sftp.status(id, S.FAILURE, e.message) } })
   sftp.on('FSETSTAT', (id) => sftp.status(id, S.OK))
 }

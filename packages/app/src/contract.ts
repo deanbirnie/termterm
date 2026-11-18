@@ -77,6 +77,16 @@ export interface FileEntry {
   size: number
   /** ms since 1970 */
   modified: number
+  /** Permission bits (0o755 and so on), for the server's files. */
+  mode?: number
+}
+
+/** A text file opened for editing, and what it was like when read (to notice changes before saving). */
+export interface TextFile {
+  text: string
+  /** ms since 1970 */
+  modified: number
+  size: number
 }
 
 export interface FolderListing {
@@ -384,6 +394,24 @@ export interface TermtermApi {
   /** Removes a file, or a folder with everything in it. */
   sftpDelete(sessionId: string, path: string): Promise<void>
   sftpClose(sessionId: string): void
+  /** Sets a server file's permission bits (as chmod does). */
+  sftpChmod(sessionId: string, path: string, mode: number): Promise<void>
+  /**
+   * Reads a server file to edit. Refuses files over 1 MB and ones that are not
+   * UTF-8 text, rather than mangling them.
+   */
+  sftpReadText(sessionId: string, path: string): Promise<TextFile>
+  /**
+   * Saves an edited file over the original, keeping its permissions. With
+   * `expected`, refuses (an error mentioning "changed on the server") if the
+   * file is no longer as it was when read; without, overwrites regardless.
+   */
+  sftpWriteText(
+    sessionId: string,
+    path: string,
+    text: string,
+    expected?: { modified: number; size: number },
+  ): Promise<{ modified: number; size: number }>
   /** Without `localFiles`: saves a server file where the user picks. False if they cancel. */
   sftpDownloadPicked?(sessionId: string, path: string, name: string, size: number): Promise<boolean>
   /** Without `localFiles`: copies files the user picks into a server folder; how many. */

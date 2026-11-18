@@ -264,6 +264,11 @@ section + section > .section-title, section + section > .group-rename { margin-t
 .modal-backdrop { position: fixed; inset: 0; background: rgba(5, 8, 12, 0.66); display: grid; place-items: center; padding: 20px; z-index: 50; }
 .modal { width: min(460px, 100%); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
 .modal.danger { border-color: var(--danger); }
+.modal.wide { width: min(980px, 100%); height: min(760px, 100%); }
+.modal.wide .editor { flex: 1; min-height: 200px; resize: none; font-family: var(--mono); font-size: 13px; line-height: 1.45; white-space: pre; tab-size: 4; }
+.perm-grid { display: grid; grid-template-columns: auto repeat(3, 1fr); gap: 8px 14px; align-items: center; margin-bottom: 14px; }
+.perm-grid label { display: flex; align-items: center; gap: 6px; }
+.file-mode { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
 .modal.danger h2 { color: var(--danger); }
 .modal h2 { font-size: 17px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; flex-wrap: wrap; }

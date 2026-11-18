@@ -102,11 +102,14 @@ export function ErrorText({ error }: { error: string | null }) {
 export function Modal({
   title,
   tone,
+  wide,
   children,
   onClose,
 }: {
   title: string
   tone?: 'danger'
+  /** Room for a text editor rather than a form. */
+  wide?: boolean
   children: ReactNode
   onClose?: () => void
 }) {
@@ -118,7 +121,7 @@ export function Modal({
   }, [onClose])
   return (
     <div className="modal-backdrop">
-      <div className={`modal ${tone ?? ''}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal ${tone ?? ''} ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <h2>{title}</h2>
         {children}
       </div>

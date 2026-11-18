@@ -13,7 +13,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, posix, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Client, FileEntry as SftpDirEntry, SFTPWrapper, Stats } from 'ssh2'
-import type { ConnectTarget, FileEntry, FolderListing, TransferState, VaultService } from '@termterm/app'
+import type { ConnectTarget, FileEntry, FolderListing, TextFile, TransferState, VaultService } from '@termterm/app'
 import { openConnection, planConnection, type Prompts } from './ssh-connect'
 
 interface FileSession {
@@ -26,6 +26,19 @@ interface FileSession {
 const S_IFMT = 0o170000
 const typeOfMode = (mode: number): FileEntry['type'] =>
   (mode & S_IFMT) === 0o040000 ? 'dir' : (mode & S_IFMT) === 0o120000 ? 'link' : (mode & S_IFMT) === 0o100000 ? 'file' : 'other'
+
+const MAX_EDIT_BYTES = 1024 * 1024
+const CHANGED_ON_SERVER = 'The file changed on the server since you opened it.'
+
+/** UTF-8 text, or an error saying why the bytes cannot be edited as text. */
+function decodeText(bytes: Buffer): string {
+  if (bytes.subarray(0, 8192).includes(0)) throw new Error('This looks like a binary file, which cannot be edited here.')
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    throw new Error('This file is not UTF-8 text, so it cannot be edited here without changing it.')
+  }
+}
 
 const byName = (a: FileEntry, b: FileEntry) =>
   (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1) || a.name.localeCompare(b.name, undefined, { numeric: true })
@@ -43,6 +56,8 @@ function remote(sftp: SFTPWrapper) {
     rename: (a: string, b: string) => call<void>((cb) => sftp.rename(a, b, cb)),
     unlink: (p: string) => call<void>((cb) => sftp.unlink(p, cb)),
     rmdir: (p: string) => call<void>((cb) => sftp.rmdir(p, cb)),
+    chmod: (p: string, mode: number) => call<void>((cb) => sftp.chmod(p, mode, cb)),
+    writeFile: (p: string, data: Buffer) => call<void>((cb) => sftp.writeFile(p, data, cb)),
     exists: (p: string) =>
       new Promise<boolean>((res) => sftp.lstat(p, (err) => res(!err))),
   }
@@ -110,7 +125,7 @@ export class FileSessions {
         let type = typeOfMode(e.attrs.mode)
         // A link to a folder opens like a folder.
         if (type === 'link') type = await r.stat(full).then((s) => (s.isDirectory() ? 'dir' : 'file'), () => 'link' as const)
-        return { name: e.filename, path: full, type, size: e.attrs.size, modified: e.attrs.mtime * 1000 }
+        return { name: e.filename, path: full, type, size: e.attrs.size, modified: e.attrs.mtime * 1000, mode: e.attrs.mode & 0o7777 }
       }),
     )
     return { path: at, parent: at === '/' ? null : posix.dirname(at), entries: entries.sort(byName) }
@@ -131,6 +146,45 @@ export class FileSessions {
     }
     if (path === '/' || !path) throw new Error('Refusing to delete /')
     await walk(path)
+  }
+
+  chmod = (sessionId: string, path: string, mode: number) => {
+    if (!Number.isInteger(mode) || mode < 0 || mode > 0o7777) throw new Error('Not a valid permission')
+    return this.sftp(sessionId).chmod(path, mode)
+  }
+
+  /** A server file as text, to edit. Only UTF-8 text up to 1 MB. */
+  async readText(sessionId: string, path: string): Promise<TextFile> {
+    const r = this.sftp(sessionId)
+    const sftp = this.sessions.get(sessionId)!.sftp!
+    const s = await r.stat(path)
+    if (!s.isFile()) throw new Error('Only files can be edited')
+    if (s.size > MAX_EDIT_BYTES) throw new Error('This file is too large to edit here (over 1 MB). Download it instead.')
+    const chunks: Buffer[] = []
+    await pipeline(sftp.createReadStream(path) as NodeJS.ReadableStream, async function* (source) {
+      for await (const chunk of source) chunks.push(Buffer.from(chunk as Buffer))
+    })
+    return { text: decodeText(Buffer.concat(chunks)), modified: s.mtime * 1000, size: s.size }
+  }
+
+  /** Saves edited text over the file; with `expected`, only if it has not changed since it was read. */
+  async writeText(
+    sessionId: string,
+    path: string,
+    text: string,
+    expected?: { modified: number; size: number },
+  ): Promise<{ modified: number; size: number }> {
+    const r = this.sftp(sessionId)
+    const data = Buffer.from(text, 'utf8')
+    if (data.length > MAX_EDIT_BYTES) throw new Error('The text is too large to save here (over 1 MB)')
+    if (expected) {
+      const now = await r.stat(path)
+      if (now.mtime * 1000 !== expected.modified || now.size !== expected.size) throw new Error(CHANGED_ON_SERVER)
+    }
+    // Written into the existing file, so its owner and permissions stay as they were.
+    await r.writeFile(path, data)
+    const s = await r.stat(path)
+    return { modified: s.mtime * 1000, size: s.size }
   }
 
   // ---- this computer's files ----

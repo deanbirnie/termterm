@@ -13,6 +13,7 @@ import {
   MAX_JUMPS,
   type ConnectTarget,
   type FolderListing,
+  type TextFile,
   type ForwardState,
   type KeyTools,
   type SessionStatus,
@@ -79,6 +80,14 @@ interface SshPluginApi {
   sftpRename(options: { sessionId: string; from: string; to: string }): Promise<void>
   sftpDelete(options: { sessionId: string; path: string }): Promise<void>
   sftpClose(options: { sessionId: string }): Promise<void>
+  sftpChmod(options: { sessionId: string; path: string; mode: number }): Promise<void>
+  sftpReadText(options: { sessionId: string; path: string }): Promise<TextFile>
+  sftpWriteText(options: {
+    sessionId: string
+    path: string
+    text: string
+    expected?: { modified: number; size: number }
+  }): Promise<{ modified: number; size: number }>
   sftpDownload(options: { sessionId: string; path: string; name: string; size: number }): Promise<{ saved: boolean }>
   sftpUpload(options: { sessionId: string; folder: string }): Promise<{ count: number }>
   addListener(
@@ -423,6 +432,10 @@ export function createSsh(vault: VaultService, events: SshEvents) {
     sftpMkdir: (sessionId: string, path: string) => call(() => Ssh.sftpMkdir({ sessionId, path })),
     sftpRename: (sessionId: string, from: string, to: string) => call(() => Ssh.sftpRename({ sessionId, from, to })),
     sftpDelete: (sessionId: string, path: string) => call(() => Ssh.sftpDelete({ sessionId, path })),
+    sftpChmod: (sessionId: string, path: string, mode: number) => call(() => Ssh.sftpChmod({ sessionId, path, mode })),
+    sftpReadText: (sessionId: string, path: string) => call(() => Ssh.sftpReadText({ sessionId, path })),
+    sftpWriteText: (sessionId: string, path: string, text: string, expected?: { modified: number; size: number }) =>
+      call(() => Ssh.sftpWriteText({ sessionId, path, text, ...(expected ? { expected } : {}) })),
     sftpClose(sessionId: string) {
       targets.delete(sessionId)
       void Ssh.sftpClose({ sessionId })
