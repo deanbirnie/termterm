@@ -199,6 +199,13 @@ certificate is affordable.
 - [x] Android emulator tests in CI (`apps/mobile/emulator-test/run.mjs`, the
       `android-emulator` job: the debug APK on an API 34 emulator, driven
       through its WebView — terminal, a port forward, files)
+- [x] Fixed on the way, found by the emulator test: typing froze for up to
+      30 s after the terminal resized (JSch waited for window-change replies on
+      the plugin thread); dialogs did not scroll when the keyboard took half
+      the screen; the Files toolbar made the page wider than a narrow phone.
+- [ ] Follow-up: once, listing right after SFTP opened failed with "Pipe
+      closed" on the emulator and did not recur. Debug builds now log JSch's
+      messages, so the next occurrence says why.
 
 ### Batch 10 — Connecting in more places (next)
 
