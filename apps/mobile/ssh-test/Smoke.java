@@ -43,6 +43,14 @@ public class Smoke {
     check("shell output arrives with the requested size", r.waitFor("welcome 100x30"), r.out.toString());
     r.session.write("echo hi\r".getBytes()); check("input reaches the shell", r.waitFor("ran:echo hi"), r.out.toString());
     r.session.resize(120, 40); r.session.write("x\r".getBytes()); check("resize is applied", r.waitFor("size:120x40"), r.out.toString());
+    // A server that does not answer window-change (as RFC 4254 allows): resizing must not hold up the caller or the input.
+    Run q = new Run().start("quiet", "pw-ok", null, null);
+    check("quiet server logs in", q.connected.await(15, TimeUnit.SECONDS) && q.waitFor("welcome"), String.valueOf(q.error));
+    long t0 = System.nanoTime(); q.session.resize(90, 20); long took = (System.nanoTime() - t0) / 1_000_000;
+    check("resizing returns at once even when the server does not answer", took < 500, took + " ms");
+    q.session.write("y\r".getBytes());
+    check("input after a resize reaches the shell at once", q.waitFor("ran:y size:90x20"), q.out.toString());
+    q.session.close();
     r.session.write("exit\r".getBytes()); check("remote exit ends the session cleanly", r.ended() && r.error == null, String.valueOf(r.error));
 
     r = new Run(); r.env.put("LANG", "en_GB.UTF-8"); r.env.put("APP_ENV", "staging"); r.keepAlive = 0; r.start("dean", "pw-ok", null, null);
