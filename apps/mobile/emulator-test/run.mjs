@@ -107,8 +107,16 @@ try {
       box?.addEventListener(type, () => (seen.events[type] = (seen.events[type] ?? 0) + 1), true)
     }
     const cap = window.Capacitor
-    const toNative = cap?.toNative?.bind(cap)
-    if (toNative) cap.toNative = (plugin, method, ...rest) => (seen.native.push(`${plugin}.${method}`), toNative(plugin, method, ...rest))
+    const nativePromise = cap?.nativePromise?.bind(cap)
+    if (nativePromise) {
+      cap.nativePromise = (plugin, method, options) => {
+        const n = seen.native.push(`${plugin}.${method}`) - 1
+        return nativePromise(plugin, method, options).then(
+          (v) => ((seen.native[n] += ' ok'), v),
+          (e) => ((seen.native[n] += ` rejected: ${e?.message ?? e}`), Promise.reject(e)),
+        )
+      }
+    }
   })
   // A phone's keyboard hands over text as input (as an IME commits it), and Enter as a key.
   await page.keyboard.insertText('echo from-the-phone')
@@ -199,8 +207,8 @@ try {
       pid = adb('shell', 'pidof', PKG)
     } catch {}
     console.error(`\nApp process now: ${pid || 'not running'}`)
-    const wanted = /AndroidRuntime|FATAL|ActivityManager|ActivityTaskManager|chromium|Capacitor|termterm|cr_|WebView|lowmemorykiller|DEBUG\s*:/
-    console.error(log.split('\n').filter((l) => wanted.test(l)).slice(-200).join('\n'))
+    // The app's own tags only: system lines that merely name the package drown them out.
+    console.error(adb('logcat', '-d', '-v', 'brief', '-s', 'termterm:V', 'AndroidRuntime:E', 'Capacitor:V', 'Capacitor/Plugin:V', 'Capacitor/Console:V', 'chromium:W').split('\n').slice(-150).join('\n'))
   } catch {}
   throw e
 } finally {
