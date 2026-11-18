@@ -186,7 +186,28 @@ try {
   assert.equal(await perms.getByLabel('As a number (like chmod)').inputValue(), '644')
   await perms.getByLabel('As a number (like chmod)').fill('600')
   await closeKeyboard()
-  await perms.getByRole('button', { name: 'Apply' }).click()
+  try {
+    await perms.getByRole('button', { name: 'Apply' }).click({ timeout: 10_000 })
+  } catch (e) {
+    // Where everything is, to tell a layout fault from a click-position one.
+    const geometry = await page.evaluate(() => {
+      const r = (el) => el && JSON.stringify(el.getBoundingClientRect())
+      const button = [...document.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === 'Apply')
+      const box = button?.getBoundingClientRect()
+      const at = box && document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      return {
+        inner: [innerWidth, innerHeight],
+        visual: window.visualViewport && [visualViewport.width, visualViewport.height, visualViewport.offsetTop, visualViewport.scale],
+        dpr: devicePixelRatio,
+        backdrop: r(document.querySelector('.modal-backdrop')),
+        modal: r(document.querySelector('.modal')),
+        modalScroll: document.querySelector('.modal') && [document.querySelector('.modal').scrollTop, document.querySelector('.modal').scrollHeight],
+        button: r(button),
+        atButtonCentre: at && `${at.tagName}.${at.className}`,
+      }
+    })
+    throw new Error(`Apply could not be pressed: ${JSON.stringify(geometry)}`, { cause: e })
+  }
   await perms.waitFor({ state: 'detached' })
   assert.equal(statSync(join(home, 'notes.txt')).mode & 0o777, 0o600)
   await files.getByRole('button', { name: 'Edit' }).click()
