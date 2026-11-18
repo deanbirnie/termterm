@@ -248,7 +248,7 @@ try {
     } catch {}
     console.error(`\nApp process now: ${pid || 'not running'}`)
     // The app's own tags only: system lines that merely name the package drown them out.
-    console.error(adb('logcat', '-d', '-v', 'brief', '-s', 'termterm:V', 'AndroidRuntime:E', 'Capacitor:V', 'Capacitor/Plugin:V', 'Capacitor/Console:V', 'chromium:W').split('\n').slice(-150).join('\n'))
+    console.error(adb('logcat', '-d', '-v', 'brief', '-s', 'termterm:V', 'AndroidRuntime:E', 'Capacitor:V', 'Capacitor/Plugin:V', 'Capacitor/Console:V', 'chromium:W', 'JSch:V').split('\n').slice(-150).join('\n'))
   } catch {}
   throw e
 } finally {

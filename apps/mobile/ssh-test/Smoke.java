@@ -247,6 +247,20 @@ public class Smoke {
     check("a folder is deleted with everything in it", !Files.exists(filesRoot.resolve("home/dean/docs")), "");
     try { files.delete("/"); check("deleting / is refused", false, "deleted"); } catch (Exception e) { check("deleting / is refused", true, ""); }
     files.close();
+
+    // The plugin runs each call on a thread of its own that ends with the call;
+    // SFTP must keep working however many threads take turns.
+    FileSession perCall = new FileSession(cfg(), TRUSTING);
+    String[] failed = { null };
+    Thread opener = new Thread(() -> { try { perCall.open(); } catch (Exception e) { failed[0] = "open: " + e.getMessage(); } });
+    opener.start(); opener.join();
+    for (int i = 0; i < 40 && failed[0] == null; i++) {
+      final int n = i;
+      Thread caller = new Thread(() -> { try { perCall.list(home); if (n % 2 == 0) perCall.readText(home + "/notes.txt"); } catch (Exception e) { failed[0] = "call " + n + ": " + e.getMessage(); } });
+      caller.start(); caller.join(); Thread.sleep(25);
+    }
+    check("SFTP calls from one short-lived thread after another all work", failed[0] == null, String.valueOf(failed[0]));
+    perCall.close();
   }
   static String describe(FileSession.Listing l) { StringBuilder b = new StringBuilder(l.path + " parent " + l.parent + ":"); for (FileSession.Entry e : l.entries) b.append(' ').append(e.name).append('/').append(e.type); return b.toString(); }
 }

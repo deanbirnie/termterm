@@ -45,6 +45,26 @@ import java.util.concurrent.ConcurrentHashMap;
 @CapacitorPlugin(name = "Ssh")
 public class SshPlugin extends Plugin {
 
+  @Override
+  public void load() {
+    // Debug builds pass on what the SSH library says, to see why a connection
+    // or channel ended. (Release builds stay quiet: it names hosts and users.)
+    if ((getContext().getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+      com.jcraft.jsch.JSch.setLogger(
+          new com.jcraft.jsch.Logger() {
+            @Override
+            public boolean isEnabled(int level) {
+              return level >= com.jcraft.jsch.Logger.INFO;
+            }
+
+            @Override
+            public void log(int level, String message) {
+              Log.println(level >= com.jcraft.jsch.Logger.ERROR ? Log.ERROR : level >= com.jcraft.jsch.Logger.WARN ? Log.WARN : Log.INFO, "JSch", message);
+            }
+          });
+    }
+  }
+
   /** A terminal, port forward or file browser connection, with its open prompts. */
   private static final class Live {
     SshSession session;

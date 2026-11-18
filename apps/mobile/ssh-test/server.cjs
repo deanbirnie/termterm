@@ -55,6 +55,7 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
 
 // A small SFTP server over a folder (argv[3]); the user's home is /home/dean.
 function serveSftp(sftp, root) {
+  if (process.env.SSH_TEST_LOG) { console.error('sftp: opened'); sftp.on('close', () => console.error('sftp: closed')); sftp.on('error', (e) => console.error(`sftp: error ${e.message}`)) }
   const path = require('path')
   const { STATUS_CODE: S, flagsToString } = utils.sftp
   const remote = (p) => path.posix.normalize(p.startsWith('/') ? p : `/home/dean/${p}`)
