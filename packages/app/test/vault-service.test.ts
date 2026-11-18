@@ -513,3 +513,27 @@ describe('forwards that start by themselves', () => {
     expect(b.snapshot().forwards[0]).toMatchObject({ autoStart: true, bindPort: 8080 })
   })
 })
+
+describe('locking and unlocking straight after a change', () => {
+  it('reopens with the change, even when storage is slow to write', async () => {
+    let file: string | null = null
+    const platform: Platform = {
+      // Each write lands 50 ms after it is asked for, like a slow disk.
+      storage: { read: async () => file, write: (data) => new Promise((r) => setTimeout(() => r(void (file = data)), 50)) },
+      deviceKey: { available: async () => false, has: async () => false, save: async () => {}, load: async () => null, clear: () => {} },
+      keys: { generate: () => Promise.reject(new Error('unused')), import: () => Promise.reject(new Error('unused')) },
+      deviceName: () => 'slow disk',
+      rememberDevice: () => false,
+    }
+    const s = new VaultService(platform, () => undefined, () => undefined)
+    await s.create('master-password')
+    await s.flush()
+    const id = s.saveHost(null, { label: 'before', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null })
+    await s.flush()
+    s.saveHost(id, { label: 'after', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null })
+    await Promise.resolve() // the change's save is queued, not yet written
+    s.lock()
+    await s.unlock('master-password')
+    expect(s.snapshot().hosts[0]?.label).toBe('after')
+  })
+})
