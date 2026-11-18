@@ -207,6 +207,18 @@ try {
       pid = adb('shell', 'pidof', PKG)
     } catch {}
     console.error(`\nApp process now: ${pid || 'not running'}`)
+    // Where the app's threads are: a stuck native call shows up here.
+    if (pid) {
+      try {
+        execFileSync('adb', ['root'], { timeout: 30_000 })
+        adb('wait-for-device')
+        const dump = adb('shell', 'debuggerd', '-j', pid.split(/\s+/)[0])
+        const threads = dump.split(/\n(?=")/).filter((t) => /CapacitorPlugins|ssh|jcraft|termterm|"main"/.test(t))
+        console.error(`\nApp threads:\n${threads.join('\n')}`)
+      } catch (err) {
+        console.error(`(no thread dump: ${err.message})`)
+      }
+    }
     // The app's own tags only: system lines that merely name the package drown them out.
     console.error(adb('logcat', '-d', '-v', 'brief', '-s', 'termterm:V', 'AndroidRuntime:E', 'Capacitor:V', 'Capacitor/Plugin:V', 'Capacitor/Console:V', 'chromium:W').split('\n').slice(-150).join('\n'))
   } catch {}
