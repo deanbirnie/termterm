@@ -96,7 +96,7 @@ public class OpenSsh {
       fwd.agentKeys.add(k);
     }
     Shell agent = new Shell(fwd);
-    boolean listed = agent.up() && agent.run("ssh-add -L; echo listed-done", "listed-done");
+    boolean listed = agent.up() && agent.run("ssh-add -L; echo listed-$((40+2))", "listed-42");
     String out = agent.output();
     check("the forwarded agent lists the vault keys and the certificate (ssh-add -L)",
         listed && out.contains(read("rsa.pub").split(" ")[1]) && out.contains(read("rsa-cert.pub").split(" ")[1]) && out.contains(read("ec.pub").split(" ")[1]),
@@ -106,7 +106,7 @@ public class OpenSsh {
     agent.session.close();
 
     Shell noAgent = new Shell(cfg("ed"));
-    check("without agent forwarding the server has no agent", noAgent.up() && noAgent.run("ssh-add -L; echo none-done", "none-done") && !noAgent.output().contains(read("rsa.pub").split(" ")[1]), noAgent.output());
+    check("without agent forwarding the server has no agent", noAgent.up() && noAgent.run("ssh-add -L; echo none-$((40+2))", "none-42") && !noAgent.output().contains(read("rsa.pub").split(" ")[1]), noAgent.output());
     noAgent.session.close();
 
     // Proxies.
