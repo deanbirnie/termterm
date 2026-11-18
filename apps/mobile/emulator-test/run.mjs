@@ -223,7 +223,13 @@ try {
   const text = editor.getByLabel('File text')
   await text.waitFor()
   assert.equal(await text.inputValue(), 'remote notes\n')
-  await text.fill('edited on the phone\n')
+  // fill() selects all and types over it, but in Android's WebView the
+  // selection can snap to the first word: set the text as an edit would.
+  await text.evaluate((el, value) => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, value)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }, 'edited on the phone\n')
+  assert.equal(await text.inputValue(), 'edited on the phone\n')
   await page.screenshot({ path: join(shots, 'emulator-editor.png') })
   await closeKeyboard()
   await editor.getByRole('button', { name: 'Save' }).click()
