@@ -59,6 +59,30 @@ public final class SshSession {
     public java.util.Map<String, String> env = new java.util.LinkedHashMap<>();
     public int cols = 80;
     public int rows = 24;
+    /** An OpenSSH certificate for {@code privateKey}, tried before the key alone, or null. */
+    public String certificate;
+    /** The proxy to reach this server through; used only for the first server reached. */
+    public Proxy proxy;
+    /** Keys the server may use through agent forwarding (ssh -A), or null to forward none. */
+    public java.util.List<AgentKey> agentKeys;
+  }
+
+  /** A SOCKS5 or HTTP (CONNECT) proxy. */
+  public static final class Proxy {
+    /** "socks5" or "http" */
+    public String kind;
+    public String host;
+    public int port;
+    public String username;
+    public String password;
+  }
+
+  /** A vault key offered through agent forwarding. */
+  public static final class AgentKey {
+    public String name;
+    public String privateKey;
+    public String passphrase;
+    public String certificate;
   }
 
   private final Config config;
@@ -103,6 +127,12 @@ public final class SshSession {
     try {
       Session s = connector.open(config);
       if (s == null) return;
+      boolean forwardAgent = config.agentKeys != null && !config.agentKeys.isEmpty();
+      if (forwardAgent) {
+        // Set only now, after logging in: the login itself tries just this
+        // host's own key, and a server that counts failed keys is not put off.
+        s.setIdentityRepository(SshConnector.identities(config.agentKeys).getIdentityRepository());
+      }
 
       ChannelShell ch = (ChannelShell) s.openChannel("shell");
       int cols;
@@ -113,6 +143,9 @@ public final class SshSession {
       }
       ch.setPtyType("xterm-256color", cols, rows, 0, 0);
       for (java.util.Map.Entry<String, String> e : config.env.entrySet()) ch.setEnv(e.getKey(), e.getValue());
+      // Asked for without waiting for an answer (see connect() below): a server
+      // that does not allow it just leaves it out, as with ssh.
+      ch.setAgentForwarding(forwardAgent);
       InputStream fromRemote = ch.getInputStream();
       OutputStream out = ch.getOutputStream();
       // Opened without a timeout on purpose: given one, JSch asks the server to

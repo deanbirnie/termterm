@@ -16,6 +16,7 @@ import {
   encryptExport,
   type KeyData,
   type KnownHostData,
+  type ProxyConfig,
   type SnippetData,
   type VaultFile,
 } from '@termterm/core'
@@ -28,6 +29,7 @@ import type {
   IdentityInput,
   ImportResult,
   KeyImportInput,
+  ProxyInput,
   SshImportFiles,
   SshImportPreview,
   SshImportResult,
@@ -35,6 +37,7 @@ import type {
   VaultSnapshot,
 } from './contract.ts'
 import { fingerprintOfPublicLine } from './fingerprint.ts'
+import { certificateMatchesKey, parseCertificate } from './certificate.ts'
 import { parseKnownHosts, parseSshConfig, type ConfigHost, type KnownHostEntry } from './ssh-import.ts'
 import type { Platform } from './platform.ts'
 
@@ -74,6 +77,30 @@ function checkColor(color: string | null): string | undefined {
   if (!color) return undefined
   if (!(HOST_COLORS as readonly string[]).includes(color)) throw new Error('Unknown colour')
   return color
+}
+
+/** A proxy as entered; the password is kept from `existing` unless replaced or removed. */
+function checkProxy(input: ProxyInput, existing?: ProxyConfig): ProxyConfig {
+  if (input.kind !== 'socks5' && input.kind !== 'http') throw new Error('Unknown kind of proxy')
+  const host = required(input.host, 'Proxy address', 255)
+  const port = Number(input.port)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Proxy port must be 1-65535')
+  const username = (input.username ?? '').trim()
+  if (username.length > 255) throw new Error('Proxy username is too long')
+  const password = input.password === undefined ? existing?.password : input.password || undefined
+  if (password && password.length > 255) throw new Error('Proxy password is too long')
+  if (password && !username) throw new Error('A proxy password needs a username')
+  return { kind: input.kind, host, port, ...(username ? { username } : {}), ...(password ? { password } : {}) }
+}
+
+/** A proxy from an export file: kept if valid, dropped (not fatal) if not. */
+function importProxy(proxy: unknown): ProxyConfig | undefined {
+  if (!proxy || typeof proxy !== 'object') return undefined
+  try {
+    return checkProxy(proxy as ProxyInput)
+  } catch {
+    return undefined
+  }
 }
 
 /** Environment variables from an export file: kept if valid, dropped (not fatal) if not. */
@@ -421,6 +448,18 @@ export class VaultService {
           startupSnippetId: data.startupSnippetId,
           env: data.env,
           color: data.color,
+          ...(data.proxy
+            ? {
+                proxy: {
+                  kind: data.proxy.kind,
+                  host: data.proxy.host,
+                  port: data.proxy.port,
+                  ...(data.proxy.username ? { username: data.proxy.username } : {}),
+                  hasPassword: !!data.proxy.password,
+                },
+              }
+            : {}),
+          ...(data.agentForward ? { agentForward: true } : {}),
         }))
         .sort(byLabel),
       identities: v
@@ -446,6 +485,7 @@ export class VaultService {
           publicKey: data.publicKey,
           fingerprint: fingerprintOfPublicLine(data.publicKey),
           hasPassphrase: !!data.passphrase,
+          ...(data.certificate ? { certificate: data.certificate } : {}),
         }))
         .sort(byLabel),
       snippets: v
@@ -533,6 +573,8 @@ export class VaultService {
     if (startupSnippetId && this.v.get(startupSnippetId)?.type !== 'snippet') throw new Error('Snippet not found')
     const env = input.env === undefined ? existing?.data.env : checkEnv(input.env)
     const color = input.color === undefined ? existing?.data.color : checkColor(input.color)
+    const proxy = input.proxy === undefined ? existing?.data.proxy : input.proxy === null ? undefined : checkProxy(input.proxy, existing?.data.proxy)
+    const agentForward = input.agentForward === undefined ? existing?.data.agentForward : input.agentForward === true
     const data: HostData = {
       label: (input.label ?? '').trim().slice(0, 128) || address,
       address,
@@ -548,6 +590,8 @@ export class VaultService {
       ...(startupSnippetId ? { startupSnippetId } : {}),
       ...(env && Object.keys(env).length ? { env } : {}),
       ...(color ? { color } : {}),
+      ...(proxy ? { proxy } : {}),
+      ...(agentForward ? { agentForward: true } : {}),
     }
     return this.v.put('host', data, id ?? undefined).id
   }
@@ -612,6 +656,21 @@ export class VaultService {
     const privateKey = required(input.privateKey, 'Private key', 32 * 1024)
     const key = await this.platform.keys.import(label, privateKey, input.passphrase)
     return this.v.put('key', key).id
+  }
+
+  setKeyCertificate(id: string, certificate: string | null): void {
+    const key = this.v.get<KeyData>(id)
+    if (key?.type !== 'key') throw new Error('Key not found')
+    const { certificate: _old, ...rest } = key.data
+    const text = (certificate ?? '').trim()
+    if (!text) {
+      this.v.put('key', rest, id)
+      return
+    }
+    if (text.length > 16 * 1024) throw new Error('This certificate is too long')
+    parseCertificate(text) // throws, with the reason, if it is not a user certificate
+    if (!certificateMatchesKey(text, key.data.publicKey)) throw new Error('This certificate is for a different key.')
+    this.v.put('key', { ...rest, certificate: text }, id)
   }
 
   renameKey(id: string, label: string): void {
@@ -754,6 +813,7 @@ export class VaultService {
         publicKey,
         keyType: str(data.keyType, 64) || publicKey.split(' ')[0] || '',
         ...(str(data.passphrase, 1024) ? { passphrase: data.passphrase } : {}),
+        ...(str(data.certificate, 16 * 1024) && certificateMatchesKey(data.certificate!, publicKey) ? { certificate: data.certificate!.trim() } : {}),
       }
       add(id, 'key', key, (k) => k.data.publicKey.trim() === publicKey.trim())
     }
@@ -800,6 +860,8 @@ export class VaultService {
         ...(ref(data.startupSnippetId) ? { startupSnippetId: ref(data.startupSnippetId) } : {}),
         ...(importEnv(data.env) ? { env: importEnv(data.env) } : {}),
         ...(typeof data.color === 'string' && (HOST_COLORS as readonly string[]).includes(data.color) ? { color: data.color } : {}),
+        ...(importProxy(data.proxy) ? { proxy: importProxy(data.proxy) } : {}),
+        ...(data.agentForward === true ? { agentForward: true } : {}),
       }
       const before = result.added
       // Several hosts can share an address (different users, identities or

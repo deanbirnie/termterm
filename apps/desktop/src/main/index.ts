@@ -203,6 +203,7 @@ if (!app.requestSingleInstanceLock()) {
   handle('key:generate', (label: string, type: 'ed25519' | 'rsa') => vault.generateKey(label, type))
   handle('key:import', (input) => vault.importKey(input))
   handle('key:rename', (id: string, label: string) => vault.renameKey(id, label))
+  handle('key:certificate', (id: string, certificate: string | null) => vault.setKeyCertificate(String(id), certificate === null ? null : String(certificate)))
   handle('snippet:save', (id: string | null, input) => vault.saveSnippet(id, input))
   // Export files. The tests stand in a fixed path for the file pickers, which
   // they cannot click; installed builds ignore it.

@@ -262,6 +262,13 @@ function HostPanel({
       .map(([k, v]) => `${k}=${v}`)
       .join('\n')
   const [env, setEnv] = useState(envText(host?.env))
+  const [proxyKind, setProxyKind] = useState<'' | 'socks5' | 'http'>(host?.proxy?.kind ?? '')
+  const [proxyHost, setProxyHost] = useState(host?.proxy?.host ?? '')
+  const [proxyPort, setProxyPort] = useState(host?.proxy ? String(host.proxy.port) : '')
+  const [proxyUser, setProxyUser] = useState(host?.proxy?.username ?? '')
+  const [proxyPassword, setProxyPassword] = useState('')
+  const [clearProxyPassword, setClearProxyPassword] = useState(false)
+  const [agentForward, setAgentForward] = useState(!!host?.agentForward)
   const identity = snapshot.identities.find((i) => i.id === identityId)
   const groups = [...new Set(snapshot.hosts.map((h) => h.group).filter((g): g is string => !!g))].sort()
   const [password, setPassword] = useState('')
@@ -308,6 +315,16 @@ function HostPanel({
     startupSnippetId: startupSnippetId || null,
     env: parseEnv(env),
     password: password ? password : clearPassword ? null : undefined,
+    proxy: proxyKind
+      ? {
+          kind: proxyKind,
+          host: proxyHost,
+          port: Number(proxyPort || (proxyKind === 'http' ? 8080 : 1080)),
+          username: proxyUser,
+          password: proxyPassword ? proxyPassword : clearProxyPassword ? null : undefined,
+        }
+      : null,
+    agentForward,
   })
   const dirty =
     !host ||
@@ -325,7 +342,14 @@ function HostPanel({
     startupSnippetId !== (host.startupSnippetId ?? '') ||
     env.trim() !== envText(host.env) ||
     !!password ||
-    clearPassword
+    clearPassword ||
+    proxyKind !== (host.proxy?.kind ?? '') ||
+    proxyHost !== (host.proxy?.host ?? '') ||
+    proxyPort !== (host.proxy ? String(host.proxy.port) : '') ||
+    proxyUser !== (host.proxy?.username ?? '') ||
+    !!proxyPassword ||
+    clearProxyPassword ||
+    agentForward !== !!host.agentForward
 
   const save = async (): Promise<string | null> => {
     let id: string | null = null
@@ -432,6 +456,65 @@ function HostPanel({
             ))}
           </select>
         </Field>
+        <Field
+          label="Proxy"
+          hint={
+            jumpHostId
+              ? "Used only if this host is reached directly; through a jump host, the jump host's own proxy applies."
+              : 'Reach this host through a SOCKS5 or HTTP proxy, for networks that only let traffic out that way.'
+          }
+        >
+          <select value={proxyKind} onChange={(e) => setProxyKind(e.target.value as '' | 'socks5' | 'http')}>
+            <option value="">None: connect directly</option>
+            <option value="socks5">SOCKS5</option>
+            <option value="http">HTTP (CONNECT)</option>
+          </select>
+        </Field>
+        {proxyKind && (
+          <>
+            <div className="row">
+              <Field label="Proxy address">
+                <input value={proxyHost} onChange={(e) => setProxyHost(e.target.value)} placeholder="proxy.example.com" />
+              </Field>
+              <Field label="Proxy port">
+                <input
+                  inputMode="numeric"
+                  className="narrow"
+                  value={proxyPort}
+                  placeholder={proxyKind === 'http' ? '8080' : '1080'}
+                  onChange={(e) => setProxyPort(e.target.value)}
+                />
+              </Field>
+            </div>
+            <div className="row">
+              <Field label="Proxy username" hint="Only if the proxy asks for one.">
+                <input autoComplete="off" value={proxyUser} onChange={(e) => setProxyUser(e.target.value)} />
+              </Field>
+              <Field
+                label="Proxy password"
+                hint={
+                  host?.proxy?.hasPassword && !clearProxyPassword ? (
+                    <>
+                      Saved.{' '}
+                      <button type="button" className="link" onClick={() => { setClearProxyPassword(true); setProxyPassword('') }}>
+                        Remove it
+                      </button>
+                    </>
+                  ) : clearProxyPassword ? (
+                    'Will be removed when you save.'
+                  ) : undefined
+                }
+              >
+                <PasswordInput
+                  autoComplete="new-password"
+                  placeholder={host?.proxy?.hasPassword && !clearProxyPassword ? '•••••••• (unchanged)' : ''}
+                  value={proxyPassword}
+                  onChange={(e) => { setProxyPassword(e.target.value); setClearProxyPassword(false) }}
+                />
+              </Field>
+            </div>
+          </>
+        )}
         {!identity && (
           <Field
             label="Password"
@@ -523,6 +606,17 @@ function HostPanel({
             onChange={(e) => setEnv(e.target.value)}
           />
         </Field>
+        <div className="field">
+          <label className="check">
+            <input type="checkbox" checked={agentForward} onChange={(e) => setAgentForward(e.target.checked)} />
+            Agent forwarding
+          </label>
+          <span className="field-hint">
+            Lets this server log in onward (to other servers, or git) with the keys in your vault, like ssh -A. Your keys never
+            leave this device, but while a session is open anyone with root on the server could use them: only for servers you
+            trust.
+          </span>
+        </div>
         <ErrorText error={error} />
         <div className="panel-actions">
           <Button type="submit" disabled={busy || !dirty || !address.trim()}>

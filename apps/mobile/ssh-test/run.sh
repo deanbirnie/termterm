@@ -24,7 +24,7 @@ fetch com/github/mwiede/jsch/2.28.8 jsch-2.28.8.jar 2afca1357d816028f2ac33f22407
 fetch org/bouncycastle/bcprov-jdk18on/1.87 bcprov-jdk18on-1.87.jar 12d2d3dd82a9ec15e92ec7c7943ee64f6097c6dc12c07e984f1693b77565b9aa
 cp="$work/jsch-2.28.8.jar:$work/bcprov-jdk18on-1.87.jar"
 
-javac -nowarn -cp "$cp" -d "$work/classes" "$src"/*.java "$here/Smoke.java"
+javac -nowarn -cp "$cp" -d "$work/classes" "$src"/*.java "$here/Smoke.java" "$here/OpenSsh.java"
 
 # A passphrase-protected key made by the desktop app's library, to import here.
 (cd "$here" && node -e "
@@ -50,3 +50,16 @@ for (const type of ['ed25519', 'rsa']) {
   if (key instanceof Error) { console.error('  FAIL desktop cannot read the generated ' + type + ' key: ' + key.message); process.exit(1) }
   console.log('  ok   desktop reads the generated ' + type + ' key (' + key.type + ')')
 }" "$work")
+
+# Against a real OpenSSH too, where one is installed (CI installs it):
+# certificates, agent forwarding seen from the server, proxies.
+if command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ]; then
+  mkdir -p "$work/openssh"
+  (cd "$here" && node openssh.cjs "$work/openssh") &
+  openssh_pid=$!
+  trap 'kill "${server_pid:-}" "${openssh_pid:-}" 2>/dev/null || true; rm -rf "$work"' EXIT
+  for _ in $(seq 1 100); do [ -s "$work/openssh/openssh.properties" ] && break; sleep 0.1; done
+  java -cp "$work/classes:$cp" OpenSsh "$work/openssh"
+else
+  echo "  (no sshd here: the OpenSSH checks are skipped)"
+fi

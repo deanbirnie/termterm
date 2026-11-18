@@ -208,12 +208,17 @@ certificate is affordable.
       read it, and the plugin ran each call on a new thread that then ended;
       a FileSession now runs all its calls on one thread of its own.
 
-### Batch 10 — Connecting in more places (next)
+### Batch 10 — Connecting in more places (done)
 
-- [ ] Reaching a host through a SOCKS or HTTP proxy
-- [ ] SSH certificates and agent forwarding
+- [x] Reaching a host through a SOCKS or HTTP proxy (SOCKS5 with a login,
+      HTTP CONNECT with Basic auth; the first server reached; desktop and Android)
+- [x] SSH certificates and agent forwarding (OpenSSH user certificates for
+      ed25519, RSA and ECDSA keys; every vault key offered to a forwarded agent).
+      Checked against a real OpenSSH that trusts only a test CA, on both
+      platforms' SSH code (`npm run check:openssh -w @termterm/desktop`, the
+      JVM test and the desktop e2e)
 
-### Batch 11 — Hardware keys and scanning
+### Batch 11 — Hardware keys and scanning (next)
 
 - [ ] FIDO2 / security-key keys
 - [ ] Scans of the Android libraries and the server image
@@ -289,7 +294,9 @@ queue above, which names the batch each open item belongs to.
       `VaultService.scanSshImport` / `applySshImport`, `apps/desktop/src/main/ssh-files.ts`)
 - [x] Encrypted export / import of the vault (Batch 4: Settings → Export and import)
 - [x] Identities (reusable username + credential shared across hosts), host groups (Batch 4)
-- [ ] SSH certificates, FIDO2 / security-key keys, agent forwarding
+- [x] SSH certificates and agent forwarding (Batch 10)
+- [x] Proxies: SOCKS5 and HTTP (Batch 10)
+- [ ] FIDO2 / security-key keys (Batch 11)
 - [x] Account deletion from the app (Batch 4: Sync → Delete account)
 - [x] Server-side storage usage reporting, server backups doc (Batch 6)
 

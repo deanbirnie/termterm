@@ -57,17 +57,14 @@ public final class SshConnector {
     Session via = c.jump == null ? null : open(c.jump, hop + 1);
     if (c.jump != null && via == null) return null;
     JSch jsch = new JSch();
-    if (c.privateKey != null && !c.privateKey.isEmpty()) {
-      byte[] passphrase =
-          c.passphrase == null || c.passphrase.isEmpty() ? null : c.passphrase.getBytes(StandardCharsets.UTF_8);
-      jsch.addIdentity("vault-key", c.privateKey.getBytes(StandardCharsets.UTF_8), null, passphrase);
-    }
+    if (c.privateKey != null && !c.privateKey.isEmpty()) addKey(jsch, "vault-key", c.privateKey, c.passphrase, c.certificate);
     Session s = jsch.getSession(c.username, c.host, c.port);
     synchronized (lock) {
       if (closing) return null;
       sessions.add(s);
     }
     if (via != null) s.setProxy(new Through(via));
+    else if (c.proxy != null) s.setProxy(proxyFor(c.proxy));
     // Our own repository decides, so anything it does not approve is refused.
     s.setHostKeyRepository(new AskingHostKeys(hop));
     s.setConfig("StrictHostKeyChecking", "yes");
@@ -78,6 +75,48 @@ public final class SshConnector {
     s.setServerAliveCountMax(3);
     s.connect(CONNECT_TIMEOUT_MS);
     return s;
+  }
+
+  /**
+   * Adds a key, and before it the key with its certificate when it has one
+   * (tried first). A certificate that does not fit the key is left out.
+   */
+  static void addKey(JSch jsch, String name, String privateKey, String passphrase, String certificate) throws JSchException {
+    byte[] prv = privateKey.getBytes(StandardCharsets.UTF_8);
+    byte[] pass = passphrase == null || passphrase.isEmpty() ? null : passphrase.getBytes(StandardCharsets.UTF_8);
+    if (certificate != null && !certificate.trim().isEmpty()) {
+      try {
+        jsch.addIdentity(name + " (certificate)", prv, certificate.trim().getBytes(StandardCharsets.UTF_8), pass);
+      } catch (JSchException e) {
+        // not a certificate for this key: the key on its own still works
+      }
+    }
+    jsch.addIdentity(name, prv, null, pass);
+  }
+
+  /** The vault keys to offer through agent forwarding; keys that cannot be read are left out. */
+  static JSch identities(java.util.List<SshSession.AgentKey> keys) {
+    JSch jsch = new JSch();
+    for (SshSession.AgentKey k : keys) {
+      try {
+        addKey(jsch, k.name == null ? "key" : k.name, k.privateKey, k.passphrase, k.certificate);
+      } catch (JSchException e) {
+        // skipped
+      }
+    }
+    return jsch;
+  }
+
+  private static com.jcraft.jsch.Proxy proxyFor(SshSession.Proxy p) {
+    boolean login = p.username != null && !p.username.isEmpty();
+    if ("http".equals(p.kind)) {
+      com.jcraft.jsch.ProxyHTTP http = new com.jcraft.jsch.ProxyHTTP(p.host, p.port);
+      if (login) http.setUserPasswd(p.username, p.password == null ? "" : p.password);
+      return http;
+    }
+    com.jcraft.jsch.ProxySOCKS5 socks = new com.jcraft.jsch.ProxySOCKS5(p.host, p.port);
+    if (login) socks.setUserPasswd(p.username, p.password == null ? "" : p.password);
+    return socks;
   }
 
   /** Disconnects everything opened, the target first. Safe to call more than once. */
@@ -102,6 +141,11 @@ public final class SshConnector {
       if (t instanceof UnknownHostException) return "Host not found";
       if (t instanceof ConnectException) return "Connection refused";
       if (t instanceof SocketTimeoutException) return "Connection timed out";
+    }
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (t instanceof com.jcraft.jsch.JSchProxyException) {
+        return "Could not connect through the proxy: " + (t.getMessage() == null ? "it refused" : t.getMessage());
+      }
     }
     String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
     if (message.contains("Auth fail")) return "Authentication failed";

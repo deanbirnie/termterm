@@ -223,6 +223,7 @@ export function createApi(): TermtermApi {
     generateKey: (label, type) => vault.generateKey(label, type),
     importKey: (input) => vault.importKey(input),
     renameKey: async (id, label) => vault.renameKey(id, label),
+    setKeyCertificate: async (id, certificate) => vault.setKeyCertificate(id, certificate),
     saveSnippet: async (id, input) => vault.saveSnippet(id, input),
     saveIdentity: async (id, input) => vault.saveIdentity(id, input),
     vaultExport: async (password) => {

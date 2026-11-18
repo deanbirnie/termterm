@@ -22,7 +22,7 @@ import {
   type TransferState,
   type VaultService,
 } from '@termterm/app'
-import { DEFAULT_KEEPALIVE_SECONDS, fromBase64, toBase64 } from '@termterm/core'
+import { DEFAULT_KEEPALIVE_SECONDS, fromBase64, toBase64, type KeyData, type ProxyConfig } from '@termterm/core'
 
 interface NativeKey {
   privateKey: string
@@ -50,6 +50,12 @@ interface ConnectOptions {
   keepAlive: number
   /** Environment variables for the shell. */
   env?: Record<string, string>
+  /** The key's OpenSSH certificate, tried before the key alone. */
+  certificate?: string
+  /** The proxy to reach the first server through (set on whichever is reached directly). */
+  proxy?: ProxyConfig
+  /** Keys the server may use through agent forwarding. */
+  agentKeys?: Array<{ name: string; privateKey: string; passphrase?: string; certificate?: string }>
   /** Jump hosts, nearest first. */
   jumps?: Array<{
     host: string
@@ -58,6 +64,8 @@ interface ConnectOptions {
     password?: string
     privateKey?: string
     passphrase?: string
+    certificate?: string
+    proxy?: ProxyConfig
     keepAlive: number
   }>
 }
@@ -178,7 +186,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
    * jump hosts before it (nearest first), as the native side takes them; and
    * each hop's address and label, for host key decisions and prompt titles.
    */
-  function plan(target: ConnectTarget) {
+  /** `forwardAgent`: for a terminal, offer the vault's keys if the host asks for agent forwarding. */
+  function plan(target: ConnectTarget, forwardAgent = false) {
     if ('local' in target) throw new Error('A local terminal is not available on a phone')
     type Hop = {
       address: string
@@ -187,8 +196,11 @@ export function createSsh(vault: VaultService, events: SshEvents) {
       password?: string
       privateKey?: string
       passphrase?: string
+      certificate?: string
+      proxy?: ProxyConfig
       keepAlive: number
     }
+    let agentKeys: ConnectOptions['agentKeys']
     let env: Record<string, string> | undefined
     // The target first, then each jump host it is reached through.
     const hops: Hop[] = []
@@ -210,11 +222,25 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         }
         // Environment variables are for the target's shell only.
         if (hops.length === 0) env = host.data.env
+        if (hops.length === 0 && forwardAgent && host.data.agentForward) {
+          agentKeys = vault
+            .snapshot()
+            .keys.map((k) => vault.key(k.id)?.data)
+            .filter((k): k is KeyData => !!k)
+            .map((k) => ({
+              name: k.label,
+              privateKey: k.privateKey,
+              ...(k.passphrase ? { passphrase: k.passphrase } : {}),
+              ...(k.certificate ? { certificate: k.certificate } : {}),
+            }))
+        }
+        if (host.data.proxy) hop.proxy = host.data.proxy
         if (host.data.keyId) {
           const key = vault.key(host.data.keyId)
           if (key?.type === 'key') {
             hop.privateKey = key.data.privateKey
             hop.passphrase = key.data.passphrase
+            if (key.data.certificate) hop.certificate = key.data.certificate
           }
         }
         if (!hop.username) {
@@ -233,6 +259,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
       const where = h.port === 22 ? h.address : `${h.address}:${h.port}`
       return i > 0 ? `${where} (jump host)` : where
     }
+    // Only the server reached directly (the outermost) goes through its proxy.
+    hops.forEach((h, i) => i < hops.length - 1 && delete h.proxy)
     const [first, ...jumps] = hops
     return {
       labels: hops.map((h, i) => ({ address: h.address, port: h.port, label: label(h, i) })),
@@ -245,6 +273,9 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         passphrase: first!.passphrase,
         keepAlive: first!.keepAlive,
         ...(env ? { env } : {}),
+        ...(first!.certificate ? { certificate: first!.certificate } : {}),
+        ...(first!.proxy ? { proxy: first!.proxy } : {}),
+        ...(agentKeys?.length ? { agentKeys } : {}),
         jumps: jumps.map((h) => ({
           host: h.address,
           port: h.port,
@@ -252,6 +283,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
           keepAlive: h.keepAlive,
           ...(h.password ? { password: h.password } : {}),
           ...(h.privateKey ? { privateKey: h.privateKey, passphrase: h.passphrase } : {}),
+          ...(h.certificate ? { certificate: h.certificate } : {}),
+          ...(h.proxy ? { proxy: h.proxy } : {}),
         })),
       },
     }
@@ -362,7 +395,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
 
   return {
     async connect(sessionId: string, target: ConnectTarget, cols: number, rows: number): Promise<void> {
-      const { options, labels } = plan(target)
+      const { options, labels } = plan(target, true)
       targets.set(sessionId, { hops: labels })
       try {
         await Ssh.connect({

@@ -93,11 +93,13 @@ The **Hosts** page lists the servers you have saved.
 | Username, Port | The SSH username, and the port (usually 22). |
 | Key | One of the keys in your [Keychain](#keychain-keys-and-identities), if the server uses key login. |
 | Jump host | Another saved host to go through first, for servers you can only reach from there. See [Jump hosts](#jump-hosts). |
+| Proxy | A SOCKS5 or HTTP proxy to connect through, with its login if it needs one. See [Proxies](#proxies). |
 | Password | Saved encrypted in the vault, or left empty to be asked each time you connect. |
 | Colour | Marks the host's card, its tabs and its panes, to tell them apart at a glance (red for production, for example). |
 | Startup snippet | A [snippet](#snippets) typed into the session each time it connects. |
 | Keep-alive | How often termterm checks the connection is still there (every 20 seconds unless you change it, or off). More often helps through firewalls that drop quiet connections. |
 | Environment variables | One `NAME=value` per line, set when the shell starts. The server only applies the ones its `AcceptEnv` setting allows; others are quietly ignored. |
+| Agent forwarding | Lets the server use your vault's keys to log in onward. See [Agent forwarding](#agent-forwarding). |
 
 **Finding and connecting.**
 
@@ -129,6 +131,36 @@ bastion (in OpenSSH this is `ProxyJump`). In the server's details set **Jump
 host** to the saved host to go through. Chains work too: up to five hosts in a
 row. termterm checks each server's host key and login on its own, and each
 server only ever sees its own key.
+
+### Proxies
+
+On networks that only let traffic out through a proxy (some offices, hotels,
+or Tor), set the host's **Proxy** to **SOCKS5** or **HTTP (CONNECT)** and give
+its address and port, plus a username and password if the proxy asks for one.
+
+- The proxy is used for the first server termterm connects to. With a jump
+  host, set the proxy on the jump host: the servers behind it are reached from
+  there.
+- With SOCKS5, the server's name is looked up by the proxy, not by your
+  device.
+- Terminals, port forwards and file browsing all go through it. Works on
+  desktop and Android.
+
+### Agent forwarding
+
+Turn on **Agent forwarding** for a host to log in onward from that server with
+the keys in your vault, as `ssh -A` does. Use it, for example, to `git pull`
+from a private repository, or to `ssh` on to another server, without copying
+your private key onto the server.
+
+- Your keys never leave your device: the server sends what needs signing, and
+  termterm signs it.
+- **Only turn it on for servers you trust.** While a session is open, anyone
+  with root on that server could use your keys (though never copy them).
+- Every key in your vault is offered, with its certificate if it has one.
+  `ssh-add -L` on the server lists them.
+- If the server does not allow agent forwarding, the session opens without it
+  and says so.
 
 ---
 
@@ -332,6 +364,17 @@ SOCKS proxy is for apps on the phone itself.
 - Private keys are stored encrypted and are never shown again after you save
   them.
 
+**Certificates.** Some organisations don't put keys in `authorized_keys`:
+their servers trust a certificate authority (CA) instead, which signs a
+certificate for your key. To use one, select the key and paste the
+certificate (the line from the `-cert.pub` file) under **Certificate**.
+
+- termterm checks that it is a user certificate for this very key.
+- It shows the certificate's key ID, the usernames it allows, and how long it
+  is valid. It warns when it has expired or is not valid yet; ask for a new one
+  and replace it.
+- When logging in, the certificate is offered first, then the key on its own.
+
 ### Identities
 
 An identity is a login that several hosts share: a username with a key, a
@@ -498,6 +541,7 @@ offers it. Updating never touches your vault.
 | "A password change was interrupted on this device" | Enter the password you had *before* the change. The change finishes by itself the next time the app reaches the sync server. |
 | Sync: "This device was signed out" | Enter your master password under **Sync → Sign in again**. Use the new one if you changed it elsewhere. |
 | Host key has changed | Don't accept it unless you know the server was reinstalled or its key changed. To accept a new key on purpose, delete the old one under **Known hosts** and connect again. |
-| Authentication failed | Check the username, password or key in the host's details, or in its identity if it uses one. |
+| Authentication failed | Check the username, password or key in the host's details, or in its identity if it uses one. With a certificate, check it has not expired and lists the username you log in as. |
+| "…refused the username or password" (proxy) | The proxy's own login is wrong: check the proxy username and password in the host's details. |
 | Port already in use (forwarding) | Another program is using that port on your computer. Pick another port. |
 | "This export was made by a newer version of termterm" | Update the app, then import again. |

@@ -537,3 +537,66 @@ describe('locking and unlocking straight after a change', () => {
     expect(s.snapshot().hosts[0]?.label).toBe('after')
   })
 })
+
+describe('proxies, agent forwarding and certificates', () => {
+  const base = { label: 'h', address: 'h.test', port: 22, username: 'u', tags: [], keyId: null }
+
+  it('keeps a host proxy (its password hidden from views) and agent forwarding, and checks them', async () => {
+    const s = device('none').open()
+    await s.create('master-password')
+    const id = s.saveHost(null, { ...base, proxy: { kind: 'socks5', host: 'proxy.test', port: 1080, username: 'p', password: 'secret' }, agentForward: true })
+    expect(s.snapshot().hosts[0]).toMatchObject({ proxy: { kind: 'socks5', host: 'proxy.test', port: 1080, username: 'p', hasPassword: true }, agentForward: true })
+    expect(JSON.stringify(s.snapshot())).not.toContain('secret')
+    expect(s.host(id)?.data.proxy).toEqual({ kind: 'socks5', host: 'proxy.test', port: 1080, username: 'p', password: 'secret' })
+
+    // Saving the proxy again without a password keeps it; null removes it.
+    s.saveHost(id, { ...base, proxy: { kind: 'http', host: 'proxy.test', port: 3128, username: 'p' } })
+    expect(s.host(id)?.data.proxy).toEqual({ kind: 'http', host: 'proxy.test', port: 3128, username: 'p', password: 'secret' })
+    expect(s.host(id)?.data.agentForward).toBe(true)
+    s.saveHost(id, { ...base, proxy: { kind: 'http', host: 'proxy.test', port: 3128, username: 'p', password: null }, agentForward: false })
+    expect(s.host(id)?.data.proxy?.password).toBeUndefined()
+    expect(s.host(id)?.data.agentForward).toBeUndefined()
+    s.saveHost(id, { ...base, proxy: null })
+    expect(s.host(id)?.data.proxy).toBeUndefined()
+
+    expect(() => s.saveHost(id, { ...base, proxy: { kind: 'socks4' as 'socks5', host: 'p', port: 1 } })).toThrow('Unknown kind of proxy')
+    expect(() => s.saveHost(id, { ...base, proxy: { kind: 'http', host: ' ', port: 1 } })).toThrow('Proxy address')
+    expect(() => s.saveHost(id, { ...base, proxy: { kind: 'http', host: 'p', port: 70000 } })).toThrow('Proxy port')
+    expect(() => s.saveHost(id, { ...base, proxy: { kind: 'http', host: 'p', port: 8080, password: 'x' } })).toThrow('needs a username')
+  })
+
+  it('adds a certificate only to the key it certifies, and carries everything through export', async () => {
+    let file: string | null = null
+    const platform: Platform = {
+      storage: { read: async () => file, write: async (data) => void (file = data) },
+      deviceKey: { available: async () => false, has: async () => false, save: async () => {}, load: async () => null, clear: () => {} },
+      keys: {
+        generate: () => Promise.reject(new Error('unused')),
+        import: async (label, privateKey) => ({ label, privateKey, publicKey: privateKey === 'other' ? 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPWYg72XTvOPpdfiwnYajxtD7rySL0XKzimh2Q1iq2R9 other' : 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH772/pAofexhCu9u+ORbNuQfo8pdQraNaAiSi7B/ahy user', keyType: 'ssh-ed25519' }),
+      },
+      deviceName: () => 'test',
+      rememberDevice: () => false,
+    }
+    const s = new VaultService(platform, () => undefined, () => undefined)
+    await s.create('master-password')
+    const key = await s.importKey({ label: 'mine', privateKey: 'mine' })
+    const other = await s.importKey({ label: 'other', privateKey: 'other' })
+    const CERT = 'ssh-ed25519-cert-v01@openssh.com AAAAIHNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAAIJ4Zd/kGU6u8/HCHV4I4uDZlJKfPODZmVwIfqvYFblstAAAAIH772/pAofexhCu9u+ORbNuQfo8pdQraNaAiSi7B/ahyAAAAAAAAAAAAAAABAAAADWFsaWNlQGV4YW1wbGUAAAATAAAABWFsaWNlAAAABmRlcGxveQAAAAAAAAAA//////////8AAAAAAAAAggAAABVwZXJtaXQtWDExLWZvcndhcmRpbmcAAAAAAAAAF3Blcm1pdC1hZ2VudC1mb3J3YXJkaW5nAAAAAAAAABZwZXJtaXQtcG9ydC1mb3J3YXJkaW5nAAAAAAAAAApwZXJtaXQtcHR5AAAAAAAAAA5wZXJtaXQtdXNlci1yYwAAAAAAAAAAAAAAMwAAAAtzc2gtZWQyNTUxOQAAACBjmcglEj1Qq6WmUmTiTtTfWiSQWvCr3vTFWCDqzVb5WgAAAFMAAAALc3NoLWVkMjU1MTkAAABAMUxNi/BffS4PAwaBqE3rNw9EPlwyzyWysCZNEm5s/LOenpTUI9pgS460odFk1bOUgqgNxj5GIS6DxkCCaLA1DA== user'
+    expect(() => s.setKeyCertificate(other, CERT)).toThrow('different key')
+    expect(() => s.setKeyCertificate(key, 'ssh-ed25519 AAAA')).toThrow('not an OpenSSH certificate')
+    s.setKeyCertificate(key, `  ${CERT}\n`)
+    expect(s.snapshot().keys.find((k) => k.id === key)?.certificate).toBe(CERT)
+    expect(s.key(key)?.data.certificate).toBe(CERT)
+
+    s.saveHost(null, { ...base, keyId: key, proxy: { kind: 'socks5', host: 'proxy.test', port: 1080 }, agentForward: true })
+    const { text } = await s.exportVault('export-password')
+    const b = device('none').open()
+    await b.create('master-password')
+    await b.importVault(text, 'export-password')
+    expect(b.snapshot().keys.find((k) => k.label === 'mine')?.certificate).toBe(CERT)
+    expect(b.snapshot().hosts[0]).toMatchObject({ proxy: { kind: 'socks5', host: 'proxy.test', port: 1080, hasPassword: false }, agentForward: true })
+
+    s.setKeyCertificate(key, null)
+    expect(s.key(key)?.data.certificate).toBeUndefined()
+  })
+})

@@ -87,6 +87,26 @@ export interface HostData {
   env?: Record<string, string>
   /** A colour to tell the host's tabs and panes apart (one of HOST_COLORS). */
   color?: string
+  /**
+   * A proxy to connect through. Used when this host is the first server
+   * reached: connected to directly, or the outermost of its jump hosts.
+   */
+  proxy?: ProxyConfig
+  /**
+   * Lets the server use this vault's keys to log in onward (ssh -A), while a
+   * session is open. Only for servers you trust: anyone with root there can
+   * use the keys meanwhile (they never see them).
+   */
+  agentForward?: boolean
+}
+
+/** A SOCKS5 or HTTP (CONNECT) proxy. */
+export interface ProxyConfig {
+  kind: 'socks5' | 'http'
+  host: string
+  port: number
+  username?: string
+  password?: string
 }
 
 /** The colours a host can be given. */
@@ -110,6 +130,8 @@ export interface KeyData {
   publicKey: string
   keyType: string
   passphrase?: string
+  /** An OpenSSH certificate for this key (the -cert.pub line), signed by a CA the servers trust. */
+  certificate?: string
 }
 
 export interface SnippetData {

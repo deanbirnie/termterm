@@ -27,6 +27,27 @@ export interface HostView {
   startupSnippetId?: string
   env?: Record<string, string>
   color?: string
+  /** Connected through this proxy when it is the first server reached. */
+  proxy?: ProxyView
+  /** Lets the server use this vault's keys onward (ssh -A). */
+  agentForward?: boolean
+}
+
+export interface ProxyView {
+  kind: 'socks5' | 'http'
+  host: string
+  port: number
+  username?: string
+  hasPassword: boolean
+}
+
+export interface ProxyInput {
+  kind: 'socks5' | 'http'
+  host: string
+  port: number
+  username?: string
+  /** undefined = leave as is, null or '' = none */
+  password?: string | null
 }
 
 export interface IdentityView {
@@ -115,6 +136,8 @@ export interface KeyView {
   publicKey: string
   fingerprint: string
   hasPassphrase: boolean
+  /** Its OpenSSH certificate, if one was added. */
+  certificate?: string
 }
 
 export interface SnippetView {
@@ -288,6 +311,10 @@ export interface HostInput {
   env?: Record<string, string>
   /** undefined = leave as is, null or '' = none */
   color?: string | null
+  /** undefined = leave as is, null = connect directly */
+  proxy?: ProxyInput | null
+  /** undefined = leave as is */
+  agentForward?: boolean
 }
 
 /** What importing an export file did. */
@@ -372,6 +399,8 @@ export interface TermtermApi {
   generateKey(label: string, type: 'ed25519' | 'rsa'): Promise<string>
   importKey(input: KeyImportInput): Promise<string>
   renameKey(id: string, label: string): Promise<void>
+  /** Adds (or with null removes) the OpenSSH certificate a key logs in with. */
+  setKeyCertificate(id: string, certificate: string | null): Promise<void>
   saveSnippet(id: string | null, input: { label: string; script: string }): Promise<string>
   saveIdentity(id: string | null, input: IdentityInput): Promise<string>
   /** Renames a group of hosts, or (with an empty name) ungroups them. */

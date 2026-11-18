@@ -5,12 +5,15 @@
  * trust on first use, and questions to the user through `Prompts`.
  */
 import { randomUUID } from 'node:crypto'
+import type { Socket } from 'node:net'
 import { userInfo } from 'node:os'
 import { Client, utils, type ClientChannel, type NextAuthHandler } from 'ssh2'
 import type { ConnectTarget, SshPrompt, SshPromptReply } from '@termterm/app'
 import { fingerprintOf, MAX_JUMPS, type VaultService } from '@termterm/app'
-import { DEFAULT_KEEPALIVE_SECONDS } from '@termterm/core'
+import { DEFAULT_KEEPALIVE_SECONDS, type KeyData, type ProxyConfig } from '@termterm/core'
 import { keyTypeOfBlob } from './keys'
+import { connectThroughProxy } from './proxy'
+import { certificateKey, useCertificates, VaultAgent } from './ssh-auth'
 
 export type PromptBody = SshPrompt extends infer P
   ? P extends SshPrompt
@@ -77,6 +80,12 @@ export interface Hop {
   keepAlive: number
   /** Environment variables for the shell (the target only). */
   env?: Record<string, string>
+  /** An OpenSSH certificate for `privateKey`, tried before the key on its own. */
+  certificate?: string
+  /** The proxy to reach this server through (the first server only). */
+  proxy?: ProxyConfig
+  /** Offered to the server for agent forwarding (terminals to the target only). */
+  agent?: VaultAgent
 }
 
 /**
@@ -116,12 +125,30 @@ export function planConnection(vault: VaultService, target: ConnectTarget): Hop[
         if (parsed instanceof Error) throw new Error(`Cannot use key "${key.data.label}": ${parsed.message}`)
         hop.privateKey = key.data.privateKey
         hop.passphrase = key.data.passphrase
+        if (key.data.certificate) hop.certificate = key.data.certificate
       }
     }
+    if (host.data.proxy) hop.proxy = host.data.proxy
     hops.unshift(hop)
     id = host.data.jumpHostId
   }
+  // Only the first server is reached directly, so only its proxy is used.
+  for (const hop of hops.slice(1)) delete hop.proxy
   return hops
+}
+
+/**
+ * The agent to forward for a terminal to `target`, when the host asks for
+ * it: every key in the vault (and its certificate), so the server can log in
+ * onward with any of them.
+ */
+export function agentFor(vault: VaultService, target: ConnectTarget): VaultAgent | undefined {
+  if (!('hostId' in target) || !vault.host(target.hostId)?.data.agentForward) return undefined
+  const keys = vault
+    .snapshot()
+    .keys.map((k) => vault.key(k.id)?.data)
+    .filter((k): k is KeyData => !!k)
+  return new VaultAgent(keys)
 }
 
 const label = (address: string, port: number) => (port === 22 ? address : `${address}:${port}`)
@@ -186,8 +213,9 @@ function connectHop(vault: VaultService, hop: Hop, ask: Ask, track: (c: Client) 
       return true
     }
 
-    // Auth order: saved key, saved password, keyboard-interactive, then ask.
-    const tried = { none: false, key: false, stored: false, keyboard: false, prompts: 0 }
+    // Auth order: saved key (with its certificate first, if it has one),
+    // saved password, keyboard-interactive, then ask.
+    const tried = { none: false, certificate: false, key: false, stored: false, keyboard: false, prompts: 0 }
     const cancelled = () => {
       failure = 'Authentication cancelled'
       fail(failure)
@@ -197,6 +225,16 @@ function connectHop(vault: VaultService, hop: Hop, ask: Ask, track: (c: Client) 
       if (!tried.none) {
         tried.none = true
         return next({ type: 'none', username })
+      }
+      if (hop.privateKey && hop.certificate && !tried.certificate && allows('publickey')) {
+        tried.certificate = true
+        let key
+        try {
+          key = certificateKey(hop.privateKey, hop.passphrase, hop.certificate)
+        } catch {
+          key = undefined // a certificate that does not fit: log in with the key alone
+        }
+        if (key) return next({ type: 'publickey', username, key } as unknown as Parameters<NextAuthHandler>[0])
       }
       if (hop.privateKey && !tried.key && allows('publickey')) {
         tried.key = true
@@ -242,12 +280,13 @@ function connectHop(vault: VaultService, hop: Hop, ask: Ask, track: (c: Client) 
       .on('error', (err) => fail(friendlyError(err)))
       .on('close', () => fail('Connection closed'))
 
-    const start = (sock?: ClientChannel) =>
+    const start = (sock?: ClientChannel | Socket) => {
       client.connect({
         host: address,
         port,
         username,
         ...(sock ? { sock } : {}),
+        ...(hop.agent ? { agent: hop.agent } : {}),
         readyTimeout: 120_000, // generous: includes time the user spends on prompts
         keepaliveInterval: hop.keepAlive * 1000, // 0 turns them off
         keepaliveCountMax: 3,
@@ -256,7 +295,13 @@ function connectHop(vault: VaultService, hop: Hop, ask: Ask, track: (c: Client) 
         },
         authHandler,
       })
+      useCertificates(client)
+    }
 
+    if (!via && hop.proxy) {
+      connectThroughProxy(hop.proxy, address, port).then(start, (e: Error) => fail(e.message))
+      return
+    }
     if (!via) return start()
     // Through the jump host: a TCP stream it opens to this hop stands in for a socket.
     via.forwardOut('127.0.0.1', 0, address, port, (err, stream) => {

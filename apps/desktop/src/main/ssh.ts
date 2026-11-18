@@ -1,7 +1,7 @@
 import type { Client, ClientChannel } from 'ssh2'
 import type { ConnectTarget, SessionStatus } from '@termterm/app'
 import type { VaultService } from '@termterm/app'
-import { friendlyError, LOST, openConnection, planConnection, type Prompts } from './ssh-connect'
+import { agentFor, friendlyError, LOST, openConnection, planConnection, type Prompts } from './ssh-connect'
 
 interface Session {
   /** Every connection opened for it: jump hosts first, the target last. */
@@ -34,6 +34,8 @@ export class SshManager {
     this.close(sessionId)
     // Throws straight away for what the vault cannot supply (missing host, unreadable key).
     const hops = planConnection(this.vault, target)
+    const agent = agentFor(this.vault, target)
+    if (agent) hops.at(-1)!.agent = agent
 
     const session: Session = { clients: [], size: { cols, rows }, prompts: new Set(), closed: false }
     this.sessions.set(sessionId, session)
@@ -64,7 +66,13 @@ export class SshManager {
         // Environment variables the host asks for; servers only set those
         // their AcceptEnv allows, and quietly ignore the rest.
         const env = hops.at(-1)?.env
-        client.shell({ term: 'xterm-256color', ...opened }, env ? { env } : {}, (err, stream) => {
+        const open = (forwardAgent: boolean) =>
+          client.shell({ term: 'xterm-256color', ...opened }, { ...(env ? { env } : {}), ...(forwardAgent ? { agentForward: true } : {}) }, (err, stream) => {
+          // A server that does not allow agent forwarding: carry on without it, as ssh does.
+          if (err && forwardAgent && /agent forwarding/i.test(err.message)) {
+            this.events.data(sessionId, new TextEncoder().encode('termterm: the server refused agent forwarding; continuing without it.\r\n'))
+            return open(false)
+          }
           if (err) return finish(err.message)
           session.stream = stream
           // A resize that arrived while the shell was being opened.
@@ -78,6 +86,7 @@ export class SshManager {
           stream.on('exit', () => (session.exited = true))
           stream.on('close', () => finish(session.exited ? undefined : LOST))
         })
+        open(!!agent)
       },
       (err: Error) => finish(err.message),
     )
