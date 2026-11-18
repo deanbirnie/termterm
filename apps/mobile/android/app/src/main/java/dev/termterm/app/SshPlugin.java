@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.util.Log;
 import androidx.activity.result.ActivityResult;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -579,9 +580,18 @@ public class SshPlugin extends Plugin {
 
   @PluginMethod
   public void write(PluginCall call) {
-    Live live = sessions.get(call.getString("sessionId", ""));
+    String sessionId = call.getString("sessionId", "");
+    Live live = sessions.get(sessionId);
     String data = call.getString("data");
-    if (live != null && data != null) live.session.write(data.getBytes(StandardCharsets.UTF_8));
+    if (live == null) {
+      Log.w("termterm", "Input for a session that is not open: " + sessionId);
+    } else if (data != null) {
+      try {
+        live.session.write(data.getBytes(StandardCharsets.UTF_8));
+      } catch (Exception e) {
+        Log.w("termterm", "Input could not be sent to " + sessionId, e);
+      }
+    }
     call.resolve();
   }
 

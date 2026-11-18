@@ -124,18 +124,19 @@ public final class SshSession {
     }
   }
 
-  public void write(byte[] data) {
+  /**
+   * Sends typed input to the shell. Throws if it could not be sent (not
+   * connected yet, or the connection failed); the read loop reports a broken
+   * connection to the interface, so callers only need to log this.
+   */
+  public void write(byte[] data) throws java.io.IOException {
     OutputStream out;
     synchronized (lock) {
       out = toRemote;
     }
-    if (out == null) return;
-    try {
-      out.write(data);
-      out.flush();
-    } catch (Exception e) {
-      // The read loop notices a broken connection and reports it.
-    }
+    if (out == null) throw new java.io.IOException("Not connected yet");
+    out.write(data);
+    out.flush();
   }
 
   public void resize(int cols, int rows) {

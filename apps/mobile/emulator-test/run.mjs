@@ -38,6 +38,7 @@ writeFileSync(join(home, 'notes.txt'), 'remote notes\n')
 chmodSync(join(home, 'notes.txt'), 0o644)
 const server = spawn('node', [join(here, '../ssh-test/server.cjs'), join(work, 'authorized'), join(work, 'files')], {
   cwd: join(here, '../ssh-test'),
+  env: { ...process.env, SSH_TEST_LOG: '1' },
   stdio: ['ignore', 'pipe', 'inherit'],
 })
 const sshPort = await new Promise((ok, fail) => {
