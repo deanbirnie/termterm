@@ -167,7 +167,16 @@ try {
 } catch (e) {
   if (page) await page.screenshot({ path: join(shots, 'emulator-failure.png') }).catch(() => {})
   try {
-    writeFileSync(join(shots, 'emulator-logcat.txt'), adb('logcat', '-d', '-t', '2000'))
+    const log = adb('logcat', '-d', '-t', '3000')
+    writeFileSync(join(shots, 'emulator-logcat.txt'), log)
+    // The artifact is not always to hand: the lines that matter go in the job log too.
+    let pid = ''
+    try {
+      pid = adb('shell', 'pidof', PKG)
+    } catch {}
+    console.error(`\nApp process now: ${pid || 'not running'}`)
+    const wanted = /AndroidRuntime|FATAL|ActivityManager|ActivityTaskManager|chromium|Capacitor|termterm|cr_|WebView|lowmemorykiller|DEBUG\s*:/
+    console.error(log.split('\n').filter((l) => wanted.test(l)).slice(-200).join('\n'))
   } catch {}
   throw e
 } finally {
