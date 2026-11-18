@@ -35,9 +35,11 @@ certs="$("$tools/apksigner" verify --print-certs "$apk")" || {
 echo "signature verifies"
 
 if [ -n "$want_cert" ]; then
-  # apksigner names signers "Signer #1", or "Signer (minSdkVersion=..., ...)"
-  # when the signature schemes differ by Android version: read every one.
-  got="$(printf '%s\n' "$certs" | sed -n 's/^Signer.* certificate SHA-256 digest: //p' | tr -d ': ' | tr '[:upper:]' '[:lower:]' | sort -u)"
+  # apksigner names signers "Signer #1", "Signer (minSdkVersion=..., ...)"
+  # when the signature schemes differ by Android version, or "V2 Signer:" by
+  # scheme, depending on its version: read every one. (Not a "Source Stamp"
+  # signer, which is not the app's own certificate.)
+  got="$(printf '%s\n' "$certs" | sed -n 's/^\(V[0-9.]* \)\{0,1\}Signer[^:]*:\{0,1\} certificate SHA-256 digest: //p' | tr -d ': ' | tr '[:upper:]' '[:lower:]' | sort -u)"
   if [ -z "$got" ]; then
     echo "::error::Could not read the signing certificate of $apk. apksigner said:"
     printf '%s\n' "$certs"
