@@ -70,6 +70,12 @@ try {
     const notNow = page.getByRole('button', { name: 'Not now' })
     if (await notNow.count()) await notNow.click()
   }
+  // The on-screen keyboard shifts the WebView's visual viewport, which throws
+  // Playwright's click positions off; a person taps elsewhere to close it first.
+  const closeKeyboard = async () => {
+    await page.evaluate(() => document.activeElement?.blur())
+    await page.waitForTimeout(1000)
+  }
   const nav = (name) => page.getByRole('navigation').getByRole('button', { name, exact: true })
 
   await page.getByLabel('Master password', { exact: true }).fill(MASTER)
@@ -179,6 +185,7 @@ try {
   const perms = page.getByRole('dialog', { name: 'Permissions of notes.txt' })
   assert.equal(await perms.getByLabel('As a number (like chmod)').inputValue(), '644')
   await perms.getByLabel('As a number (like chmod)').fill('600')
+  await closeKeyboard()
   await perms.getByRole('button', { name: 'Apply' }).click()
   await perms.waitFor({ state: 'detached' })
   assert.equal(statSync(join(home, 'notes.txt')).mode & 0o777, 0o600)
@@ -189,6 +196,7 @@ try {
   assert.equal(await text.inputValue(), 'remote notes\n')
   await text.fill('edited on the phone\n')
   await page.screenshot({ path: join(shots, 'emulator-editor.png') })
+  await closeKeyboard()
   await editor.getByRole('button', { name: 'Save' }).click()
   await editor.getByText('Saved', { exact: true }).waitFor()
   assert.equal(readFileSync(join(home, 'notes.txt'), 'utf8'), 'edited on the phone\n')
