@@ -18,7 +18,9 @@ import { _android as android } from 'playwright'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const apk = resolve(process.argv[2] ?? '')
-const PKG = 'dev.termterm.app'
+// Debug builds are installed as their own app, beside a release build (build.gradle).
+const PKG = 'dev.termterm.app.debug'
+const ACTIVITY = 'dev.termterm.app.MainActivity'
 const MASTER = 'emulator master pw'
 const SSH_PORT_ON_PHONE = 2222
 const FORWARD_PORT = 18080
@@ -54,7 +56,9 @@ try {
   adb('install', '-r', '-g', apk)
   adb('reverse', `tcp:${SSH_PORT_ON_PHONE}`, `tcp:${sshPort}`)
   adb('shell', 'am', 'force-stop', PKG)
-  adb('shell', 'am', 'start', '-W', '-n', `${PKG}/.MainActivity`)
+  // am start reports a missing app or activity in its output, not its exit code.
+  const started = adb('shell', 'am', 'start', '-W', '-n', `${PKG}/${ACTIVITY}`)
+  assert.doesNotMatch(started, /Error|does not exist/, started)
   ;[device] = await android.devices()
   assert.ok(device, 'no Android device found')
   const webView = await device.webView({ pkg: PKG }, { timeout: 60_000 })
