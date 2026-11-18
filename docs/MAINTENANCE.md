@@ -152,7 +152,7 @@ review of the changed text and references, not application builds.
 | Change area | Required verification |
 |---|---|
 | Desktop dependencies or code | Desktop e2e and a Windows installer build (`npm run dist` on Windows); verify the Linux package when its packaging/runtime is affected. |
-| Android dependencies or code | Mobile browser e2e, Java SSH tests, and `npm run apk -w @termterm/mobile`. Capacitor, native SSH, storage or lifecycle changes also need device/emulator smoke testing. |
+| Android dependencies or code | Mobile browser e2e, Java SSH tests, and `npm run apk -w @termterm/mobile`. Capacitor, native SSH, storage or lifecycle changes also need the emulator job (`android-emulator` in `build.yml`) to pass, and a real device for anything it does not cover. |
 | Server dependencies, runtime or image | Core/server tests, server image build and health check, persistence and expected runtime UID checks. |
 | Shared vault, app or UI dependencies/code | Both desktop and Android checks, plus server checks when crypto, sync or server-consumed code is affected. |
 | Actions, release or cleanup scripts | Workflow validation (for example actionlint), shell validation (for example ShellCheck), and focused tests of changed selection/version logic; preview cleanup with its dry-run mode. |
@@ -223,8 +223,9 @@ edit. Mark them complete only when their implementation and evidence exist.
       move the frozen release forward when the protocol changes.
 - [x] Automated server backup/restore verification
       (`.github/scripts/check-backup-restore.sh`, in the server image job).
-- [ ] Native Android device/emulator smoke coverage and targeted Windows
-      credential-store and installed-upgrade coverage.
+- [x] Native Android emulator smoke coverage (the `android-emulator` job in
+      `build.yml`: the debug APK installed and driven through its WebView).
+- [ ] Targeted Windows credential-store and installed-upgrade coverage.
 - [x] Mobile browser and Java SSH tests in the release workflow (its `test`
       job, which every build and publish job waits for).
 - [x] Expected-asset, signing and update-metadata validation in the release

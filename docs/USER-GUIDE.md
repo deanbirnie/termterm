@@ -265,6 +265,25 @@ details, or with the folder button at the top right of a terminal.
   overwritten. Folders can't be downloaded as a whole on a phone yet: open one
   and download its files.
 
+**Permissions** (server side, desktop and Android): select a file or folder
+and press the shield button. Tick who may read, write and run it, or type the
+number as you would for `chmod` (644, 755 and so on); the two stay in step.
+Hovering over a file on desktop shows its permissions, like `-rw-r--r--`.
+
+**Editing a server file** (desktop and Android): double-click a file on
+desktop, or select it and press the edit button, to open it in an editor.
+
+- **Save** with the button or Ctrl+S. The text goes into the existing file, so
+  its permissions and owner stay as they were.
+- If the file **changed on the server** since you opened it (someone else
+  edited it, or a program wrote to it), saving stops and asks: **Overwrite**
+  replaces it with your text, **Reload** shows the server's version (losing
+  your edits).
+- Closing with unsaved changes asks before throwing them away.
+- Only text files up to 1 MB in UTF-8 can be edited. Binary files and other
+  encodings are refused, so they are never damaged by mistake; download those
+  instead.
+
 ---
 
 ## Port forwarding
