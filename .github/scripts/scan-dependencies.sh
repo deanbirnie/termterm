@@ -55,6 +55,8 @@ EOF
     "$work/osv-scanner" scan source "${config[@]}" --lockfile "$work/release/gradle.lockfile"
     ;;
   image)
+    # The scanner wants a tagged name: an untagged one means :latest, as for docker.
+    case "${target##*/}" in *:*) ;; *) target="$target:latest" ;; esac
     "$work/osv-scanner" scan image "${config[@]}" "$target"
     ;;
   *)
