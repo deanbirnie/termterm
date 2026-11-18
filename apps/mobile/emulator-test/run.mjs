@@ -98,14 +98,26 @@ try {
   await input.focus()
   const active = await page.evaluate(() => `${document.activeElement?.tagName}.${document.activeElement?.className}`)
   assert.match(active, /xterm-helper-textarea/, `the terminal did not take the focus (${active} has it)`)
-  await page.keyboard.type('echo from-the-phone')
+  // What reaches the page and what goes to the native side, to say where typing stops if it does.
+  await page.evaluate(() => {
+    const seen = (window.__seen = { events: {}, native: [] })
+    const box = document.querySelector('.pane:not([hidden]) .xterm-helper-textarea')
+    for (const type of ['keydown', 'keypress', 'beforeinput', 'input', 'compositionend']) {
+      box?.addEventListener(type, () => (seen.events[type] = (seen.events[type] ?? 0) + 1), true)
+    }
+    const cap = window.Capacitor
+    const toNative = cap?.toNative?.bind(cap)
+    if (toNative) cap.toNative = (plugin, method, ...rest) => (seen.native.push(`${plugin}.${method}`), toNative(plugin, method, ...rest))
+  })
+  // A phone's keyboard hands over text as input (as an IME commits it), and Enter as a key.
+  await page.keyboard.insertText('echo from-the-phone')
   await page.keyboard.press('Enter')
   try {
     await term.getByText('ran:echo from-the-phone').waitFor({ timeout: 15_000 })
   } catch (e) {
     const shown = await term.innerText().catch(() => '?')
-    const now = await page.evaluate(() => `${document.activeElement?.tagName}.${document.activeElement?.className}`)
-    throw new Error(`typed text did not reach the server. Focus: ${now}. Terminal shows:\n${shown}`, { cause: e })
+    const seen = await page.evaluate(() => JSON.stringify(window.__seen))
+    throw new Error(`typed text did not reach the server. Seen: ${seen}. Terminal shows:\n${shown}`, { cause: e })
   }
   await page.screenshot({ path: join(shots, 'emulator-terminal.png') })
   step('a terminal logs in with the saved password and runs a command')
