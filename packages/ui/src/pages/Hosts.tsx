@@ -5,7 +5,7 @@ import { api } from '../api'
 import { LocalTerminalButton } from '../LocalTerminalButton'
 import { SshImportDialog } from '../SshImport'
 import { useAppInfo } from '../Update'
-import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
+import { Button, Empty, ErrorText, Field, PasswordInput, useAction, useSplitClass } from '../ui'
 
 /** How long a click waits for a second one before opening a host's details. */
 const DOUBLE_CLICK_MS = 400
@@ -85,16 +85,23 @@ export function HostsPage({
   // is closed, a click waits long enough to see whether it is the start of a
   // double-click (which connects instead). With the panel already open,
   // nothing moves, so a click selects at once; so does the keyboard.
+  // The card shows as selected at once, so the wait does not feel like lag.
   const pendingSelect = useRef<number | undefined>(undefined)
+  const [pendingId, setPendingId] = useState<string | null>(null)
   useEffect(() => () => window.clearTimeout(pendingSelect.current), [])
   const clickCard = (e: ReactMouseEvent, h: HostView) => {
     window.clearTimeout(pendingSelect.current)
     if (e.detail > 1) return // the second click of a double-click
     if (editing || !canConnect || e.detail === 0) return setEditing({ id: h.id })
-    pendingSelect.current = window.setTimeout(() => setEditing({ id: h.id }), DOUBLE_CLICK_MS)
+    setPendingId(h.id)
+    pendingSelect.current = window.setTimeout(() => {
+      setPendingId(null)
+      setEditing({ id: h.id })
+    }, DOUBLE_CLICK_MS)
   }
   const doubleClickCard = (h: HostView) => {
     window.clearTimeout(pendingSelect.current)
+    setPendingId(null)
     open(h)
   }
   const browse = (h: HostView) => onConnect({ hostId: h.id }, h.label, 'files')
@@ -107,7 +114,7 @@ export function HostsPage({
   const current = editing?.id ? snapshot.hosts.find((h) => h.id === editing.id) : undefined
 
   return (
-    <div className="split">
+    <div className={useSplitClass(!!editing)}>
       {importing && <SshImportDialog onClose={() => setImporting(false)} />}
       <div className="split-main">
         <form
@@ -167,7 +174,7 @@ export function HostsPage({
                   return (
                     <li key={h.id}>
                       <button
-                        className={`card ${editing?.id === h.id ? 'selected' : ''} ${h.color ? `host-${h.color}` : ''}`}
+                        className={`card ${editing?.id === h.id || pendingId === h.id ? 'selected' : ''} ${h.color ? `host-${h.color}` : ''}`}
                         onClick={(e) => clickCard(e, h)}
                         onDoubleClick={canConnect ? () => doubleClickCard(h) : undefined}
                         title={canConnect ? 'Double-click to connect' : undefined}

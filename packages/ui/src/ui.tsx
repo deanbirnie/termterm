@@ -2,6 +2,7 @@ import {
   cloneElement,
   useEffect,
   useId,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -10,6 +11,20 @@ import {
 } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { errorMessage } from './api'
+
+/**
+ * The class for a page with a side panel: "panel-entering" on the render
+ * where the panel appears, so it slides in then, and not again each time it
+ * switches to another item (pages rebuild it per item).
+ */
+export function useSplitClass(panelOpen: boolean): string {
+  const was = useRef(panelOpen)
+  const entering = panelOpen && !was.current
+  useEffect(() => {
+    was.current = panelOpen
+  })
+  return entering ? 'split panel-entering' : 'split'
+}
 
 export function Button({
   variant = 'default',

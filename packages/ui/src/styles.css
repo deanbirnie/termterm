@@ -227,6 +227,12 @@ section + section > .section-title, section + section > .group-rename { margin-t
 .panel-body { flex: 1; overflow-y: auto; padding: 10px 14px; }
 .panel-foot { padding: 12px 14px; border-top: 1px solid var(--border); }
 .panel-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/* A side panel slides in when it opens (the list narrows with it), not when it switches item. */
+@keyframes panel-open { from { width: 0; opacity: 0; } }
+@keyframes panel-rise { from { transform: translateY(16px); opacity: 0; } }
+.split.panel-entering > .panel { animation: panel-open 200ms ease-out; overflow: hidden; }
+.split.panel-entering > .panel > * { min-width: 300px; }
+@media (prefers-reduced-motion: reduce) { .split.panel-entering > .panel { animation: none; } }
 .group-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 16px 0 10px; }
 
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 14px 0 4px; }
@@ -359,6 +365,9 @@ section + section > .section-title, section + section > .group-rename { margin-t
 
   /* Details open over the whole screen instead of beside the list. */
   .panel { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; padding-top: env(safe-area-inset-top); }
+  /* A full-screen panel on a phone rises into place instead. */
+  .split.panel-entering > .panel { animation-name: panel-rise; }
+  .split.panel-entering > .panel > * { min-width: 0; }
   .panel-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .modal { padding: 16px; }
   .auth { align-items: start; padding: max(24px, env(safe-area-inset-top)) 20px 24px; }

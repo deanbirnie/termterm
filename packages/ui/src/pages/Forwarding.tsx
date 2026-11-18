@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { ForwardInput, ForwardState, ForwardView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { useAppInfo } from '../Update'
-import { Button, Empty, ErrorText, Field, useAction } from '../ui'
+import { Button, Empty, ErrorText, Field, useAction, useSplitClass } from '../ui'
 
 const KINDS = [
   { value: 'local', label: 'Local', hint: 'A port on this device reaches a destination through the server (ssh -L).' },
@@ -40,7 +40,7 @@ export function ForwardingPage({ snapshot }: { snapshot: VaultSnapshot }) {
   const hostLabel = (id: string) => snapshot.hosts.find((h) => h.id === id)?.label
 
   return (
-    <div className="split">
+    <div className={useSplitClass(!!editing)}>
       <div className="split-main">
         <div className="toolbar">
           <Button onClick={() => setEditing({ id: null })} disabled={snapshot.hosts.length === 0}>
