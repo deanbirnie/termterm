@@ -133,6 +133,9 @@ try {
 
   // ---- a port forward on the phone ----
   await page.getByRole('button', { name: 'Vault', exact: true }).click()
+  // On a phone the host's details cover the page (and its navigation) until closed.
+  const details = page.getByRole('complementary', { name: 'Host details' })
+  if (await details.count()) await details.getByRole('button', { name: 'Close' }).click()
   await nav('Forwarding').click()
   await page.getByRole('button', { name: 'New port forward' }).click()
   const panel = page.getByRole('complementary', { name: 'Port forward' })
