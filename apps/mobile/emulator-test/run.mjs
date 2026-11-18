@@ -92,10 +92,21 @@ try {
   await page.getByRole('button', { name: 'Trust and connect' }).click()
   const term = page.locator('.pane:not([hidden]) .xterm-rows')
   await term.getByText(/welcome \d+x\d+/).waitFor()
+  // Typing goes to xterm's hidden text box, which must have the focus.
+  const input = page.locator('.pane:not([hidden]) .xterm-helper-textarea')
   await page.locator('.pane:not([hidden]) .xterm').click()
+  await input.focus()
+  const active = await page.evaluate(() => `${document.activeElement?.tagName}.${document.activeElement?.className}`)
+  assert.match(active, /xterm-helper-textarea/, `the terminal did not take the focus (${active} has it)`)
   await page.keyboard.type('echo from-the-phone')
   await page.keyboard.press('Enter')
-  await term.getByText('ran:echo from-the-phone').waitFor()
+  try {
+    await term.getByText('ran:echo from-the-phone').waitFor({ timeout: 15_000 })
+  } catch (e) {
+    const shown = await term.innerText().catch(() => '?')
+    const now = await page.evaluate(() => `${document.activeElement?.tagName}.${document.activeElement?.className}`)
+    throw new Error(`typed text did not reach the server. Focus: ${now}. Terminal shows:\n${shown}`, { cause: e })
+  }
   await page.screenshot({ path: join(shots, 'emulator-terminal.png') })
   step('a terminal logs in with the saved password and runs a command')
 
