@@ -188,6 +188,13 @@ try {
   await row('notes.txt').waitFor()
   await row('docs').waitFor()
   await fitsScreen('Files')
+  // Call after call (each a new native call, the pattern that once closed the channel).
+  for (let i = 0; i < 15; i++) {
+    await files.getByRole('button', { name: 'Refresh' }).click()
+    await page.waitForTimeout(300)
+    await row('notes.txt').waitFor({ timeout: 10_000 })
+  }
+  assert.equal(await files.getByRole('alert').count(), 0, 'an error showed while refreshing')
   await row('notes.txt').click()
   await files.getByRole('button', { name: 'Permissions' }).click()
   const perms = page.getByRole('dialog', { name: 'Permissions of notes.txt' })
