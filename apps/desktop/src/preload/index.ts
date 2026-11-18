@@ -41,6 +41,7 @@ const api: TermtermApi = {
   generateKey: invoke('key:generate'),
   importKey: invoke('key:import'),
   renameKey: invoke('key:rename'),
+  setKeyCertificate: invoke('key:certificate'),
   saveSnippet: invoke('snippet:save'),
   saveIdentity: invoke('identity:save'),
   vaultExport: invoke('vault:export'),
