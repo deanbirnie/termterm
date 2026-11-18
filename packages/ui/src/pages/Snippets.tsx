@@ -2,13 +2,13 @@ import { Braces, Plus, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import type { SnippetView, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
-import { Button, Empty, ErrorText, Field, useAction } from '../ui'
+import { Button, Empty, ErrorText, Field, useAction, useSplitClass } from '../ui'
 
 export function SnippetsPage({ snapshot }: { snapshot: VaultSnapshot }) {
   const [editing, setEditing] = useState<{ id: string | null } | null>(null)
   const current = editing?.id ? snapshot.snippets.find((s) => s.id === editing.id) : undefined
   return (
-    <div className="split">
+    <div className={useSplitClass(!!editing)}>
       <div className="split-main">
         <div className="toolbar">
           <Button onClick={() => setEditing({ id: null })}>

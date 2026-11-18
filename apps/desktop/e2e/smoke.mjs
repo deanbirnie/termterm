@@ -1088,8 +1088,12 @@ try {
     await d.page.getByRole('button', { name: 'Vault', exact: true }).click()
     await d.page.waitForTimeout(600)
     await assertCount(details, 0)
+    // One click: the card shows as selected at once; the details slide in after the wait.
     await d.page.locator('.card', { hasText: 'Loose box' }).click()
+    assert.match(await d.page.locator('.card', { hasText: 'Loose box' }).getAttribute('class'), /\bselected\b/)
+    assert.equal(await details.count(), 0)
     await details.waitFor()
+    assert.equal(await details.evaluate((el) => getComputedStyle(el).animationName), 'panel-open')
     await d.page.getByRole('button', { name: 'Close Loose box' }).click()
     await assertCount(d.page.getByRole('tab'), tabsNow)
     logins.splice(loginsBefore)

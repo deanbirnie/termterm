@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { certificateProblem, parseCertificate, type IdentityView, type KeyView, type VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { useAppInfo } from '../Update'
-import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
+import { Button, Empty, ErrorText, Field, PasswordInput, useAction, useSplitClass } from '../ui'
 
 type Mode =
   | { kind: 'generate' }
@@ -18,7 +18,7 @@ export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
   const identity = mode?.kind === 'identity' && mode.id ? snapshot.identities.find((i) => i.id === mode.id) : undefined
 
   return (
-    <div className="split">
+    <div className={useSplitClass(!!mode)}>
       <div className="split-main">
         <div className="toolbar">
           {canManage && (
