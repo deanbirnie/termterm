@@ -17,8 +17,12 @@ apk="${1:?usage: check-apk.sh <apk> <versionName> [<cert sha256>]}"
 version_name="${2:?usage: check-apk.sh <apk> <versionName> [<cert sha256>]}"
 want_cert="$(printf '%s' "${3-}" | tr -d ': \n' | tr '[:upper:]' '[:lower:]')"
 
-sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-tools="$(find "$sdk/build-tools" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1)"
+# The SDK's newest build tools, or (for test-check-apk.sh) the folder in CHECK_APK_TOOLS.
+tools="${CHECK_APK_TOOLS:-}"
+if [ -z "$tools" ]; then
+  sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+  tools="$(find "$sdk/build-tools" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1)"
+fi
 if [ -z "$tools" ] || [ ! -x "$tools/apksigner" ] || [ ! -x "$tools/aapt2" ]; then
   echo "::error::Android build tools (apksigner, aapt2) not found under \$ANDROID_HOME/build-tools"
   exit 1
@@ -31,9 +35,16 @@ certs="$("$tools/apksigner" verify --print-certs "$apk")" || {
 echo "signature verifies"
 
 if [ -n "$want_cert" ]; then
-  got="$(printf '%s\n' "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ': ' | tr '[:upper:]' '[:lower:]')"
+  # apksigner names signers "Signer #1", or "Signer (minSdkVersion=..., ...)"
+  # when the signature schemes differ by Android version: read every one.
+  got="$(printf '%s\n' "$certs" | sed -n 's/^Signer.* certificate SHA-256 digest: //p' | tr -d ': ' | tr '[:upper:]' '[:lower:]' | sort -u)"
+  if [ -z "$got" ]; then
+    echo "::error::Could not read the signing certificate of $apk. apksigner said:"
+    printf '%s\n' "$certs"
+    exit 1
+  fi
   if [ "$got" != "$want_cert" ]; then
-    echo "::error::$apk is signed by certificate $got, not the release certificate $want_cert. It would not install over the app."
+    echo "::error::$apk is signed by $(printf '%s' "$got" | tr '\n' ' ')not the release certificate $want_cert. It would not install over the app."
     exit 1
   fi
   echo "signed by the release certificate"
