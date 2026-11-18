@@ -221,7 +221,8 @@ certificate is affordable.
 ### Batch 11 — Hardware keys and scanning (next)
 
 - [ ] FIDO2 / security-key keys
-- [ ] Scans of the Android libraries and the server image
+- [x] Scans of the Android libraries and the server image (OSV-Scanner in CI
+      and before every release; deferrals recorded in `osv-scanner.toml`)
 
 ### Batch 13 — Shared vaults for teams (its own release)
 

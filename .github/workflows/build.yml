@@ -166,6 +166,9 @@ jobs:
           exit 1
       - name: Back up a running server and restore it into a new container
         run: .github/scripts/check-backup-restore.sh termterm-server
+      # Known vulnerabilities in the image, its OS packages included.
+      - name: Scan the image
+        run: .github/scripts/scan-dependencies.sh image termterm-server
       # Everything below runs only for pushes to main.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -282,6 +285,10 @@ jobs:
           apk="$(ls apps/mobile/android/app/build/outputs/apk/debug/*.apk)"
           name="$(node -p "require('./apps/mobile/package.json').version")-debug"
           .github/scripts/check-apk.sh "$apk" "$name"
+      # Known vulnerabilities in the Maven libraries the app ships (npm audit
+      # does not see them).
+      - name: Scan the Android libraries
+        run: .github/scripts/scan-dependencies.sh android apps/mobile/android
       # A debug build, signed with a throwaway key: for trying out, not for
       # keeping. It cannot be installed over a build from another run.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

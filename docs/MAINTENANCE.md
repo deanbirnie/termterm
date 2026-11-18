@@ -86,7 +86,18 @@ npm audit
   scripts, build tools and Actions can access signing or publishing credentials.
 - Check Android Maven dependencies (including JSch and Bouncy Castle) against
   upstream advisories and scan the built server image for OS/package findings.
-  `npm audit` does not cover either of these surfaces.
+  `npm audit` does not cover either of these surfaces. CI does both with
+  OSV-Scanner (`.github/scripts/scan-dependencies.sh android|image`) and fails
+  on any finding. To defer one that cannot be fixed yet, add it to
+  `osv-scanner.toml` at the repository root, with a reason and a date to look
+  again (it fails again after that date):
+
+  ```toml
+  [[IgnoredVulns]]
+  id = "GHSA-xxxx-xxxx-xxxx"
+  ignoreUntil = 2027-01-31
+  reason = "No fixed version yet; only reachable when ... (owner: ..., record: ...)"
+  ```
 - For every deferred finding, record the advisory URL/ID, component/version,
   severity, reachable exposure, mitigation or reason for deferral, owner and
   next review date. Link the record from the run log. Do not call a scan clean
@@ -239,7 +250,10 @@ edit. Mark them complete only when their implementation and evidence exist.
       Gradle, Docker) and Action SHA pins with version comments.
 - [x] Workflow and shell validation: actionlint (pinned, checksum verified)
       and shellcheck on every PR ("Workflow and script checks").
-- [ ] Maven and container image scans (Batch 11).
+- [x] Maven and container image scans (Batch 11): OSV-Scanner
+      (`.github/scripts/scan-dependencies.sh`, pinned and checksum-verified)
+      scans the Android release libraries and the server image, OS packages
+      included, on every relevant PR and before every release.
 
 Prioritize platform verification, existing-data compatibility and release
 checks. Preserve an explicit manual verification path until automation lands.
