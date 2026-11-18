@@ -263,6 +263,14 @@ jobs:
           echo "Using browser: $CHROME_PATH"
           test -n "$CHROME_PATH"
           npm run e2e -w @termterm/mobile
+      # A real OpenSSH server for the SSH core's certificate, agent and proxy
+      # checks (they are skipped without one).
+      - name: Install OpenSSH
+        run: |
+          if [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q --no-install-recommends openssh-server
+          fi
       - name: SSH core test
         run: npm run test:ssh -w @termterm/mobile
       - name: Build debug APK

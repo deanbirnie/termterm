@@ -149,6 +149,26 @@ public class SshPlugin extends Plugin {
     config.privateKey = call.getString("privateKey");
     config.passphrase = call.getString("passphrase");
     config.keepAliveSeconds = call.getInt("keepAlive", 20);
+    config.certificate = call.getString("certificate");
+    try {
+      config.proxy = proxyFrom(call.getObject("proxy"));
+      JSArray agentKeys = call.getArray("agentKeys");
+      if (agentKeys != null) {
+        config.agentKeys = new java.util.ArrayList<>();
+        for (int i = 0; i < agentKeys.length(); i++) {
+          org.json.JSONObject k = agentKeys.getJSONObject(i);
+          SshSession.AgentKey key = new SshSession.AgentKey();
+          key.name = k.optString("name", "key");
+          key.privateKey = k.getString("privateKey");
+          key.passphrase = k.has("passphrase") ? k.optString("passphrase", null) : null;
+          key.certificate = k.has("certificate") ? k.optString("certificate", null) : null;
+          config.agentKeys.add(key);
+        }
+      }
+    } catch (org.json.JSONException e) {
+      call.reject("Unreadable proxy or agent settings");
+      return null;
+    }
     JSObject env = call.getObject("env");
     if (env != null) {
       java.util.Iterator<String> names = env.keys();
@@ -171,6 +191,8 @@ public class SshPlugin extends Plugin {
           hop.privateKey = j.has("privateKey") ? j.optString("privateKey", null) : null;
           hop.passphrase = j.has("passphrase") ? j.optString("passphrase", null) : null;
           hop.keepAliveSeconds = j.optInt("keepAlive", 20);
+          hop.certificate = j.has("certificate") ? j.optString("certificate", null) : null;
+          hop.proxy = proxyFrom(j.optJSONObject("proxy"));
           inner.jump = hop;
           inner = hop;
         }
@@ -180,6 +202,17 @@ public class SshPlugin extends Plugin {
       }
     }
     return config;
+  }
+
+  private static SshSession.Proxy proxyFrom(org.json.JSONObject p) throws org.json.JSONException {
+    if (p == null) return null;
+    SshSession.Proxy proxy = new SshSession.Proxy();
+    proxy.kind = p.getString("kind");
+    proxy.host = p.getString("host");
+    proxy.port = p.getInt("port");
+    proxy.username = p.has("username") ? p.optString("username", null) : null;
+    proxy.password = p.has("password") ? p.optString("password", null) : null;
+    return proxy;
   }
 
   /** Questions from a connection, sent to the interface as "prompt" events tagged with {@code id}. */
