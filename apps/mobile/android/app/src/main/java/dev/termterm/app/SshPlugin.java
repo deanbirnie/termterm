@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.util.Log;
 import androidx.activity.result.ActivityResult;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -43,6 +44,26 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @CapacitorPlugin(name = "Ssh")
 public class SshPlugin extends Plugin {
+
+  @Override
+  public void load() {
+    // Debug builds pass on what the SSH library says, to see why a connection
+    // or channel ended. (Release builds stay quiet: it names hosts and users.)
+    if ((getContext().getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+      com.jcraft.jsch.JSch.setLogger(
+          new com.jcraft.jsch.Logger() {
+            @Override
+            public boolean isEnabled(int level) {
+              return level >= com.jcraft.jsch.Logger.INFO;
+            }
+
+            @Override
+            public void log(int level, String message) {
+              Log.println(level >= com.jcraft.jsch.Logger.ERROR ? Log.ERROR : level >= com.jcraft.jsch.Logger.WARN ? Log.WARN : Log.INFO, "JSch", message);
+            }
+          });
+    }
+  }
 
   /** A terminal, port forward or file browser connection, with its open prompts. */
   private static final class Live {
@@ -333,6 +354,7 @@ public class SshPlugin extends Plugin {
             o.put("type", e.type);
             o.put("size", e.size);
             o.put("modified", e.modified);
+            o.put("mode", e.mode);
             entries.put(o);
           }
           out.put("entries", entries);
@@ -356,6 +378,46 @@ public class SshPlugin extends Plugin {
   public void sftpDelete(PluginCall call) {
     FileSession f = filesFor(call);
     if (f != null) background(call, () -> { f.delete(call.getString("path")); return null; });
+  }
+
+  @PluginMethod
+  public void sftpChmod(PluginCall call) {
+    FileSession f = filesFor(call);
+    if (f != null) background(call, () -> { f.chmod(call.getString("path"), call.getInt("mode", -1)); return null; });
+  }
+
+  @PluginMethod
+  public void sftpReadText(PluginCall call) {
+    FileSession f = filesFor(call);
+    if (f == null) return;
+    background(
+        call,
+        () -> {
+          FileSession.Text t = f.readText(call.getString("path"));
+          JSObject out = new JSObject();
+          out.put("text", t.text);
+          out.put("modified", t.modified);
+          out.put("size", t.size);
+          return out;
+        });
+  }
+
+  @PluginMethod
+  public void sftpWriteText(PluginCall call) {
+    FileSession f = filesFor(call);
+    if (f == null) return;
+    background(
+        call,
+        () -> {
+          JSObject expected = call.getObject("expected");
+          long modified = expected == null ? -1 : expected.getLong("modified");
+          long size = expected == null ? -1 : expected.getLong("size");
+          FileSession.Text t = f.writeText(call.getString("path"), call.getString("text", ""), modified, size);
+          JSObject out = new JSObject();
+          out.put("modified", t.modified);
+          out.put("size", t.size);
+          return out;
+        });
   }
 
   @PluginMethod
@@ -538,9 +600,18 @@ public class SshPlugin extends Plugin {
 
   @PluginMethod
   public void write(PluginCall call) {
-    Live live = sessions.get(call.getString("sessionId", ""));
+    String sessionId = call.getString("sessionId", "");
+    Live live = sessions.get(sessionId);
     String data = call.getString("data");
-    if (live != null && data != null) live.session.write(data.getBytes(StandardCharsets.UTF_8));
+    if (live == null) {
+      Log.w("termterm", "Input for a session that is not open: " + sessionId);
+    } else if (data != null) {
+      try {
+        live.session.write(data.getBytes(StandardCharsets.UTF_8));
+      } catch (Exception e) {
+        Log.w("termterm", "Input could not be sent to " + sessionId, e);
+      }
+    }
     call.resolve();
   }
 

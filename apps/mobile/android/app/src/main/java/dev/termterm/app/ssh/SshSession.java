@@ -2,8 +2,13 @@ package dev.termterm.app.ssh;
 
 import com.jcraft.jsch.ChannelShell;
 import com.jcraft.jsch.Session;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * One SSH connection with an interactive shell. Logging in (jump hosts,
@@ -65,6 +70,21 @@ public final class SshSession {
   private OutputStream toRemote;
   private boolean closedReported;
 
+  /**
+   * Input and size changes, in the order they were made, on a thread of their
+   * own: whoever calls write() or resize() (the plugin's one thread, shared by
+   * every call the app makes) is never held up by the network. When several
+   * size changes come quickly, only the latest is sent.
+   */
+  private final ExecutorService sender = Executors.newSingleThreadExecutor(r -> daemon(r, "ssh-out"));
+  private final AtomicReference<int[]> pendingSize = new AtomicReference<>();
+
+  private static Thread daemon(Runnable r, String name) {
+    Thread t = new Thread(r, name);
+    t.setDaemon(true);
+    return t;
+  }
+
   public SshSession(Config config, Events events, Prompter prompter) {
     this.config = config;
     this.events = events;
@@ -95,7 +115,12 @@ public final class SshSession {
       for (java.util.Map.Entry<String, String> e : config.env.entrySet()) ch.setEnv(e.getKey(), e.getValue());
       InputStream fromRemote = ch.getInputStream();
       OutputStream out = ch.getOutputStream();
-      ch.connect(SshConnector.CONNECT_TIMEOUT_MS);
+      // Opened without a timeout on purpose: given one, JSch asks the server to
+      // answer every later request, window-change included, and waits up to
+      // that long for each. RFC 4254 says window-change asks for no answer, so
+      // many servers never send one. (Opening the channel is still bounded:
+      // JSch gives up after about 20 seconds.)
+      ch.connect();
       synchronized (lock) {
         if (connector.isClosing()) return;
         channel = ch;
@@ -124,17 +149,30 @@ public final class SshSession {
     }
   }
 
-  public void write(byte[] data) {
+  /**
+   * Sends typed input to the shell. Throws if it could not be sent (not
+   * connected yet, or the connection failed); the read loop reports a broken
+   * connection to the interface, so callers only need to log this.
+   */
+  public void write(byte[] data) throws IOException {
     OutputStream out;
     synchronized (lock) {
       out = toRemote;
     }
-    if (out == null) return;
+    if (out == null) throw new IOException("Not connected yet");
+    byte[] copy = data.clone();
     try {
-      out.write(data);
-      out.flush();
-    } catch (Exception e) {
-      // The read loop notices a broken connection and reports it.
+      sender.execute(
+          () -> {
+            try {
+              out.write(copy);
+              out.flush();
+            } catch (IOException e) {
+              // The read loop notices a broken connection and reports it.
+            }
+          });
+    } catch (RejectedExecutionException e) {
+      throw new IOException("Closed");
     }
   }
 
@@ -150,7 +188,17 @@ public final class SshSession {
       config.rows = rows;
       ch = channel;
     }
-    if (ch != null) ch.setPtySize(cols, rows, 0, 0);
+    if (ch == null) return;
+    if (pendingSize.getAndSet(new int[] {cols, rows}) != null) return; // already queued: it sends the latest
+    try {
+      sender.execute(
+          () -> {
+            int[] size = pendingSize.getAndSet(null);
+            if (size != null) ch.setPtySize(size[0], size[1], 0, 0);
+          });
+    } catch (RejectedExecutionException e) {
+      // closed
+    }
   }
 
   /** Ends the session without reporting an error. Safe to call more than once. */
@@ -168,6 +216,7 @@ public final class SshSession {
     }
     if (ch != null) ch.disconnect();
     connector.disconnect();
+    sender.shutdownNow();
   }
 
   private void reportClosed(String error) {

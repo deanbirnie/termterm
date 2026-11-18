@@ -188,12 +188,27 @@ already been agreed as one.
 - Shared: the Android connect logic (jump hosts, prompts) is now one
   `SshConnector` used by terminals, forwards and files
 
-### Batch 9 — Files, part 2 (next)
+Releases, agreed 2026-11-18: batches 9, 10 and 11 go out together as one
+release (the PR of batch 11 carries the label); batch 13 (shared vaults) is a
+release of its own; Windows code signing waits on the back burner until a
+certificate is affordable.
 
-- [ ] File permissions, and editing a remote file in place (desktop and Android)
-- [ ] Android emulator tests in CI
+### Batch 9 — Files, part 2 (done)
 
-### Batch 10 — Connecting in more places
+- [x] File permissions, and editing a remote file in place (desktop and Android)
+- [x] Android emulator tests in CI (`apps/mobile/emulator-test/run.mjs`, the
+      `android-emulator` job: the debug APK on an API 34 emulator, driven
+      through its WebView — terminal, a port forward, files)
+- [x] Fixed on the way, found by the emulator test: typing froze for up to
+      30 s after the terminal resized (JSch waited for window-change replies on
+      the plugin thread); dialogs did not scroll when the keyboard took half
+      the screen; the Files toolbar made the page wider than a narrow phone.
+- [x] SFTP on Android sometimes failed with "Pipe closed" (seen twice on the
+      emulator). JSch reads replies through a pipe tied to the last thread that
+      read it, and the plugin ran each call on a new thread that then ended;
+      a FileSession now runs all its calls on one thread of its own.
+
+### Batch 10 — Connecting in more places (next)
 
 - [ ] Reaching a host through a SOCKS or HTTP proxy
 - [ ] SSH certificates and agent forwarding
@@ -203,17 +218,16 @@ already been agreed as one.
 - [ ] FIDO2 / security-key keys
 - [ ] Scans of the Android libraries and the server image
 
-### Batch 12 — Windows code signing
-
-- [ ] Sign the Windows installer (needs a certificate bought in the owner's
-      name; can move earlier once there is one)
-
-### Batch 13 — Shared vaults for teams
+### Batch 13 — Shared vaults for teams (its own release)
 
 - [ ] Per-vault keys wrapped to each member's public key (likely two PRs)
 
 ### Back burner (only when the owner asks)
 
+- [ ] Windows code signing: sign the installer so SmartScreen stops warning.
+      Needs a certificate in the owner's name. Cheaper routes to look at
+      first: Azure Trusted Signing (a monthly subscription, no hardware
+      token) and SignPath Foundation's free signing for open-source projects
 - [ ] macOS build, with Touch ID unlock and self-update (signing and notarisation)
 - [ ] iOS app
 - [ ] Mosh, Telnet, serial
@@ -328,7 +342,7 @@ queue above, which names the batch each open item belongs to.
       dropping files from the system onto the server; progress per transfer; never
       overwrites (`apps/desktop/src/main/files.ts`, `packages/ui/src/FilesTab.tsx`)
 - [x] SFTP on Android (Batch 8)
-- [ ] File permissions and editing a remote file in place (Batch 9)
+- [x] File permissions and editing a remote file in place (Batch 9)
 - [x] Search in scrollback (`@xterm/addon-search`; Ctrl+Shift+F, Cmd+F, or the magnifier)
 - [x] Terminal themes, fonts, per-host colour; session logs (Batch 7)
 - [x] Predictive typing: command history per host (a `history` vault item,
@@ -354,8 +368,8 @@ queue above, which names the batch each open item belongs to.
         covered by `npm run e2e:mobile` in a phone-sized browser (vault, storage,
         cross-origin sync between two profiles), and it has been used on a real
         phone. The sync server sends CORS headers for it, and the app accepts a
-        plain-http server on the local network. Still to do: an emulator test in
-        CI.
+        plain-http server on the local network. The installed app is tested
+        on an emulator in CI (Batch 9).
   - [x] Step 3: native SSH plugin and the terminal. The SSH core
         (`apps/mobile/android/app/src/main/java/dev/termterm/app/ssh`, plain Java
         on JSch) is tested on a JVM by `npm run test:ssh -w @termterm/mobile`.

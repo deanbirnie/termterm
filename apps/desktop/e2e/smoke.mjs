@@ -4,7 +4,7 @@
 //
 //   npm run e2e            (Linux without a display: xvfb-run -a npm run e2e)
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
@@ -90,7 +90,7 @@ function serveSftp(sftp) {
   sftp.on('RMDIR', (id, p) => ok(id, () => fs.rmdirSync(onDisk(p))))
   sftp.on('REMOVE', (id, p) => ok(id, () => fs.unlinkSync(onDisk(p))))
   sftp.on('RENAME', (id, a, b) => ok(id, () => fs.renameSync(onDisk(a), onDisk(b))))
-  sftp.on('SETSTAT', (id) => sftp.status(id, S.OK))
+  sftp.on('SETSTAT', (id, p, a) => ok(id, () => a.mode !== undefined && fs.chmodSync(onDisk(p), a.mode & 0o7777)))
   sftp.on('FSETSTAT', (id) => sftp.status(id, S.OK))
 }
 
@@ -561,6 +561,68 @@ try {
     await page.getByRole('dialog', { name: 'Delete renamed?' }).getByRole('button', { name: 'Delete' }).click()
     await assertCount(row(server, 'renamed'), 0)
     assert.ok(!existsSync(join(remoteHome, 'renamed')))
+
+    // Permissions: the dialog shows them and chmod applies them.
+    chmodSync(join(remoteHome, 'notes.txt'), 0o644)
+    await server.getByRole('button', { name: 'Refresh' }).click()
+    await row(server, 'notes.txt').click()
+    await server.getByRole('button', { name: 'Permissions' }).click()
+    const perms = page.getByRole('dialog', { name: 'Permissions of notes.txt' })
+    assert.equal(await perms.getByLabel('As a number (like chmod)').inputValue(), '644')
+    await perms.getByLabel('Owner run').check()
+    await perms.getByLabel('Others read').uncheck()
+    assert.equal(await perms.getByLabel('As a number (like chmod)').inputValue(), '740')
+    await shot(page, '12b-permissions')
+    await perms.getByLabel('As a number (like chmod)').fill('750')
+    assert.ok(await perms.getByLabel('Group run').isChecked())
+    await perms.getByRole('button', { name: 'Apply' }).click()
+    await assertCount(perms, 0)
+    assert.equal(statSync(join(remoteHome, 'notes.txt')).mode & 0o777, 0o750)
+    step('file permissions show as boxes and as a number, and are applied on the server')
+
+    // Editing a server file in place: saved over the original, keeping its permissions.
+    await row(server, 'notes.txt').dblclick()
+    const editor = page.getByRole('dialog', { name: 'Edit notes.txt' })
+    const text = editor.getByLabel('File text')
+    await text.waitFor()
+    assert.equal(await text.inputValue(), 'remote notes\n')
+    await text.fill('remote notes\nedited here\n')
+    await shot(page, '12c-editor')
+    await text.press('Control+s')
+    await editor.getByText('Saved', { exact: true }).waitFor()
+    assert.equal(readFileSync(join(remoteHome, 'notes.txt'), 'utf8'), 'remote notes\nedited here\n')
+    assert.equal(statSync(join(remoteHome, 'notes.txt')).mode & 0o777, 0o750)
+    // Changed on the server meanwhile: saving asks, rather than losing the other change.
+    writeFileSync(join(remoteHome, 'notes.txt'), 'someone else was here\n')
+    await text.fill('mine\n')
+    await editor.getByRole('button', { name: 'Save' }).click()
+    await editor.getByText('The file changed on the server since you opened it.').waitFor()
+    assert.equal(readFileSync(join(remoteHome, 'notes.txt'), 'utf8'), 'someone else was here\n')
+    await editor.getByRole('button', { name: 'Overwrite' }).click()
+    await editor.getByText('Saved', { exact: true }).waitFor()
+    assert.equal(readFileSync(join(remoteHome, 'notes.txt'), 'utf8'), 'mine\n')
+    writeFileSync(join(remoteHome, 'notes.txt'), 'theirs again\n')
+    await text.fill('mine again\n')
+    await editor.getByRole('button', { name: 'Save' }).click()
+    await editor.getByRole('button', { name: /Reload/ }).click()
+    await page.waitForFunction(() => document.querySelector('textarea.editor')?.value === 'theirs again\n')
+    // Unsaved edits are not thrown away by accident.
+    await text.fill('not saved\n')
+    await editor.getByRole('button', { name: 'Close', exact: true }).click()
+    await editor.getByRole('button', { name: 'Keep editing' }).click()
+    await editor.getByRole('button', { name: 'Close', exact: true }).click()
+    await editor.getByRole('button', { name: 'Discard changes' }).click()
+    await assertCount(editor, 0)
+    assert.equal(readFileSync(join(remoteHome, 'notes.txt'), 'utf8'), 'theirs again\n')
+    // Binary files are refused rather than mangled.
+    writeFileSync(join(remoteHome, 'blob.bin'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0, 1, 2]))
+    await server.getByRole('button', { name: 'Refresh' }).click()
+    await row(server, 'blob.bin').dblclick()
+    const binary = page.getByRole('dialog', { name: 'Edit blob.bin' })
+    await binary.getByText('This looks like a binary file, which cannot be edited here.').waitFor()
+    await assertCount(binary.getByLabel('File text'), 0)
+    await binary.getByRole('button', { name: 'Close', exact: true }).click()
+    step('a server file is edited in place; changes made on the server meanwhile are not overwritten silently; binary files are refused')
     await page.getByRole('button', { name: 'Close Test box' }).last().click()
 
     // A terminal to a host opens its files too.

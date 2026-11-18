@@ -5,6 +5,7 @@ const fs = require('fs')
 function hostKey() { for (;;) { const k = utils.generateKeyPairSync('ed25519').private; if (!(utils.parseKey(k) instanceof Error)) return k } }
 const server = new Server({ hostKeys: [hostKey()] }, (client) => {
   client.on('authentication', (ctx) => {
+    client.user = ctx.username
     if (ctx.username === 'kbd') {
       if (ctx.method !== 'keyboard-interactive') return ctx.reject(['keyboard-interactive'])
       return ctx.prompt([{ prompt: 'Code: ', echo: true }], 'Second factor', 'Enter the code', (answers) => answers[0] === 'kbd-ok' ? ctx.accept() : ctx.reject(['keyboard-interactive']))
@@ -41,11 +42,12 @@ const server = new Server({ hostKeys: [hostKey()] }, (client) => {
     client.on('session', (accept) => {
       const s = accept(); let size = ''; const env = []
       s.on('sftp', (a) => serveSftp(a(), process.argv[3]))
-      s.on('pty', (a, r, info) => { size = `${info.cols}x${info.rows}`; a() })
+      s.on('pty', (a, r, info) => { size = `${info.cols}x${info.rows}`; a && a() })
       s.on('env', (a, r, info) => { env.push(`${info.key}=${info.val}`); a && a() })
-      s.on('window-change', (a, r, info) => { size = `${info.cols}x${info.rows}`; a && a() })
+      // RFC 4254 says window-change asks for no reply; user "quiet" is a server that never sends one.
+      s.on('window-change', (a, r, info) => { size = `${info.cols}x${info.rows}`; if (client.user !== 'quiet') a && a() })
       s.on('shell', (a) => { const st = a(); st.write(`welcome ${size}${env.length ? ' env:' + env.join(',') : ''}\r\n$ `); let line = ''
-        st.on('data', (c) => { for (const ch of c.toString()) { if (ch === '\r') { st.write(`\r\nran:${line} size:${size}\r\n$ `); if (line === 'exit') { st.exit(0); st.end() } if (line === 'drop') client.end(); line = '' } else { line += ch } } }) })
+        st.on('data', (c) => { if (process.env.SSH_TEST_LOG) console.error(`shell input: ${JSON.stringify(c.toString())}`); for (const ch of c.toString()) { if (ch === '\r') { st.write(`\r\nran:${line} size:${size}\r\n$ `); if (line === 'exit') { st.exit(0); st.end() } if (line === 'drop') client.end(); line = '' } else { line += ch } } }) })
     })
   }).on('error', () => {})
 })
@@ -53,6 +55,7 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
 
 // A small SFTP server over a folder (argv[3]); the user's home is /home/dean.
 function serveSftp(sftp, root) {
+  if (process.env.SSH_TEST_LOG) { console.error('sftp: opened'); sftp.on('close', () => console.error('sftp: closed')); sftp.on('error', (e) => console.error(`sftp: error ${e.message}`)) }
   const path = require('path')
   const { STATUS_CODE: S, flagsToString } = utils.sftp
   const remote = (p) => path.posix.normalize(p.startsWith('/') ? p : `/home/dean/${p}`)
@@ -86,6 +89,6 @@ function serveSftp(sftp, root) {
   sftp.on('RMDIR', (id, p) => ok(id, () => fs.rmdirSync(disk(p))))
   sftp.on('REMOVE', (id, p) => ok(id, () => fs.unlinkSync(disk(p))))
   sftp.on('RENAME', (id, a, b) => ok(id, () => fs.renameSync(disk(a), disk(b))))
-  sftp.on('SETSTAT', (id) => sftp.status(id, S.OK))
+  sftp.on('SETSTAT', (id, p, a) => { try { if (a.mode !== undefined) fs.chmodSync(disk(p), a.mode & 0o7777); sftp.status(id, S.OK) } catch (e) { sftp.status(id, S.FAILURE, e.message) } })
   sftp.on('FSETSTAT', (id) => sftp.status(id, S.OK))
 }

@@ -262,8 +262,14 @@ section + section > .section-title, section + section > .group-rename { margin-t
 
 /* ---- modal ---- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(5, 8, 12, 0.66); display: grid; place-items: center; padding: 20px; z-index: 50; }
-.modal { width: min(460px, 100%); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+/* Never taller than the screen (a phone's keyboard takes half of it): scroll inside instead. */
+.modal { width: min(460px, 100%); max-height: 100%; overflow-y: auto; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
 .modal.danger { border-color: var(--danger); }
+.modal.wide { width: min(980px, 100%); height: min(760px, 100%); }
+.modal.wide .editor { flex: 1; min-height: 200px; resize: none; font-family: var(--mono); font-size: 13px; line-height: 1.45; white-space: pre; tab-size: 4; }
+.perm-grid { display: grid; grid-template-columns: auto repeat(3, 1fr); gap: 8px 14px; align-items: center; margin-bottom: 14px; }
+.perm-grid label { display: flex; align-items: center; gap: 6px; }
+.file-mode { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
 .modal.danger h2 { color: var(--danger); }
 .modal h2 { font-size: 17px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
@@ -398,14 +404,15 @@ a.btn, a.update-pill { text-decoration: none; }
 /* ---- files (SFTP) ---- */
 .files-tab { height: 100%; display: flex; flex-direction: column; background: var(--bg); min-height: 0; }
 .files-tab > .session-bar { margin-top: auto; }
-.files-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
-.files-panes.single { grid-template-columns: 1fr; }
+/* minmax(0, …): a pane never grows past its share for its toolbar (on a phone that widened the whole page). */
+.files-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.files-panes.single { grid-template-columns: minmax(0, 1fr); }
 .file-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); }
 .file-pane:last-child { border-right: 0; }
 .file-pane.dropping { outline: 2px dashed var(--accent); outline-offset: -4px; background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.file-pane-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg-raised); }
+.file-pane-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg-raised); }
 .file-pane-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.file-tools { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.file-tools { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px; }
 .file-tools .btn { margin-left: 6px; padding: 5px 10px; }
 .file-path { padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .file-path input { padding: 5px 8px; font-size: 12.5px; }

@@ -5,19 +5,30 @@ import com.jcraft.jsch.Session;
 import com.jcraft.jsch.SftpATTRS;
 import com.jcraft.jsch.SftpException;
 import com.jcraft.jsch.SftpProgressMonitor;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * One SFTP connection for the phone's file browser: listing, folders,
  * renaming, deleting, and copying a file to or from a stream (Android's file
  * picker supplies those). Copies never overwrite: an existing name stops them.
  *
- * <p>Calls block, so the plugin runs them off the main thread; they are
- * serialised here because one SFTP channel handles one request at a time.
+ * <p>Calls block, so the plugin runs them off the main thread. Here they run
+ * one at a time on the session's own thread (see {@code io}): one SFTP channel
+ * handles one request at a time, and JSch wants a reader that stays alive.
  *
  * <p>No Android dependencies: compiled and tested on a plain JVM.
  */
@@ -31,7 +42,20 @@ public final class FileSession {
     public long size;
     /** ms since 1970 */
     public long modified;
+    /** Permission bits, such as 0755. */
+    public int mode;
   }
+
+  /** A file read to edit, and its state then (to notice changes before saving). */
+  public static final class Text {
+    public String text;
+    /** ms since 1970 */
+    public long modified;
+    public long size;
+  }
+
+  static final int MAX_EDIT_BYTES = 1024 * 1024;
+  static final String CHANGED_ON_SERVER = "The file changed on the server since you opened it.";
 
   public static final class Listing {
     public String path;
@@ -50,13 +74,44 @@ public final class FileSession {
   private ChannelSftp sftp;
   private String home;
 
+  /**
+   * Every SFTP call runs on this one thread, in turn. JSch reads the server's
+   * replies through a Java pipe that remembers the last thread to read it;
+   * if data arrives after that thread has ended, JSch closes the channel
+   * ("Pipe closed" on the next call). The plugin starts a new, short-lived
+   * thread per call, so calls are handed to this long-lived one instead.
+   */
+  private final ExecutorService io =
+      Executors.newSingleThreadExecutor(
+          r -> {
+            Thread t = new Thread(r, "sftp");
+            t.setDaemon(true);
+            return t;
+          });
+
+  private <T> T on(Callable<T> work) throws Exception {
+    try {
+      return io.submit(work).get();
+    } catch (ExecutionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof Exception) throw (Exception) cause;
+      throw new Exception(cause);
+    } catch (java.util.concurrent.RejectedExecutionException e) {
+      throw new Exception("Closed");
+    }
+  }
+
   public FileSession(SshSession.Config config, SshSession.Prompter prompter) {
     this.config = config;
     this.connector = new SshConnector(prompter);
   }
 
   /** Logs in and opens SFTP. Returns the home folder. Blocks. */
-  public synchronized String open() throws Exception {
+  public String open() throws Exception {
+    return on(() -> openNow());
+  }
+
+  private String openNow() throws Exception {
     try {
       Session s = connector.open(config);
       if (s == null) throw new Exception("Closed");
@@ -75,6 +130,7 @@ public final class FileSession {
     ChannelSftp ch = sftp;
     if (ch != null) ch.disconnect();
     connector.close();
+    io.shutdown();
   }
 
   private ChannelSftp channel() throws Exception {
@@ -82,7 +138,11 @@ public final class FileSession {
     return sftp;
   }
 
-  public synchronized Listing list(String path) throws Exception {
+  public Listing list(String path) throws Exception {
+    return on(() -> listNow(path));
+  }
+
+  private Listing listNow(String path) throws Exception {
     ChannelSftp ch = channel();
     String at = ch.realpath(path == null || path.isEmpty() ? home : path);
     Listing out = new Listing();
@@ -108,6 +168,7 @@ public final class FileSession {
       }
       entry.size = a.getSize();
       entry.modified = a.getMTime() * 1000L;
+      entry.mode = a.getPermissions() & 07777;
       out.entries.add(entry);
     }
     out.entries.sort(
@@ -118,17 +179,38 @@ public final class FileSession {
     return out;
   }
 
-  public synchronized void mkdir(String path) throws Exception {
+  public void mkdir(String path) throws Exception {
+    on(() -> {
+          mkdirNow(path);
+          return null;
+        });
+  }
+
+  private void mkdirNow(String path) throws Exception {
     channel().mkdir(path);
   }
 
-  public synchronized void rename(String from, String to) throws Exception {
+  public void rename(String from, String to) throws Exception {
+    on(() -> {
+          renameNow(from, to);
+          return null;
+        });
+  }
+
+  private void renameNow(String from, String to) throws Exception {
     if (exists(to)) throw new Exception("\"" + nameOf(to) + "\" is already there");
     channel().rename(from, to);
   }
 
   /** Removes a file, or a folder with everything in it. */
-  public synchronized void delete(String path) throws Exception {
+  public void delete(String path) throws Exception {
+    on(() -> {
+          deleteNow(path);
+          return null;
+        });
+  }
+
+  private void deleteNow(String path) throws Exception {
     if (path == null || path.isEmpty() || "/".equals(path)) throw new Exception("Refusing to delete /");
     remove(channel(), path);
   }
@@ -148,8 +230,86 @@ public final class FileSession {
     }
   }
 
+  /** Sets a file's permission bits, as chmod does. */
+  public void chmod(String path, int mode) throws Exception {
+    on(() -> {
+          chmodNow(path, mode);
+          return null;
+        });
+  }
+
+  private void chmodNow(String path, int mode) throws Exception {
+    if (mode < 0 || mode > 07777) throw new Exception("Not a valid permission");
+    channel().chmod(mode, path);
+  }
+
+  /** A server file as text, to edit: UTF-8 only, up to 1 MB. */
+  public Text readText(String path) throws Exception {
+    return on(() -> readTextNow(path));
+  }
+
+  private Text readTextNow(String path) throws Exception {
+    ChannelSftp ch = channel();
+    SftpATTRS a = ch.stat(path);
+    if (!a.isReg()) throw new Exception("Only files can be edited");
+    if (a.getSize() > MAX_EDIT_BYTES) throw new Exception("This file is too large to edit here (over 1 MB). Download it instead.");
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    ch.get(path, bytes);
+    Text t = new Text();
+    t.text = decode(bytes.toByteArray());
+    t.modified = a.getMTime() * 1000L;
+    t.size = a.getSize();
+    return t;
+  }
+
+  /**
+   * Saves text over a file, into the existing file so its permissions stay.
+   * With {@code expectedModified} at or above 0, refuses if the file is no
+   * longer as it was when read.
+   */
+  public Text writeText(String path, String text, long expectedModified, long expectedSize) throws Exception {
+    return on(() -> writeTextNow(path, text, expectedModified, expectedSize));
+  }
+
+  private Text writeTextNow(String path, String text, long expectedModified, long expectedSize) throws Exception {
+    ChannelSftp ch = channel();
+    byte[] data = text.getBytes(StandardCharsets.UTF_8);
+    if (data.length > MAX_EDIT_BYTES) throw new Exception("The text is too large to save here (over 1 MB)");
+    if (expectedModified >= 0) {
+      SftpATTRS now = ch.stat(path);
+      if (now.getMTime() * 1000L != expectedModified || now.getSize() != expectedSize) throw new Exception(CHANGED_ON_SERVER);
+    }
+    ch.put(new ByteArrayInputStream(data), path, ChannelSftp.OVERWRITE);
+    SftpATTRS after = ch.stat(path);
+    Text t = new Text();
+    t.modified = after.getMTime() * 1000L;
+    t.size = after.getSize();
+    return t;
+  }
+
+  /** UTF-8 text, or an error saying why the bytes cannot be edited as text. */
+  static String decode(byte[] bytes) throws Exception {
+    for (int i = 0; i < Math.min(bytes.length, 8192); i++) {
+      if (bytes[i] == 0) throw new Exception("This looks like a binary file, which cannot be edited here.");
+    }
+    try {
+      return StandardCharsets.UTF_8
+          .newDecoder()
+          .onMalformedInput(CodingErrorAction.REPORT)
+          .onUnmappableCharacter(CodingErrorAction.REPORT)
+          .decode(ByteBuffer.wrap(bytes))
+          .toString();
+    } catch (CharacterCodingException e) {
+      throw new Exception("This file is not UTF-8 text, so it cannot be edited here without changing it.");
+    }
+  }
+
   /** Copies a server file into {@code to}. Returns its size. */
-  public synchronized long download(String path, OutputStream to, Progress progress) throws Exception {
+  public long download(String path, OutputStream to, Progress progress) throws Exception {
+    return on(() -> downloadNow(path, to, progress));
+  }
+
+  private long downloadNow(String path, OutputStream to, Progress progress) throws Exception {
     ChannelSftp ch = channel();
     SftpATTRS a = ch.stat(path);
     if (a.isDir()) throw new Exception("Folders cannot be downloaded on a phone yet; open it and copy its files");
@@ -158,7 +318,11 @@ public final class FileSession {
   }
 
   /** Copies {@code from} to a new file {@code name} in folder {@code folder}; never overwrites. */
-  public synchronized String upload(InputStream from, String folder, String name, Progress progress) throws Exception {
+  public String upload(InputStream from, String folder, String name, Progress progress) throws Exception {
+    return on(() -> uploadNow(from, folder, name, progress));
+  }
+
+  private String uploadNow(InputStream from, String folder, String name, Progress progress) throws Exception {
     ChannelSftp ch = channel();
     String target = join(folder, name.replace('/', '_'));
     if (exists(target)) throw new Exception("\"" + name + "\" is already there. Rename or delete it first.");

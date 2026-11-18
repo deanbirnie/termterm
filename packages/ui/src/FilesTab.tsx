@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowUp, ArrowUpFromLine, File, Folder, FolderPlus, Link2, Pencil, RefreshCw, RotateCw, Trash2 } from 'lucide-react'
+import { ArrowDownToLine, ArrowUp, ArrowUpFromLine, File, FilePen, Folder, FolderPlus, Link2, Pencil, RefreshCw, RotateCw, ShieldCheck, Trash2 } from 'lucide-react'
 import {
   forwardRef,
   useEffect,
@@ -9,7 +9,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react'
-import type { FileEntry, FolderListing, TransferState } from '@termterm/app'
+import type { FileEntry, FolderListing, TextFile, TransferState } from '@termterm/app'
 import { api, errorMessage } from './api'
 import { Button, ErrorText, Field, Modal, useAction } from './ui'
 import { useAppInfo } from './Update'
@@ -113,6 +113,9 @@ export function FilesTab({ tab, active, onClose }: { tab: SessionTab; active: bo
         mkdir: (p) => api.sftpMkdir(tab.id, p),
         rename: (a, b) => api.sftpRename(tab.id, a, b),
         remove: (p) => api.sftpDelete(tab.id, p),
+        chmod: (p, mode) => api.sftpChmod(tab.id, p, mode),
+        readText: (p) => api.sftpReadText(tab.id, p),
+        writeText: (p, text, expected) => api.sftpWriteText(tab.id, p, text, expected),
         join: (dir, name) => (dir.endsWith('/') ? dir + name : `${dir}/${name}`),
       }}
       copyLabel="Download"
@@ -226,6 +229,10 @@ interface PaneOps {
   rename(from: string, to: string): Promise<void>
   remove(path: string): Promise<void>
   join(dir: string, name: string): string
+  /** Server side only: permissions and editing in place. */
+  chmod?(path: string, mode: number): Promise<void>
+  readText?(path: string): Promise<TextFile>
+  writeText?(path: string, text: string, expected?: { modified: number; size: number }): Promise<{ modified: number; size: number }>
 }
 
 interface PaneHandle {
@@ -261,7 +268,7 @@ const FilePane = forwardRef<
   const [typed, setTyped] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchor, setAnchor] = useState<string | null>(null)
-  const [dialog, setDialog] = useState<null | 'mkdir' | 'rename' | 'delete'>(null)
+  const [dialog, setDialog] = useState<null | 'mkdir' | 'rename' | 'delete' | 'chmod' | 'edit'>(null)
   const [dropping, setDropping] = useState(false)
   const { error, run } = useAction()
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -288,6 +295,9 @@ const FilePane = forwardRef<
     if (entry.type === 'dir') {
       setSelected(new Set())
       void load(entry.path)
+    } else if (entry.type === 'file' && ops.readText) {
+      setSelected(new Set([entry.path]))
+      setDialog('edit')
     }
   }
   const up = () => listing?.parent && void load(listing.parent).then(() => setSelected(new Set([listing.path])))
@@ -391,6 +401,28 @@ const FilePane = forwardRef<
           >
             <Trash2 size={15} />
           </button>
+          {ops.chmod && (
+            <button
+              className="icon-btn"
+              aria-label="Permissions"
+              title="Permissions"
+              disabled={chosen.length !== 1 || chosen[0]!.mode === undefined}
+              onClick={() => setDialog('chmod')}
+            >
+              <ShieldCheck size={15} />
+            </button>
+          )}
+          {ops.readText && (
+            <button
+              className="icon-btn"
+              aria-label="Edit"
+              title="Edit the file here (double-click)"
+              disabled={chosen.length !== 1 || chosen[0]!.type !== 'file'}
+              onClick={() => setDialog('edit')}
+            >
+              <FilePen size={15} />
+            </button>
+          )}
           <Button
             disabled={chosen.length === 0}
             onClick={() => onCopy(chosen)}
@@ -436,7 +468,7 @@ const FilePane = forwardRef<
             onDragStart={(e) => dragStart(e, entry)}
             onClick={(e) => click(e, entry)}
             onDoubleClick={() => open(entry)}
-            title={entry.name}
+            title={entry.mode === undefined ? entry.name : `${entry.name}  ${modeText(entry.mode, entry.type)}`}
           >
             {entry.type === 'dir' ? <Folder size={15} className="file-icon dir" /> : entry.type === 'link' ? <Link2 size={15} className="file-icon" /> : <File size={15} className="file-icon" />}
             <span className="file-name">{entry.name}</span>
@@ -475,6 +507,31 @@ const FilePane = forwardRef<
               await load(listing.path)
             })
           }
+        />
+      )}
+      {dialog === 'chmod' && listing && chosen[0] && ops.chmod && (
+        <PermissionsDialog
+          entry={chosen[0]}
+          error={error}
+          onCancel={() => setDialog(null)}
+          onDone={(mode) =>
+            run(async () => {
+              await ops.chmod!(chosen[0]!.path, mode)
+              setDialog(null)
+              await load(listing.path)
+            })
+          }
+        />
+      )}
+      {dialog === 'edit' && listing && chosen[0] && ops.readText && ops.writeText && (
+        <EditorDialog
+          entry={chosen[0]}
+          read={ops.readText}
+          write={ops.writeText}
+          onClose={(saved) => {
+            setDialog(null)
+            if (saved) void load(listing.path)
+          }}
         />
       )}
       {dialog === 'delete' && listing && (
@@ -542,6 +599,203 @@ function NameDialog({
           </Button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+const PERM_WHO = ['Owner', 'Group', 'Others'] as const
+const PERM_WHAT = [
+  ['Read', 4],
+  ['Write', 2],
+  ['Run', 1],
+] as const
+
+/** Like ls -l: rwxr-xr-x, with a leading d for folders. */
+export function modeText(mode: number, type?: FileEntry['type']): string {
+  let out = type === 'dir' ? 'd' : type === 'link' ? 'l' : '-'
+  for (let who = 2; who >= 0; who--) {
+    const bits = (mode >> (who * 3)) & 7
+    out += (bits & 4 ? 'r' : '-') + (bits & 2 ? 'w' : '-') + (bits & 1 ? 'x' : '-')
+  }
+  return out
+}
+
+function PermissionsDialog({
+  entry,
+  error,
+  onCancel,
+  onDone,
+}: {
+  entry: FileEntry
+  error: string | null
+  onCancel: () => void
+  onDone: (mode: number) => Promise<boolean>
+}) {
+  const [mode, setMode] = useState(entry.mode ?? 0o644)
+  const [typed, setTyped] = useState((entry.mode ?? 0o644).toString(8).padStart(3, '0'))
+  const set = (next: number) => {
+    setMode(next)
+    setTyped(next.toString(8).padStart(3, '0'))
+  }
+  const typedOk = /^[0-7]{3,4}$/.test(typed)
+  return (
+    <Modal title={`Permissions of ${entry.name}`} onClose={onCancel}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (typedOk) void onDone(mode)
+        }}
+      >
+        <div className="perm-grid" role="group" aria-label="Permissions">
+          <span />
+          {PERM_WHAT.map(([label]) => (
+            <strong key={label}>{entry.type === 'dir' && label === 'Run' ? 'Open' : label}</strong>
+          ))}
+          {PERM_WHO.map((who, i) => {
+            const shift = (2 - i) * 3
+            return [
+              <span key={who}>{who}</span>,
+              ...PERM_WHAT.map(([what, bit]) => (
+                <label key={who + what}>
+                  <input
+                    type="checkbox"
+                    aria-label={`${who} ${what.toLowerCase()}`}
+                    checked={(mode & (bit << shift)) !== 0}
+                    onChange={(e) => set(e.target.checked ? mode | (bit << shift) : mode & ~(bit << shift))}
+                  />
+                </label>
+              )),
+            ]
+          })}
+        </div>
+        <Field label="As a number (like chmod)">
+          <input
+            className="mono"
+            inputMode="numeric"
+            value={typed}
+            onChange={(e) => {
+              setTyped(e.target.value)
+              if (/^[0-7]{3,4}$/.test(e.target.value)) setMode(parseInt(e.target.value, 8))
+            }}
+          />
+        </Field>
+        <p className="muted">
+          <span className="file-mode">{modeText(mode, entry.type)}</span>
+        </p>
+        <ErrorText error={error ?? (typedOk ? null : 'Three or four digits from 0 to 7, such as 644 or 755')} />
+        <div className="modal-actions">
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={!typedOk || mode === entry.mode}>
+            Apply
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/**
+ * Edits a server text file in place. Saving checks the file has not changed
+ * on the server since it was opened; if it has, the choice is to overwrite or
+ * to reload (losing these edits).
+ */
+function EditorDialog({
+  entry,
+  read,
+  write,
+  onClose,
+}: {
+  entry: FileEntry
+  read: (path: string) => Promise<TextFile>
+  write: (path: string, text: string, expected?: { modified: number; size: number }) => Promise<{ modified: number; size: number }>
+  onClose: (saved: boolean) => void
+}) {
+  const [file, setFile] = useState<TextFile | null>(null)
+  const [text, setText] = useState('')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const { busy, error, run, setError } = useAction()
+  const dirty = !!file && text !== file.text
+
+  const reload = () =>
+    read(entry.path).then(
+      (f) => {
+        setFile(f)
+        setText(f.text)
+        setConflict(false)
+        setError(null)
+        setLoadError(null)
+      },
+      (e) => setLoadError(errorMessage(e)),
+    )
+  useEffect(() => void reload(), [entry.path])
+
+  const save = (overwrite = false) => {
+    if (!file || busy) return
+    void run(async () => {
+      try {
+        const after = await write(entry.path, text, overwrite ? undefined : { modified: file.modified, size: file.size })
+        setFile({ text, ...after })
+        setConflict(false)
+        setSaved(true)
+      } catch (e) {
+        if (/changed on the server/i.test(errorMessage(e))) setConflict(true)
+        throw e
+      }
+    })
+  }
+  const close = () => (dirty ? setConfirmClose(true) : onClose(saved))
+
+  return (
+    <Modal title={`Edit ${entry.name}`} wide onClose={close}>
+      <p className="muted mono">{entry.path}</p>
+      <ErrorText error={loadError} />
+      {file && (
+        <textarea
+          className="editor"
+          aria-label="File text"
+          spellCheck={false}
+          autoFocus
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value)
+            setConfirmClose(false)
+          }}
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+              e.preventDefault()
+              save()
+            }
+          }}
+        />
+      )}
+      <ErrorText error={error} />
+      {confirmClose ? (
+        <div className="modal-actions">
+          <span className="muted">Close without saving your changes?</span>
+          <Button onClick={() => setConfirmClose(false)}>Keep editing</Button>
+          <Button variant="danger" onClick={() => onClose(saved)}>
+            Discard changes
+          </Button>
+        </div>
+      ) : conflict ? (
+        <div className="modal-actions">
+          <Button onClick={() => void reload()}>Reload (lose my changes)</Button>
+          <Button variant="danger" onClick={() => save(true)}>
+            Overwrite
+          </Button>
+        </div>
+      ) : (
+        <div className="modal-actions">
+          <span className="muted">{dirty ? 'Unsaved changes' : saved ? 'Saved' : ''}</span>
+          <Button onClick={close}>Close</Button>
+          <Button variant="primary" disabled={!dirty || busy} onClick={() => save()} title="Save (Ctrl+S)">
+            Save
+          </Button>
+        </div>
+      )}
     </Modal>
   )
 }

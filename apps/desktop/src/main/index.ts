@@ -277,6 +277,11 @@ if (!app.requestSingleInstanceLock()) {
   handle('sftp:mkdir', (id: string, path: string) => files.mkdir(id, text(path, 'Path')))
   handle('sftp:rename', (id: string, from: string, to: string) => files.rename(id, text(from, 'Path'), text(to, 'Path')))
   handle('sftp:delete', (id: string, path: string) => files.delete(id, text(path, 'Path')))
+  handle('sftp:chmod', (id: string, path: string, mode: number) => files.chmod(id, text(path, 'Path'), Number(mode)))
+  handle('sftp:readText', (id: string, path: string) => files.readText(id, text(path, 'Path')))
+  handle('sftp:writeText', (id: string, path: string, body: string, expected?: { modified: number; size: number }) =>
+    files.writeText(id, text(path, 'Path'), String(body), expected ? { modified: Number(expected.modified), size: Number(expected.size) } : undefined),
+  )
   listen('sftp:close', (id: string) => files.close(String(id)))
   handle('local:list', (path: string | null) => files.localList(typeof path === 'string' ? path : null))
   handle('local:mkdir', (path: string) => files.localMkdir(text(path, 'Path')))
