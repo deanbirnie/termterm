@@ -203,9 +203,10 @@ certificate is affordable.
       30 s after the terminal resized (JSch waited for window-change replies on
       the plugin thread); dialogs did not scroll when the keyboard took half
       the screen; the Files toolbar made the page wider than a narrow phone.
-- [ ] Follow-up: once, listing right after SFTP opened failed with "Pipe
-      closed" on the emulator and did not recur. Debug builds now log JSch's
-      messages, so the next occurrence says why.
+- [x] SFTP on Android sometimes failed with "Pipe closed" (seen twice on the
+      emulator). JSch reads replies through a pipe tied to the last thread that
+      read it, and the plugin ran each call on a new thread that then ended;
+      a FileSession now runs all its calls on one thread of its own.
 
 ### Batch 10 — Connecting in more places (next)
 
