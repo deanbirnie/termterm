@@ -115,6 +115,16 @@ jobs:
       - run: npm ci
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      # A real OpenSSH server for the checks that ssh2's own test server
+      # cannot do: certificates, agent forwarding from the server's side.
+      - name: Install OpenSSH
+        run: |
+          if [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q --no-install-recommends openssh-server
+          fi
+      - name: OpenSSH check (certificates, agent forwarding, proxies)
+        run: npm run check:openssh -w @termterm/desktop
       - run: xvfb-run -a npm run e2e
       # Only worth keeping when something went wrong.
       - name: Upload e2e screenshots
