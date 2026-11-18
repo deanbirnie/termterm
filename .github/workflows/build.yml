@@ -87,6 +87,8 @@ jobs:
         run: shellcheck .github/scripts/*.sh apps/mobile/ssh-test/run.sh apps/server/test/compat/make-fixtures.sh
       - name: Release version rules
         run: .github/scripts/test-release-version.sh
+      - name: APK check (with stand-in Android tools)
+        run: .github/scripts/test-check-apk.sh
       - name: Release file checks
         run: node --test .github/scripts/check-release-files.test.mjs
 
