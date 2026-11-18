@@ -188,6 +188,11 @@ already been agreed as one.
 - Shared: the Android connect logic (jump hosts, prompts) is now one
   `SshConnector` used by terminals, forwards and files
 
+Releases, agreed 2026-11-18: batches 9, 10 and 11 go out together as one
+release (the PR of batch 11 carries the label); batch 13 (shared vaults) is a
+release of its own; Windows code signing waits on the back burner until a
+certificate is affordable.
+
 ### Batch 9 — Files, part 2 (next)
 
 - [ ] File permissions, and editing a remote file in place (desktop and Android)
@@ -203,17 +208,16 @@ already been agreed as one.
 - [ ] FIDO2 / security-key keys
 - [ ] Scans of the Android libraries and the server image
 
-### Batch 12 — Windows code signing
-
-- [ ] Sign the Windows installer (needs a certificate bought in the owner's
-      name; can move earlier once there is one)
-
-### Batch 13 — Shared vaults for teams
+### Batch 13 — Shared vaults for teams (its own release)
 
 - [ ] Per-vault keys wrapped to each member's public key (likely two PRs)
 
 ### Back burner (only when the owner asks)
 
+- [ ] Windows code signing: sign the installer so SmartScreen stops warning.
+      Needs a certificate in the owner's name. Cheaper routes to look at
+      first: Azure Trusted Signing (a monthly subscription, no hardware
+      token) and SignPath Foundation's free signing for open-source projects
 - [ ] macOS build, with Touch ID unlock and self-update (signing and notarisation)
 - [ ] iOS app
 - [ ] Mosh, Telnet, serial
