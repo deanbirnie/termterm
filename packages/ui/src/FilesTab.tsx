@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowUp, ArrowUpFromLine, File, FilePen, Folder, FolderPlus, Link2, Pencil, RefreshCw, RotateCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowDownToLine, ArrowUp, ArrowUpFromLine, File, FilePen, Folder, FolderPlus, Link2, Pencil, RefreshCw, RotateCw, ShieldCheck, Trash2, X } from 'lucide-react'
 import {
   forwardRef,
   useEffect,
@@ -64,13 +64,28 @@ export function FilesTab({ tab, active, onClose }: { tab: SessionTab; active: bo
     () =>
       api.onTransfer((t) => {
         if (t.sessionId !== tab.id) return
-        setTransfers((list) => [t, ...list.filter((x) => x.id !== t.id)].slice(0, 6))
+        setTransfers((list) => [t, ...list.filter((x) => x.id !== t.id)].slice(0, 20))
         if (t.state === 'done') {
           if (t.direction === 'upload') setRefreshRemote((n) => n + 1)
           else setRefreshLocal((n) => n + 1)
         }
       }),
     [tab.id],
+  )
+
+  const dismiss = (ids: string[]) => setTransfers((list) => list.filter((t) => !ids.includes(t.id)))
+  const transferList = <TransferList transfers={transfers} onDismiss={dismiss} />
+  // A tab of its own: say so, and offer the way out.
+  const header = (
+    <header className="files-head">
+      <span>
+        <strong>Files on {tab.title}</strong>
+        <span className="muted"> · in its own tab; your other tabs stay open</span>
+      </span>
+      <Button onClick={onClose} title="Close this tab and go back to where you opened it">
+        <X size={14} /> Close files
+      </Button>
+    </header>
   )
 
   const copy = (direction: 'upload' | 'download', paths: string[], toFolder?: string) => {
@@ -145,15 +160,17 @@ export function FilesTab({ tab, active, onClose }: { tab: SessionTab; active: bo
   if (!localFiles) {
     return (
       <div className="files-tab">
+        {header}
         <div className="files-panes single">{remotePane}</div>
         <ErrorText error={pickError} />
-        <TransferList transfers={transfers} />
+        {transferList}
       </div>
     )
   }
 
   return (
     <div className="files-tab">
+      {header}
       <div className="files-panes">
         <FilePane
           ref={localRef}
@@ -176,15 +193,23 @@ export function FilesTab({ tab, active, onClose }: { tab: SessionTab; active: bo
         />
         {remotePane}
       </div>
-      <TransferList transfers={transfers} />
+      {transferList}
     </div>
   )
 }
 
-function TransferList({ transfers }: { transfers: TransferState[] }) {
+function TransferList({ transfers, onDismiss }: { transfers: TransferState[]; onDismiss: (ids: string[]) => void }) {
   if (transfers.length === 0) return null
+  const finished = transfers.filter((t) => t.state !== 'running').map((t) => t.id)
   return (
     <ul className="transfers" aria-label="Transfers">
+      {finished.length > 1 && (
+        <li className="transfers-head">
+          <Button variant="ghost" onClick={() => onDismiss(finished)}>
+            Clear finished
+          </Button>
+        </li>
+      )}
       {transfers.map((t) => (
         <li key={t.id} className={t.state}>
           {t.direction === 'upload' ? <ArrowUpFromLine size={14} /> : <ArrowDownToLine size={14} />}
@@ -198,6 +223,11 @@ function TransferList({ transfers }: { transfers: TransferState[] }) {
                 {t.state === 'done' ? `Done · ${size(t.total)}` : `${size(t.done)} of ${size(t.total)}`}
               </span>
             </>
+          )}
+          {t.state !== 'running' && (
+            <button className="icon-btn" aria-label={`Dismiss ${t.name}`} title="Dismiss" onClick={() => onDismiss([t.id])}>
+              <X size={14} />
+            </button>
           )}
         </li>
       ))}

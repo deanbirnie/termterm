@@ -58,6 +58,8 @@ interface Tab {
   zoomed?: string
   /** What is typed in any of its terminal panes goes to all of them. */
   broadcast?: boolean
+  /** The tab it was opened from (a terminal, or the vault), shown again when it closes. */
+  returnTo?: string
 }
 
 /** Panes are not split smaller than this, in pixels. */
@@ -78,6 +80,9 @@ export function Workspace({ locked }: { locked: boolean }) {
   const [sessions, setSessions] = useState<Record<string, SessionTab>>({})
   const [tabs, setTabs] = useState<Tab[]>([])
   const [active, setActive] = useState('vault')
+  // Read when a tab opens, to go back to it when that tab closes.
+  const activeRef = useRef(active)
+  activeRef.current = active
   const [prompts, setPrompts] = useState<SshPrompt[]>([])
   const [drag, setDrag] = useState<Drag | null>(null)
   const [drop, setDrop] = useState<{ sessionId: string; side: Side } | null>(null)
@@ -143,7 +148,7 @@ export function Workspace({ locked }: { locked: boolean }) {
 
   const connect = useCallback((target: ConnectTarget, title: string, kind?: 'files') => {
     const session = newSession(target, title, kind)
-    const tab = { id: crypto.randomUUID(), layout: pane(session.id), focus: session.id }
+    const tab: Tab = { id: crypto.randomUUID(), layout: pane(session.id), focus: session.id, returnTo: activeRef.current }
     setTabs((t) => [...t, tab])
     setActive(tab.id)
   }, [])
@@ -155,7 +160,10 @@ export function Workspace({ locked }: { locked: boolean }) {
       const next = change(all[index]!)
       if (next) return all.map((t, i) => (i === index ? next : t))
       const rest = all.filter((_, i) => i !== index)
-      setActive((a) => (a === tabId ? (rest[Math.min(index, rest.length - 1)]?.id ?? 'vault') : a))
+      // Back to where it was opened from, if that is still open; else a neighbour.
+      const back = all[index]!.returnTo
+      const returnTo = back === 'vault' || rest.some((t) => t.id === back) ? back : undefined
+      setActive((a) => (a === tabId ? (returnTo ?? rest[Math.min(index, rest.length - 1)]?.id ?? 'vault') : a))
       return rest
     })
 
