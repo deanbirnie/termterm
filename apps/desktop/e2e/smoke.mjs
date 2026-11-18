@@ -1212,6 +1212,87 @@ try {
     step('another vault imported the file: hosts, group and identity arrived and logged in')
   }
 
+  // ---- against a real OpenSSH: a certificate, a proxy, agent forwarding ------------
+  // sshd trusts only a test CA; a SOCKS5 proxy beside it wants a login
+  // (both from the Android SSH test's helper).
+  {
+    const opensshDir = join(tmp, 'openssh')
+    mkdirSync(opensshDir, { recursive: true })
+    const { spawn } = await import('node:child_process')
+    const helper = spawn(process.execPath, [join(here, '../../mobile/ssh-test/openssh.cjs'), opensshDir], { stdio: ['ignore', 'ignore', 'inherit'] })
+    try {
+      for (let i = 0; i < 200 && !existsSync(join(opensshDir, 'openssh.properties')); i++) await new Promise((r) => setTimeout(r, 100))
+      const props = Object.fromEntries(readFileSync(join(opensshDir, 'openssh.properties'), 'utf8').trim().split('\n').map((l) => l.split('=')))
+      const readKey = (f) => readFileSync(join(opensshDir, f), 'utf8').trim()
+
+      const f = await launch('device-f')
+      const page = f.page
+      const navF = (name) => page.getByRole('navigation').getByRole('button', { name, exact: true })
+      await page.getByLabel('Master password', { exact: true }).fill(MASTER)
+      await page.getByLabel('Confirm master password').fill(MASTER)
+      await page.getByRole('button', { name: 'Create vault' }).click()
+      await page.getByText('No hosts yet').waitFor()
+
+      // A key and its certificate.
+      await navF('Keychain').click()
+      await page.getByRole('button', { name: 'Import key' }).click()
+      await page.getByLabel('Label').fill('CA-signed')
+      await page.getByLabel('Private key').fill(readKey('ed'))
+      await page.getByRole('button', { name: 'Import', exact: true }).click()
+      const certSection = page.getByRole('region', { name: 'Certificate' })
+      await certSection.getByLabel('Certificate').fill(readKey('rsa-cert.pub'))
+      await certSection.getByRole('button', { name: 'Add certificate' }).click()
+      await certSection.getByText('This certificate is for a different key.').waitFor()
+      await certSection.getByLabel('Certificate').fill(readKey('ed-cert.pub'))
+      await certSection.getByRole('button', { name: 'Add certificate' }).click()
+      await certSection.getByText('ed-cert', { exact: true }).waitFor()
+      await certSection.getByText(props.user, { exact: true }).waitFor()
+      await shot(page, '23-certificate')
+      step('a certificate is added to its key (and refused for another), showing its key ID and usernames')
+
+      // A host behind a SOCKS5 proxy, with agent forwarding; the proxy password is wrong at first.
+      await navF('Hosts').click()
+      await page.getByRole('button', { name: 'New host' }).click()
+      await page.getByLabel('Address', { exact: true }).fill('127.0.0.1')
+      await page.getByLabel('Label').fill('CA box')
+      await page.getByLabel('Username').fill(props.user)
+      await page.getByLabel('Port', { exact: true }).fill(props.port)
+      await page.getByLabel('Key', { exact: true }).selectOption({ label: 'CA-signed' })
+      await page.getByLabel('Proxy', { exact: true }).selectOption('socks5')
+      await page.getByLabel('Proxy address').fill('127.0.0.1')
+      await page.getByLabel('Proxy port').fill(props.socksPort)
+      await page.getByLabel('Proxy username').fill('proxy-user')
+      await page.getByLabel('Proxy password').fill('not-it')
+      await page.getByLabel('Agent forwarding').check()
+      await shot(page, '24-proxy-agent')
+      await page.getByRole('button', { name: 'Save host' }).click()
+      await page.getByRole('button', { name: 'Save changes' }).waitFor()
+      await page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+      await page.getByText(/refused the username or password/).waitFor()
+      step('a wrong proxy password is reported as such')
+
+      await page.getByRole('button', { name: 'Vault', exact: true }).click()
+      await page.locator('.card', { hasText: 'CA box' }).click()
+      await page.getByLabel('Proxy password').fill('proxy-pass')
+      await page.getByRole('button', { name: 'Save changes' }).click()
+      await page.getByRole('button', { name: 'Connect', exact: true }).last().click()
+      await page.getByRole('button', { name: 'Trust and connect' }).click()
+      const term = page.locator('.pane:not([hidden]) .xterm-rows')
+      await page.waitForTimeout(800)
+      await page.keyboard.type('echo in-as-$USER; ssh-add -L | grep -c cert-v01; echo agent-$((6*7))')
+      await page.keyboard.press('Enter')
+      await term.getByText(`in-as-${props.user}`, { exact: true }).waitFor()
+      await term.getByText('agent-42', { exact: true }).waitFor()
+      const rows = await term.innerText()
+      assert.match(rows, /^1$/m, `the forwarded agent should list the certificate once:\n${rows}`)
+      await shot(page, '25-openssh-terminal')
+      step('logged in to OpenSSH with the certificate through the SOCKS5 proxy; the server sees the forwarded agent')
+      await f.app.close()
+    } finally {
+      helper.kill()
+    }
+  }
+
   // ---- a changed host key is refused --------------------------------------------
   sshServer.close()
   const impostor = new Server({ hostKeys: [hostKey()] }, (c) => {

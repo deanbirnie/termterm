@@ -1,6 +1,6 @@
 import { Check, Copy, KeyRound, Plus, Upload, UserRound, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import type { IdentityView, KeyView, VaultSnapshot } from '@termterm/app'
+import { certificateProblem, parseCertificate, type IdentityView, type KeyView, type VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { useAppInfo } from '../Update'
 import { Button, Empty, ErrorText, Field, PasswordInput, useAction } from '../ui'
@@ -241,6 +241,7 @@ function KeyPanel({ item, usedBy, onClose }: { item: KeyView; usedBy: string[]; 
           <dt>Used by</dt>
           <dd>{usedBy.length ? usedBy.join(', ') : 'Nothing yet'}</dd>
         </dl>
+        <CertificateSection item={item} />
         <ErrorText error={error} />
         <div className="panel-actions">
           <Button type="submit" disabled={busy || !label.trim() || label === item.label}>
@@ -258,6 +259,76 @@ function KeyPanel({ item, usedBy, onClose }: { item: KeyView; usedBy: string[]; 
         </div>
       </form>
     </PanelShell>
+  )
+}
+
+/** The key's OpenSSH certificate: what it allows and until when, or a place to add one. */
+function CertificateSection({ item }: { item: KeyView }) {
+  const [text, setText] = useState('')
+  const { busy, error, run } = useAction()
+  if (item.certificate) {
+    let info: ReturnType<typeof parseCertificate> | null = null
+    try {
+      info = parseCertificate(item.certificate)
+    } catch {
+      info = null
+    }
+    const problem = certificateProblem(item.certificate, item.publicKey)
+    const when = (ms: number | null, none: string) => (ms === null ? none : new Date(ms).toLocaleString())
+    return (
+      <section aria-label="Certificate">
+        <h3 className="group-title">Certificate</h3>
+        <p className="field-hint">Logins with this key offer the certificate first, then the key on its own.</p>
+        {info && (
+          <dl className="facts">
+            <dt>Key ID</dt>
+            <dd className="mono">{info.keyId || '(none)'}</dd>
+            <dt>Usernames</dt>
+            <dd>{info.principals.length ? info.principals.join(', ') : 'Any'}</dd>
+            <dt>Valid</dt>
+            <dd>
+              {info.validAfter === null && info.validBefore === null
+                ? 'Always'
+                : `${when(info.validAfter, 'from the start')} to ${when(info.validBefore, 'forever')}`}
+            </dd>
+          </dl>
+        )}
+        {problem && <p className="error" role="alert">{problem}</p>}
+        <ErrorText error={error} />
+        <Button variant="ghost" disabled={busy} onClick={() => void run(() => api.setKeyCertificate(item.id, null))}>
+          Remove certificate
+        </Button>
+      </section>
+    )
+  }
+  return (
+    <section aria-label="Certificate">
+      <h3 className="group-title">Certificate</h3>
+      <Field
+        label="Certificate"
+        hint="If your servers trust a certificate authority, paste the certificate it signed for this key (the line from the -cert.pub file)."
+      >
+        <textarea
+          className="mono"
+          rows={4}
+          placeholder="ssh-ed25519-cert-v01@openssh.com AAAA…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </Field>
+      <ErrorText error={error} />
+      <Button
+        disabled={busy || !text.trim()}
+        onClick={() =>
+          void run(async () => {
+            await api.setKeyCertificate(item.id, text)
+            setText('')
+          })
+        }
+      >
+        Add certificate
+      </Button>
+    </section>
   )
 }
 
