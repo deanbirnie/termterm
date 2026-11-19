@@ -46,7 +46,7 @@ describe('further vaults', () => {
 
     // The second device lists the account's vaults and opens this one with the account's key.
     const [listed] = await a.api.vaults()
-    expect(listed).toMatchObject({ id, role: 'owner', head: 1 })
+    expect(listed).toMatchObject({ id, role: 'admin', head: 1 })
     expect(JSON.parse(a.account.openText(listed!.meta, `vault-meta:${id}`))).toEqual({ name: 'Work' })
     const key = Buffer.from(a.account.openText(listed!.wrappedKey, `vault-key:${id}`), 'base64')
     const copy = Vault.createWithKey(new Uint8Array(key))
