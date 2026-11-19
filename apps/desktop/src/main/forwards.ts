@@ -43,10 +43,12 @@ export class ForwardManager {
 
   async start(id: string): Promise<void> {
     this.stop(id, false)
-    const forward = this.vault.forward(id)
+    // Forwards are started from the vault on screen (or, at unlock, the one shown last).
+    const scope = this.vault.scope()
+    const forward = scope.forward(id)
     if (!forward) throw new Error('Port forward not found')
     const f = forward.data
-    const hops = planConnection(this.vault, { hostId: f.hostId })
+    const hops = planConnection(this.vault, { hostId: f.hostId, vaultId: scope.vaultId })
     const run: Running = { clients: [], sockets: new Set(), prompts: new Set(), stopped: false }
     this.running.set(id, run)
     this.set(id, { state: 'starting' })
@@ -78,7 +80,7 @@ export class ForwardManager {
     let client: Client
     try {
       client = await openConnection(
-        this.vault,
+        scope,
         hops,
         (host, body) => (run.stopped ? Promise.resolve(null) : this.prompts.ask(`forward:${id}`, host, body, run.prompts)),
         (c) => run.clients.push(c),

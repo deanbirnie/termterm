@@ -351,9 +351,13 @@ export interface AccountInput {
   password: string
 }
 
+/**
+ * What to connect to. `vaultId`: the vault it was opened from (whose hosts,
+ * keys and known hosts it uses); unset means the vault on screen.
+ */
 export type ConnectTarget =
-  | { hostId: string }
-  | { address: string; port: number; username: string }
+  | { hostId: string; vaultId?: string }
+  | { address: string; port: number; username: string; vaultId?: string }
   /** A shell on this computer: a shell id from localShells(), or null for the default. */
   | { local: string | null }
 

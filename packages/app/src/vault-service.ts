@@ -235,7 +235,7 @@ export class VaultService {
   async create(password: string): Promise<void> {
     await this.assertNoVault()
     this.checkNewPassword(password)
-    this.adopt(await Vault.create(password))
+    await this.adopt(await Vault.create(password))
   }
 
   async signIn(input: AccountInput): Promise<void> {
@@ -248,7 +248,7 @@ export class VaultService {
     const { token, wrappedVaultKey } = await api.login(username, authKey)
     const vault = await Vault.fromAccount(kdf, wrappedVaultKey, input.password)
     vault.setSync(serverUrl, username, token)
-    this.adopt(vault)
+    await this.adopt(vault)
     void this.labelDevice()
     await this.syncNow()
   }
@@ -268,7 +268,7 @@ export class VaultService {
       }
       throw e
     }
-    if (!this.vault) this.adopt(vault)
+    if (!this.vault) await this.adopt(vault)
   }
 
   /**
@@ -283,7 +283,7 @@ export class VaultService {
     if (!key || this.vault) return
     try {
       const vault = Vault.unlockWithKey(await this.readFile(), key)
-      if (!this.vault) this.adopt(vault)
+      if (!this.vault) await this.adopt(vault)
     } catch {
       await this.deviceKey.clear()
     } finally {
@@ -309,7 +309,7 @@ export class VaultService {
     if (!key) throw new Error('Fingerprint unlock is not set up. Use your master password.')
     try {
       const vault = Vault.unlockWithKey(await this.readFile(), key)
-      if (!this.vault) this.adopt(vault)
+      if (!this.vault) await this.adopt(vault)
     } catch {
       // The stored key is for a different vault key (the vault was re-keyed).
       await this.deviceKey.clear()
@@ -415,12 +415,20 @@ export class VaultService {
     this.save()
   }
 
-  private adopt(vault: Vault): void {
+  private async adopt(vault: Vault): Promise<void> {
     this.vault = vault
     this.activeId = PERSONAL_ID
     vault.onChange(() => this.changed(PERSONAL_ID))
     this.save()
-    void this.openOthers(vault).catch((e: unknown) => console.error('Could not open the other vaults:', e))
+    // The other vaults open before the app shows as unlocked, so it opens on
+    // the vault shown last (and starts that vault's forwards). A vault that
+    // cannot be read must not keep the Personal one shut.
+    try {
+      await this.openOthers(vault)
+    } catch (e) {
+      console.error('Could not open the other vaults:', e)
+    }
+    if (this.vault !== vault) return // locked meanwhile
     // If the credential store has gone away, unlocking still works with the password.
     void this.applyRememberDevice().catch(() => undefined)
     this.interval = setInterval(() => this.scheduleSync(0), SYNC_INTERVAL_MS)
