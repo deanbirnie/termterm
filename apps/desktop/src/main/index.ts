@@ -221,6 +221,25 @@ if (!app.requestSingleInstanceLock()) {
   handle('server:vaults', (id: string) => vault.serverVaults(String(id)))
   handle('server:addVault', (serverId: string, vaultId: string) => vault.addServerVault(String(serverId), String(vaultId)))
   handle('vault:connect', (vaultId: string, serverId: string) => vault.connectVault(String(vaultId), String(serverId)))
+  handle('members:list', (vaultId: string) => vault.vaultMembers(String(vaultId)))
+  handle('members:lookup', (vaultId: string, username: string) => vault.lookupMember(String(vaultId), String(username)))
+  handle('members:add', (vaultId: string, input: { username: string; role: string; fingerprint: string }) =>
+    vault.addMember(String(vaultId), {
+      username: String(input?.username),
+      role: input?.role === 'admin' ? 'admin' : 'member',
+      fingerprint: String(input?.fingerprint),
+    }),
+  )
+  handle('members:role', (vaultId: string, username: string, role: string) =>
+    vault.setMemberRole(String(vaultId), String(username), role === 'admin' ? 'admin' : 'member'),
+  )
+  handle('members:remove', (vaultId: string, username: string) => vault.removeMember(String(vaultId), String(username)))
+  handle('memberKey:generate', (type: 'ed25519' | 'rsa') => vault.generateMemberKey(type))
+  handle('memberKey:import', (input) => vault.importMemberKey(input))
+  handle('memberKey:certificate', (certificate: string | null) =>
+    vault.setMemberKeyCertificate(certificate === null ? null : String(certificate)),
+  )
+  handle('memberKey:remove', () => vault.removeMemberKey())
   handle('vault:disconnect', (vaultId: string, options?: { fromServer?: boolean }) =>
     vault.disconnectVault(String(vaultId), { fromServer: options?.fromServer === true }),
   )

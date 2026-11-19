@@ -83,6 +83,11 @@ export interface HostData {
    * used instead of this host's own.
    */
   identityId?: string
+  /**
+   * In a shared vault: each member logs in with the personal login an admin
+   * assigned to them (and their own key, if they set one), not a shared one.
+   */
+  personalLogin?: boolean
   /** The group the host is listed under. Hosts with the same group name form a group. */
   group?: string
   /** Seconds between keep-alive messages; 0 turns them off. Unset: the default (20). */
@@ -126,6 +131,38 @@ export interface IdentityData {
   password?: string
   /** id of a `key` item */
   keyId?: string
+  /**
+   * In a shared vault: the member (server username) this personal login is
+   * for. Its password is then not in `password` but in `sealed`, which only
+   * that member and the vault's admins can open.
+   */
+  assignee?: string
+  sealed?: SealedLogin
+}
+
+/**
+ * A personal login's secrets: `box` is sealed with a key of its own, and
+ * `keys` holds that key sealed to each reader's account public key (the
+ * member it is for, and every admin), by username.
+ */
+export interface SealedLogin {
+  box: string
+  keys: Record<string, string>
+}
+
+/**
+ * A member's own key for a shared vault (item id: their member tag + "-key").
+ * Its public half is for the admins to install on servers; its private half
+ * is sealed with the member's account key, so only their devices can use it.
+ */
+export interface MemberKeyData {
+  username: string
+  label: string
+  keyType: string
+  publicKey: string
+  certificate?: string
+  /** JSON {privateKey, passphrase?}, sealed with the account key */
+  sealedPrivate: string
 }
 
 export interface KeyData {

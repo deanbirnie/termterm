@@ -22,6 +22,24 @@ import {
   type ProxyConfig,
   type SnippetData,
   type VaultFile,
+  TOMBSTONE,
+  fingerprint,
+  fromUtf8,
+  generateAccountKeyPair,
+  generateVaultKey,
+  isPublicBox,
+  memberTag,
+  open,
+  openWith,
+  publicKeyOf,
+  seal,
+  sealTo,
+  utf8,
+  type AccountKeyPair,
+  type MemberKeyData,
+  type RemoteMember,
+  type RemoteVault,
+  type SealedLogin,
 } from '@termterm/core'
 import type {
   AccountInput,
@@ -32,6 +50,7 @@ import type {
   IdentityInput,
   ImportResult,
   KeyImportInput,
+  MemberView,
   ProxyInput,
   RemoteVaultView,
   ServerView,
@@ -145,11 +164,26 @@ const vaultFile = (id: string) => `vault-${id}`
 interface VaultIndex {
   personalName: string
   /** `serverId`: the server connection it syncs through (`PERSONAL_ID` for the Personal vault's account). */
-  vaults: Array<{ id: string; name: string; key: string; serverId?: string }>
+  vaults: Array<VaultEntry>
   /** The vault shown last; the Personal vault when unset. */
   active?: string
   /** Accounts on further sync servers. */
   servers?: ServerEntry[]
+}
+
+interface VaultEntry {
+  id: string
+  name: string
+  key: string
+  serverId?: string
+  /** On its server: an admin (changes it) or a member (connects only). */
+  role?: 'admin' | 'member'
+  /** Which vault key it has (see `RemoteVault.epoch`). */
+  epoch?: number
+  /** How many accounts share it. */
+  members?: number
+  /** Removed from it, or deleted on the server: it stopped syncing. */
+  lost?: boolean
 }
 
 /**
@@ -177,6 +211,12 @@ interface Account {
 const vaultKeyContext = (id: string) => `vault-key:${id}`
 const vaultMetaContext = (id: string) => `vault-meta:${id}`
 const OLD_SERVER = 'This sync server must be updated before it can hold more than one vault.'
+const OLD_SERVER_SHARED = 'This sync server must be updated before vaults on it can be shared.'
+const READ_ONLY = 'You are a member of this shared vault: only its admins can change it.'
+const PRIVATE_KEY_CONTEXT = 'account-private-key'
+const loginContext = (id: string) => `termterm:login:${id}`
+const loginKeyContext = (id: string) => `termterm:login-key:${id}`
+const memberKeyContext = (vaultId: string) => `member-key:${vaultId}`
 
 /** What a connection reads and writes in the vault it was made from. */
 export interface VaultScope {
@@ -216,6 +256,10 @@ export class VaultService {
   private changedVaults = new Set<string>()
   /** Further servers' sync errors and sign-outs, by server id (the Personal account's are in `syncState`). */
   private serverState = new Map<string, { error?: string; needsSignIn: boolean }>()
+  /** Each server account's key pair, once fetched (or made) this session. */
+  private keyPairs = new Map<string, AccountKeyPair>()
+  /** Shared vaults' members, from the last time they were fetched (for sealing personal logins). */
+  private memberCache = new Map<string, RemoteMember[]>()
 
   /** Whether a vault file exists on this device; known once `ready` resolves. */
   private exists = false
@@ -394,6 +438,9 @@ export class VaultService {
     this.activeId = PERSONAL_ID
     this.syncState = { state: 'idle', needsSignIn: false }
     this.serverState.clear()
+    for (const pair of this.keyPairs.values()) pair.privateKey.fill(0)
+    this.keyPairs.clear()
+    this.memberCache.clear()
     this.onPhase('locked')
   }
 
@@ -675,10 +722,15 @@ export class VaultService {
       if (!found) throw new Error('That vault is no longer on this device')
       return found
     }
+    const sameHost = (k: Item<KnownHostData>, host: string, port: number) => k.data.host === host && k.data.port === port
     return {
       vaultId: id,
-      host: (hostId) => this.hostIn(vault(), hostId),
-      key: (keyId) => vault().get<KeyData>(keyId),
+      host: (hostId) => this.hostIn(id, vault(), hostId),
+      key: (keyId) => {
+        const item = vault().get<KeyData | MemberKeyData>(keyId)
+        if (item?.type === 'memberKey') return this.openMemberKey(id, item as Item<MemberKeyData>)
+        return item as Item<KeyData> | undefined
+      },
       keys: () => vault().list<KeyData>('key').map((k) => k.data),
       forward: (forwardId) => {
         const item = vault().get<ForwardData>(forwardId)
@@ -687,15 +739,55 @@ export class VaultService {
       knownHostsFor: (host, port) =>
         vault()
           .list<KnownHostData>('knownHost')
-          .filter((k) => k.data.host === host && k.data.port === port),
+          .filter((k) => sameHost(k, host, port)),
       trustHostKey: (entry, replace) => {
         const v = vault()
+        // A member of a shared vault keeps the host keys they trust as their
+        // own items (which the server lets them write); the admins' stay.
+        const tag = this.readOnly(id) ? this.memberPrefix(id) : null
         if (replace) {
           for (const old of v.list<KnownHostData>('knownHost')) {
-            if (old.data.host === entry.host && old.data.port === entry.port) v.delete(old.id)
+            if (sameHost(old, entry.host, entry.port) && (!tag || old.id.startsWith(tag))) v.delete(old.id)
           }
         }
-        v.put('knownHost', entry)
+        // Item ids are at most 64 characters: the tag (35) and 24 random hex digits.
+        v.put('knownHost', entry, tag ? `${tag}${randomId().replace(/-/g, '').slice(0, 24)}` : undefined)
+      },
+    }
+  }
+
+  /** A host as connected to, from a given vault: its identity's (or the member's personal) login in place of its own. */
+  private hostIn(vaultId: string, vault: Vault, id: string): Item<HostData> | undefined {
+    const host = vault.get<HostData>(id)
+    if (host?.type !== 'host') return host
+    if (host.data.personalLogin) return this.withPersonalLogin(vaultId, vault, host)
+    if (!host.data.identityId) return host
+    const identity = vault.get<IdentityData>(host.data.identityId)
+    if (identity?.type !== 'identity') return host
+    const { password: _p, keyId: _k, ...own } = host.data
+    const { username, password, keyId } = identity.data
+    return {
+      ...host,
+      data: { ...own, username: username || own.username, ...(password ? { password } : {}), ...(keyId ? { keyId } : {}) },
+    }
+  }
+
+  /** The personal login assigned to this device's account, with its password and the member's own key. */
+  private withPersonalLogin(vaultId: string, vault: Vault, host: Item<HostData>): Item<HostData> {
+    const me = this.memberName(vaultId)
+    const { password: _p, keyId: _k, identityId: _i, ...own } = host.data
+    if (!me) throw new Error('This host uses personal logins, which need a shared vault')
+    const login = vault.list<IdentityData>('identity').find((i) => i.data.assignee === me)
+    if (!login) throw new Error(`No personal login is assigned to ${me} in this vault. Ask one of its admins.`)
+    const password = this.openLogin(vaultId, login)?.password
+    const keyId = `${this.memberPrefix(vaultId)}key`
+    return {
+      ...host,
+      data: {
+        ...own,
+        username: login.data.username,
+        ...(password ? { password } : {}),
+        ...(vault.get(keyId)?.type === 'memberKey' ? { keyId } : {}),
       },
     }
   }
@@ -710,10 +802,20 @@ export class VaultService {
         { id: PERSONAL_ID, name: this.index.personalName, personal: true, ...this.syncView(PERSONAL_ID, this.p) },
         ...this.index.vaults.map((x) => {
           const vault = this.others.get(x.id)
-          return { id: x.id, name: x.name, personal: false, ...(vault ? this.syncView(x.serverId, vault) : {}) }
+          return {
+            id: x.id,
+            name: x.name,
+            personal: false,
+            ...(vault ? this.syncView(x.serverId, vault) : {}),
+            ...(x.serverId && x.role ? { role: x.role } : {}),
+            ...(x.serverId && x.members ? { members: x.members } : {}),
+            ...(x.lost ? { lost: true } : {}),
+          }
         }),
       ],
       servers: this.serverViews(),
+      readOnly: this.readOnly(this.activeId),
+      ...this.sharedAsView(),
       activeVaultId: this.activeId,
       multiVault: !!this.platform.storage.writeNamed,
       hosts: v
@@ -746,6 +848,7 @@ export class VaultService {
               }
             : {}),
           ...(data.agentForward ? { agentForward: true } : {}),
+          ...(data.personalLogin ? { personalLogin: true } : {}),
         }))
         .sort(byLabel),
       identities: v
@@ -754,8 +857,9 @@ export class VaultService {
           id,
           label: data.label,
           username: data.username,
-          hasPassword: !!data.password,
+          hasPassword: !!data.password || !!data.sealed,
           keyId: data.keyId,
+          ...(data.assignee ? { assignee: data.assignee } : {}),
         }))
         .sort(byLabel),
       forwards: v
@@ -808,43 +912,25 @@ export class VaultService {
    * key in place of its own when it uses one.
    */
   host(id: string): Item<HostData> | undefined {
-    return this.hostIn(this.v, id)
-  }
-
-  /** A host as connected to, from a given vault: its identity's login in place of its own. */
-  private hostIn(vault: Vault, id: string): Item<HostData> | undefined {
-    const host = vault.get<HostData>(id)
-    if (host?.type !== 'host' || !host.data.identityId) return host
-    const identity = vault.get<IdentityData>(host.data.identityId)
-    if (identity?.type !== 'identity') return host
-    const { password: _p, keyId: _k, ...own } = host.data
-    const { username, password, keyId } = identity.data
-    return {
-      ...host,
-      data: { ...own, username: username || own.username, ...(password ? { password } : {}), ...(keyId ? { keyId } : {}) },
-    }
+    return this.scope().host(id)
   }
 
   key(id: string): Item<KeyData> | undefined {
-    return this.v.get<KeyData>(id)
+    return this.scope().key(id)
   }
 
   knownHostsFor(host: string, port: number): Item<KnownHostData>[] {
-    return this.v
-      .list<KnownHostData>('knownHost')
-      .filter((k) => k.data.host === host && k.data.port === port)
+    return this.scope().knownHostsFor(host, port)
   }
 
   trustHostKey(entry: KnownHostData, replace: boolean): void {
-    if (replace) {
-      for (const old of this.knownHostsFor(entry.host, entry.port)) this.v.delete(old.id)
-    }
-    this.v.put('knownHost', entry)
+    this.scope().trustHostKey(entry, replace)
   }
 
   // ---- mutations -------------------------------------------------------------
 
   saveHost(id: string | null, input: HostInput): string {
+    this.writable()
     const existing = id ? this.v.get<HostData>(id) : undefined
     if (id && existing?.type !== 'host') throw new Error('Host not found')
     const address = required(input.address, 'Address', 255)
@@ -866,6 +952,8 @@ export class VaultService {
     const color = input.color === undefined ? existing?.data.color : checkColor(input.color)
     const proxy = input.proxy === undefined ? existing?.data.proxy : input.proxy === null ? undefined : checkProxy(input.proxy, existing?.data.proxy)
     const agentForward = input.agentForward === undefined ? existing?.data.agentForward : input.agentForward === true
+    const personalLogin = input.personalLogin === undefined ? existing?.data.personalLogin : input.personalLogin === true
+    if (personalLogin && this.activeId === PERSONAL_ID) throw new Error('Personal logins are for shared vaults')
     const data: HostData = {
       label: (input.label ?? '').trim().slice(0, 128) || address,
       address,
@@ -883,6 +971,7 @@ export class VaultService {
       ...(color ? { color } : {}),
       ...(proxy ? { proxy } : {}),
       ...(agentForward ? { agentForward: true } : {}),
+      ...(personalLogin ? { personalLogin: true } : {}),
     }
     return this.v.put('host', data, id ?? undefined).id
   }
@@ -902,6 +991,7 @@ export class VaultService {
   }
 
   saveForward(id: string | null, input: ForwardInput): string {
+    this.writable()
     if (id && this.v.get(id)?.type !== 'forward') throw new Error('Port forward not found')
     if (this.v.get(input.hostId)?.type !== 'host') throw new Error('Choose a host to forward through')
     const kind = input.kind
@@ -937,12 +1027,14 @@ export class VaultService {
   }
 
   async generateKey(label: string, type: 'ed25519' | 'rsa'): Promise<string> {
+    this.writable()
     if (type !== 'ed25519' && type !== 'rsa') throw new Error('Unsupported key type')
     const key = await this.platform.keys.generate(required(label, 'Label', 128), type)
     return this.v.put('key', key).id
   }
 
   async importKey(input: KeyImportInput): Promise<string> {
+    this.writable()
     const label = required(input.label, 'Label', 128)
     const privateKey = required(input.privateKey, 'Private key', 32 * 1024)
     const key = await this.platform.keys.import(label, privateKey, input.passphrase)
@@ -950,6 +1042,7 @@ export class VaultService {
   }
 
   setKeyCertificate(id: string, certificate: string | null): void {
+    this.writable()
     const key = this.v.get<KeyData>(id)
     if (key?.type !== 'key') throw new Error('Key not found')
     const { certificate: _old, ...rest } = key.data
@@ -965,12 +1058,14 @@ export class VaultService {
   }
 
   renameKey(id: string, label: string): void {
+    this.writable()
     const key = this.v.get<KeyData>(id)
     if (key?.type !== 'key') throw new Error('Key not found')
     this.v.put('key', { ...key.data, label: required(label, 'Label', 128) }, id)
   }
 
   saveSnippet(id: string | null, input: { label: string; script: string }): string {
+    this.writable()
     if (id && this.v.get(id)?.type !== 'snippet') throw new Error('Snippet not found')
     const data: SnippetData = {
       label: required(input.label, 'Label', 128),
@@ -980,13 +1075,19 @@ export class VaultService {
   }
 
   saveIdentity(id: string | null, input: IdentityInput): string {
+    this.writable()
     const existing = id ? this.v.get<IdentityData>(id) : undefined
     if (id && existing?.type !== 'identity') throw new Error('Identity not found')
-    if (input.keyId && this.v.get(input.keyId)?.type !== 'key') throw new Error('Key not found')
     const username = required(input.username, 'Username', 128)
-    const password = input.password === undefined ? existing?.data.password : input.password || undefined
+    const label = (input.label ?? '').trim().slice(0, 128) || username
+    const assignee = input.assignee === undefined ? existing?.data.assignee : input.assignee || undefined
+    if (assignee) return this.savePersonalLogin(id ?? randomId(), existing, { label, username, assignee, password: input.password })
+    if (input.keyId && this.v.get(input.keyId)?.type !== 'key') throw new Error('Key not found')
+    // A personal login made shared again keeps no password: it was only ever sealed for some.
+    const previous = existing?.data.assignee ? undefined : existing?.data.password
+    const password = input.password === undefined ? previous : input.password || undefined
     const data: IdentityData = {
-      label: (input.label ?? '').trim().slice(0, 128) || username,
+      label,
       username,
       ...(password ? { password } : {}),
       ...(input.keyId ? { keyId: input.keyId } : {}),
@@ -994,7 +1095,9 @@ export class VaultService {
     return this.v.put('identity', data, id ?? undefined).id
   }
 
+
   renameGroup(from: string, to: string): void {
+    this.writable()
     const name = String(to ?? '').trim().slice(0, 64)
     for (const host of this.v.list<HostData>('host')) {
       if (host.data.group !== from) continue
@@ -1004,6 +1107,7 @@ export class VaultService {
   }
 
   deleteItem(id: string): void {
+    this.writable()
     const item = this.v.get(id)
     if (!item) return
     if (item.type === 'key') {
@@ -1075,6 +1179,7 @@ export class VaultService {
    * at the copy already in the vault, which is left as it is.
    */
   async importVault(text: string, password: string): Promise<ImportResult> {
+    this.writable()
     const items = await decryptExport(text, password)
     const v = this.v
     const result: ImportResult = { added: 0, existing: 0, skipped: 0 }
@@ -1244,6 +1349,7 @@ export class VaultService {
   }
 
   async applySshImport(aliases: string[], includeKnownHosts: boolean): Promise<SshImportResult> {
+    this.writable()
     const pending = this.sshImport
     if (!pending) throw new Error('Scan for hosts first')
     const v = this.v
@@ -1346,7 +1452,8 @@ export class VaultService {
       .filter((c): c is string => typeof c === 'string')
       .map((c) => c.trim())
       .filter((c) => c.length > 0 && c.length <= 1000)
-    if (add.length === 0) return
+    // A member of a shared vault cannot write to it; their commands are not kept there.
+    if (add.length === 0 || this.readOnly(this.activeId)) return
     const items = this.historyItems(historyKey)
     const merged = dedupeKeepLast([...items.flatMap((i) => i.data.commands), ...add]).slice(-HISTORY_LIMIT)
     const [keep, ...extra] = items
@@ -1355,6 +1462,7 @@ export class VaultService {
   }
 
   clearCommandHistory(): void {
+    this.writable()
     for (const item of this.v.list<HistoryData>('history')) this.v.delete(item.id)
   }
 
@@ -1552,6 +1660,8 @@ export class VaultService {
       await this.finishPasswordChange(vault)
       this.noteRollback(await syncVault(vault))
       this.syncState = { state: 'idle', needsSignIn: false }
+      const account = this.accountOrNull(PERSONAL_ID)
+      if (account) await this.ensureKeyPair(account).catch(() => undefined) // older servers have none
     } catch (e) {
       const needsSignIn = e instanceof SyncError && e.status === 401
       this.syncState = {
@@ -1570,29 +1680,53 @@ export class VaultService {
 
   /** Every further vault that syncs, each through its own server account. One failing does not stop the rest. */
   private async syncOthers(personal: Vault): Promise<void> {
-    const failed = new Set<string>()
+    const byServer = new Map<string, VaultEntry[]>()
     for (const entry of this.index.vaults) {
-      const vault = this.others.get(entry.id)
-      const serverId = entry.serverId
-      if (!vault?.sync || !serverId || failed.has(serverId)) continue
+      if (!entry.serverId || !this.others.get(entry.id)?.sync) continue
+      byServer.set(entry.serverId, [...(byServer.get(entry.serverId) ?? []), entry])
+    }
+    for (const [serverId, entries] of byServer) {
       if (serverId === PERSONAL_ID ? this.syncState.needsSignIn : this.serverState.get(serverId)?.needsSignIn) continue
+      const account = this.accountOrNull(serverId)
       const token = this.tokenFor(serverId)
-      if (!token) continue
+      if (!account || !token) continue
       try {
-        this.noteRollback(await syncVault(vault, undefined, token))
+        // What the server says of each vault: still a member, which role, which key.
+        const remote = await account.api.vaults()
+        if (this.vault !== personal) return
+        for (const entry of entries) {
+          const r = remote.find((x) => x.id === entry.id)
+          if (!r) {
+            this.loseVault(entry.id)
+            continue
+          }
+          if ((r.epoch ?? 0) !== (entry.epoch ?? 0)) await this.adoptNewKey(account, entry.id, r)
+          this.updateEntry(entry.id, remoteState(r))
+          const vault = this.others.get(entry.id)
+          if (!vault?.sync) continue
+          this.noteRollback(await syncVault(vault, undefined, token))
+          if (this.vault !== personal) return
+          this.saveOther(entry.id)
+          // Admins seal personal logins for every admin: keep the list of them current.
+          if (r.role === 'admin' && (r.members ?? 1) > 1) {
+            this.memberCache.set(entry.id, await account.api.members(entry.id))
+          }
+        }
         if (serverId !== PERSONAL_ID) this.serverState.delete(serverId)
+        // Others can add this account to a vault once it has a key pair.
+        await this.ensureKeyPair(account).catch(() => undefined)
       } catch (e) {
-        failed.add(serverId)
         const needsSignIn = e instanceof SyncError && e.status === 401
         const error = needsSignIn ? 'This device was signed out. Sign in again to resume syncing.' : (e as Error).message
         if (serverId === PERSONAL_ID) this.syncState = { state: 'error', needsSignIn, error }
         else this.serverState.set(serverId, { needsSignIn, error })
       }
       if (this.vault !== personal) return
-      this.saveOther(entry.id)
     }
+    this.saveIndex()
     this.onSnapshot(this.snapshot())
   }
+
 
   private noteRollback(summary: { rolledBack: number; serverBehind: boolean }): void {
     if (!summary.rolledBack && !summary.serverBehind) return
@@ -1600,6 +1734,421 @@ export class VaultService {
       at: Date.now(),
       items: summary.rolledBack + (this.rollback?.items ?? 0),
       serverBehind: summary.serverBehind || !!this.rollback?.serverBehind,
+    }
+  }
+
+  // ---- shared vaults --------------------------------------------------------------
+
+  private entryOf(vaultId: string): VaultEntry | undefined {
+    return this.index.vaults.find((v) => v.id === vaultId)
+  }
+
+  private updateEntry(vaultId: string, change: Partial<VaultEntry>): void {
+    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === vaultId ? { ...v, ...change } : v)) }
+  }
+
+  /** A member, not an admin, of a shared vault: they connect, but cannot change it. */
+  private readOnly(vaultId: string): boolean {
+    const entry = this.entryOf(vaultId)
+    return !!entry?.serverId && entry.role === 'member'
+  }
+
+  private writable(): void {
+    void this.p // throws when locked
+    if (this.readOnly(this.activeId)) throw new Error(READ_ONLY)
+  }
+
+  /** Your username on the server a vault syncs through; null for a vault that does not. */
+  private memberName(vaultId: string): string | null {
+    const serverId = this.entryOf(vaultId)?.serverId
+    if (!serverId || vaultId === PERSONAL_ID) return null
+    if (serverId === PERSONAL_ID) return this.vault?.sync?.username ?? null
+    return this.index.servers?.find((x) => x.id === serverId)?.username ?? null
+  }
+
+  /** The id prefix of your own items in a shared vault (see `memberTag`). */
+  private memberPrefix(vaultId: string): string {
+    const me = this.memberName(vaultId)
+    if (!me) throw new Error('This vault does not sync')
+    return `${memberTag(me)}-`
+  }
+
+  private fingerprintOf(serverId: string): { fingerprint?: string } {
+    const pair = this.keyPairs.get(serverId)
+    return pair ? { fingerprint: fingerprint(pair.publicKey) } : {}
+  }
+
+  /** The account's key pair: fetched (and opened) from the server, or made and stored there the first time. */
+  private async ensureKeyPair(account: Account): Promise<AccountKeyPair> {
+    const cached = this.keyPairs.get(account.id)
+    if (cached) return cached
+    let remote: { publicKey: string | null; sealedPrivateKey: string | null }
+    try {
+      remote = await account.api.accountKeys()
+    } catch (e) {
+      if (e instanceof SyncError && e.status === 404) throw new Error(OLD_SERVER_SHARED)
+      throw e
+    }
+    let pair: AccountKeyPair
+    if (remote.publicKey && remote.sealedPrivateKey) {
+      const privateKey = fromBase64(account.sealer.openText(remote.sealedPrivateKey, PRIVATE_KEY_CONTEXT))
+      if (toBase64(publicKeyOf(privateKey)) !== remote.publicKey) throw new Error('This account’s key pair does not match')
+      pair = { privateKey, publicKey: fromBase64(remote.publicKey) }
+    } else {
+      pair = generateAccountKeyPair()
+      await account.api.setAccountKeys(toBase64(pair.publicKey), account.sealer.sealText(toBase64(pair.privateKey), PRIVATE_KEY_CONTEXT))
+    }
+    if (!this.vault) throw new Error('Vault is locked')
+    this.keyPairs.set(account.id, pair)
+    return pair
+  }
+
+  /** Opens text sealed for this account: with its own key, or (from another member) to its public key. */
+  private async openRemoteText(account: Account, box: string, context: string): Promise<string> {
+    if (!isPublicBox(box)) return account.sealer.openText(box, context)
+    const pair = await this.ensureKeyPair(account)
+    return fromUtf8(openWith(pair.privateKey, box, `termterm:${context}`))
+  }
+
+  /** Text sealed to another account's public key, to open with `openRemoteText`. */
+  private sealFor(publicKey: string, text: string, context: string): string {
+    return sealTo(fromBase64(publicKey), utf8(text), `termterm:${context}`)
+  }
+
+  /** The vault's server account, after checking the caller may manage its members. */
+  private sharedVault(vaultId: string, { admin = false } = {}): { entry: VaultEntry; account: Account; vault: Vault } {
+    void this.p // throws when locked
+    const entry = this.entryOf(vaultId)
+    const vault = this.others.get(vaultId)
+    if (!entry || !vault) throw new Error('Vault not found')
+    if (!entry.serverId || !vault.sync) throw new Error('Sync the vault first: it is shared through its sync server')
+    if (admin && entry.role === 'member') throw new Error('Only the vault’s admins can do that')
+    return { entry, account: this.account(entry.serverId), vault }
+  }
+
+  async vaultMembers(vaultId: string): Promise<MemberView[]> {
+    const { entry, account, vault } = this.sharedVault(vaultId)
+    let members: RemoteMember[]
+    try {
+      members = await account.api.members(vaultId)
+    } catch (e) {
+      if (e instanceof SyncError && e.status === 404 && !(await account.api.features()).includes('shared')) throw new Error(OLD_SERVER_SHARED)
+      throw e
+    }
+    await this.ensureKeyPair(account)
+    this.memberCache.set(vaultId, members)
+    this.updateEntry(vaultId, { members: members.length, role: members.find((m) => m.username === account.username)?.role ?? entry.role })
+    this.saveIndex()
+    const keys = vault.list<MemberKeyData>('memberKey')
+    return members.map((m) => {
+      const key = keys.find((k) => k.data.username === m.username && k.id === `${memberTag(m.username)}-key`)
+      return {
+        username: m.username,
+        role: m.role,
+        fingerprint: m.publicKey ? fingerprint(fromBase64(m.publicKey)) : null,
+        you: m.username === account.username,
+        ...(key
+          ? { key: { keyType: key.data.keyType, publicKey: key.data.publicKey, ...(key.data.certificate ? { certificate: key.data.certificate } : {}) } }
+          : {}),
+      }
+    })
+  }
+
+  async lookupMember(vaultId: string, username: string): Promise<{ username: string; fingerprint: string }> {
+    const { account } = this.sharedVault(vaultId, { admin: true })
+    const name = checkUsername(username)
+    const publicKey = await account.api.userKey(name)
+    return { username: name, fingerprint: fingerprint(fromBase64(publicKey)) }
+  }
+
+  async addMember(vaultId: string, input: { username: string; role: 'admin' | 'member'; fingerprint: string }): Promise<void> {
+    const { entry, account, vault } = this.sharedVault(vaultId, { admin: true })
+    const username = checkUsername(input.username)
+    const role = input.role === 'admin' ? 'admin' : 'member'
+    const publicKey = await account.api.userKey(username)
+    // The key compared on screen must be the one sealed to.
+    if (fingerprint(fromBase64(publicKey)) !== input.fingerprint) {
+      throw new Error(`${username}’s key changed after you compared it. Compare the fingerprint again.`)
+    }
+    const key = vault.exportKey()
+    const wrappedKey = this.sealFor(publicKey, toBase64(key), vaultKeyContext(vaultId))
+    key.fill(0)
+    const meta = this.sealFor(publicKey, JSON.stringify({ name: entry.name }), vaultMetaContext(vaultId))
+    await account.api.addMember(vaultId, entry.epoch ?? 0, { username, role, wrappedKey, meta })
+    this.memberCache.set(vaultId, await account.api.members(vaultId))
+    this.updateEntry(vaultId, { members: this.memberCache.get(vaultId)!.length })
+    this.saveIndex()
+    if (role === 'admin') await this.grantLogins(vaultId, username, publicKey)
+    this.onSnapshot(this.snapshot())
+    await this.syncNow().catch(() => undefined)
+  }
+
+  async setMemberRole(vaultId: string, username: string, role: 'admin' | 'member'): Promise<void> {
+    const { account } = this.sharedVault(vaultId, { admin: true })
+    const next = role === 'admin' ? 'admin' : 'member'
+    await account.api.setMemberRole(vaultId, username, next)
+    const members = await account.api.members(vaultId)
+    this.memberCache.set(vaultId, members)
+    if (username === account.username) this.updateEntry(vaultId, { role: next })
+    this.saveIndex()
+    const publicKey = members.find((m) => m.username === username)?.publicKey
+    if (next === 'admin' && publicKey) await this.grantLogins(vaultId, username, publicKey)
+    this.onSnapshot(this.snapshot())
+    await this.syncNow().catch(() => undefined)
+  }
+
+  /**
+   * Seals every personal login this device can open for a new admin too.
+   * (Logins whose sealed key this admin was never given are left as they are.)
+   */
+  private async grantLogins(vaultId: string, username: string, publicKey: string): Promise<void> {
+    const vault = this.others.get(vaultId)
+    if (!vault) return
+    for (const login of vault.list<IdentityData>('identity')) {
+      const sealed = login.data.sealed
+      if (!sealed || sealed.keys[username]) continue
+      const loginKey = this.openLoginKey(vaultId, login.id, sealed)
+      if (!loginKey) continue
+      const keys = { ...sealed.keys, [username]: sealTo(fromBase64(publicKey), loginKey, loginKeyContext(login.id)) }
+      loginKey.fill(0)
+      vault.put('identity', { ...login.data, sealed: { ...sealed, keys } }, login.id)
+    }
+  }
+
+  /**
+   * Removes a member, then replaces the vault key: every item is read with the
+   * old key and sealed again with a new one, the member's own items are
+   * deleted and their copies of personal logins dropped, and the new key is
+   * sealed for each remaining member, all in one request.
+   */
+  async removeMember(vaultId: string, username: string): Promise<void> {
+    const { account, vault } = this.sharedVault(vaultId, { admin: true })
+    if (username === account.username) throw new Error('To leave a vault, stop syncing it and delete it from the server')
+    await this.syncNow().catch(() => undefined)
+    if (vault.dirtyItems().length) throw new Error('This vault has changes not yet synced. Sync it first, then try again.')
+    await account.api.removeMember(vaultId, username)
+    await this.replaceVaultKey(vaultId, username)
+  }
+
+  private async replaceVaultKey(vaultId: string, removed: string): Promise<void> {
+    const { entry, account, vault } = this.sharedVault(vaultId, { admin: true })
+    const oldKey = vault.exportKey()
+    const newKey = generateVaultKey()
+    try {
+      const items: Array<{ id: string; blob: string }> = []
+      for (let since = 0; ; ) {
+        const page = await account.api.vaultPull(vaultId, since)
+        for (const item of page.items) items.push({ id: item.id, blob: this.resealItem(oldKey, newKey, item.id, item.blob, removed) })
+        since = page.cursor
+        if (!page.more) break
+      }
+      const members = await account.api.members(vaultId)
+      const keys = members.map((m) => {
+        if (m.username === account.username) return { username: m.username, wrappedKey: account.sealer.sealText(toBase64(newKey), vaultKeyContext(vaultId)) }
+        if (!m.publicKey) throw new Error(`${m.username} has no key pair`)
+        return { username: m.username, wrappedKey: this.sealFor(m.publicKey, toBase64(newKey), vaultKeyContext(vaultId)) }
+      })
+      const { epoch } = await account.api.rekeyVault(vaultId, entry.epoch ?? 0, keys, items)
+      this.memberCache.set(vaultId, members)
+      this.replaceLocalVault(account, vaultId, newKey, { epoch, members: members.length })
+    } finally {
+      oldKey.fill(0)
+      newKey.fill(0)
+    }
+    await this.syncNow().catch(() => undefined)
+  }
+
+  /** One item, sealed again with the new key; a removed member's own items become deletions, and they lose their personal-login copies. */
+  private resealItem(oldKey: Uint8Array, newKey: Uint8Array, id: string, blob: string, removed: string): string {
+    const payload = Vault.openBlob(oldKey, id, blob)
+    if (payload.type !== TOMBSTONE && id.startsWith(`${memberTag(removed)}-`)) {
+      return Vault.sealBlob(newKey, id, { type: TOMBSTONE, updatedAt: Date.now(), data: null })
+    }
+    const data = payload.data as IdentityData | null
+    if (payload.type === 'identity' && data?.sealed?.keys[removed]) {
+      const { [removed]: _gone, ...keys } = data.sealed.keys
+      return Vault.sealBlob(newKey, id, { ...payload, updatedAt: Date.now(), data: { ...data, sealed: { ...data.sealed, keys } } })
+    }
+    return Vault.sealBlob(newKey, id, payload)
+  }
+
+  /** Another admin replaced the vault key: open the new one, and read the vault again with it. */
+  private async adoptNewKey(account: Account, vaultId: string, remote: RemoteVault): Promise<void> {
+    const key = fromBase64(await this.openRemoteText(account, remote.wrappedKey, vaultKeyContext(vaultId)))
+    // Changes not yet sent were sealed with the old key, which the vault no longer takes.
+    this.replaceLocalVault(account, vaultId, key, { epoch: remote.epoch ?? 0 })
+    key.fill(0)
+  }
+
+  private replaceLocalVault(account: Account, vaultId: string, key: Uint8Array, change: Partial<VaultEntry>): void {
+    this.others.get(vaultId)?.lock()
+    const vault = Vault.createWithKey(key)
+    vault.setSync(account.url, account.username, '', { remoteVaultId: vaultId })
+    this.attach(vaultId, vault)
+    this.updateEntry(vaultId, { ...change, key: toBase64(key) })
+    this.saveOther(vaultId)
+    this.saveIndex()
+  }
+
+  /** You were removed (or the vault was deleted on the server): it stays here, no longer synced. */
+  private loseVault(vaultId: string): void {
+    this.others.get(vaultId)?.clearSync()
+    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === vaultId ? { ...unlinked(v), lost: true } : v)) }
+    this.memberCache.delete(vaultId)
+    this.saveOther(vaultId)
+  }
+
+  // ---- personal logins ----
+
+  private savePersonalLogin(
+    id: string,
+    existing: Item<IdentityData> | undefined,
+    input: { label: string; username: string; assignee: string; password: string | null | undefined },
+  ): string {
+    const vaultId = this.activeId
+    const members = this.memberCache.get(vaultId)
+    if (!this.memberName(vaultId) || !members) throw new Error('Personal logins are for shared vaults: open its members first')
+    const assignee = members.find((m) => m.username === input.assignee)
+    if (!assignee?.publicKey) throw new Error(`${input.assignee} is not a member of this vault`)
+    const previous = existing?.data.sealed ? this.openLogin(vaultId, existing) : null
+    if (existing?.data.sealed && !previous && input.password === undefined) {
+      throw new Error('This device cannot open the login’s password: set it again')
+    }
+    const password = input.password === undefined ? (previous?.password ?? existing?.data.password) : input.password || undefined
+    const loginKey = generateVaultKey()
+    const readers = members.filter((m) => m.publicKey && (m.username === assignee.username || m.role === 'admin'))
+    const sealed: SealedLogin = {
+      box: seal(loginKey, utf8(JSON.stringify(password ? { password } : {})), loginContext(id)),
+      keys: Object.fromEntries(readers.map((m) => [m.username, sealTo(fromBase64(m.publicKey!), loginKey, loginKeyContext(id))])),
+    }
+    loginKey.fill(0)
+    const data: IdentityData = { label: input.label, username: input.username, assignee: assignee.username, sealed }
+    return this.v.put('identity', data, id).id
+  }
+
+  private openLoginKey(vaultId: string, loginId: string, sealed: SealedLogin): Uint8Array | null {
+    const me = this.memberName(vaultId)
+    const serverId = this.entryOf(vaultId)?.serverId
+    const pair = serverId ? this.keyPairs.get(serverId) : undefined
+    const box = me ? sealed.keys[me] : undefined
+    if (!pair || !box) return null
+    try {
+      return openWith(pair.privateKey, box, loginKeyContext(loginId))
+    } catch {
+      return null
+    }
+  }
+
+  /** A personal login's secrets, if this account is one of its readers (and its key pair is loaded). */
+  private openLogin(vaultId: string, login: Item<IdentityData>): { password?: string } | null {
+    const sealed = login.data.sealed
+    if (!sealed) return login.data.password ? { password: login.data.password } : {}
+    const loginKey = this.openLoginKey(vaultId, login.id, sealed)
+    if (!loginKey) return null
+    try {
+      return JSON.parse(fromUtf8(open(loginKey, sealed.box, loginContext(login.id)))) as { password?: string }
+    } catch {
+      return null
+    } finally {
+      loginKey.fill(0)
+    }
+  }
+
+  // ---- your own key in a shared vault ----
+
+  private memberKeyAccount(): { vaultId: string; me: string; account: Account; id: string } {
+    const vaultId = this.activeId
+    const me = this.memberName(vaultId)
+    const serverId = this.entryOf(vaultId)?.serverId
+    if (!me || !serverId) throw new Error('Your own key is for shared vaults')
+    return { vaultId, me, account: this.account(serverId), id: `${memberTag(me)}-key` }
+  }
+
+  private putMemberKey(key: KeyData): void {
+    const { vaultId, me, account, id } = this.memberKeyAccount()
+    const data: MemberKeyData = {
+      username: me,
+      label: key.label,
+      keyType: key.keyType,
+      publicKey: key.publicKey,
+      ...(key.certificate ? { certificate: key.certificate } : {}),
+      sealedPrivate: account.sealer.sealText(
+        JSON.stringify({ privateKey: key.privateKey, ...(key.passphrase ? { passphrase: key.passphrase } : {}) }),
+        memberKeyContext(vaultId),
+      ),
+    }
+    this.others.get(vaultId)!.put('memberKey', data, id)
+  }
+
+  async generateMemberKey(type: 'ed25519' | 'rsa'): Promise<void> {
+    const { me } = this.memberKeyAccount()
+    if (type !== 'ed25519' && type !== 'rsa') throw new Error('Unsupported key type')
+    this.putMemberKey(await this.platform.keys.generate(`${me} (own key)`, type))
+  }
+
+  async importMemberKey(input: KeyImportInput): Promise<void> {
+    const { me } = this.memberKeyAccount()
+    const privateKey = required(input.privateKey, 'Private key', 32 * 1024)
+    this.putMemberKey(await this.platform.keys.import(`${me} (own key)`, privateKey, input.passphrase))
+  }
+
+  async setMemberKeyCertificate(certificate: string | null): Promise<void> {
+    const { vaultId, id } = this.memberKeyAccount()
+    const vault = this.others.get(vaultId)!
+    const item = vault.get<MemberKeyData>(id)
+    if (item?.type !== 'memberKey') throw new Error('Set your own key first')
+    const { certificate: _old, ...rest } = item.data
+    const text = (certificate ?? '').trim()
+    if (text) {
+      if (text.length > 16 * 1024) throw new Error('This certificate is too long')
+      parseCertificate(text)
+      if (!certificateMatchesKey(text, item.data.publicKey)) throw new Error('This certificate is for a different key.')
+    }
+    vault.put('memberKey', text ? { ...rest, certificate: text } : rest, id)
+  }
+
+  async removeMemberKey(): Promise<void> {
+    const { vaultId, id } = this.memberKeyAccount()
+    const vault = this.others.get(vaultId)!
+    if (vault.get(id)) vault.delete(id)
+  }
+
+  /** Your own key, opened for connecting; someone else's is never usable here. */
+  private openMemberKey(vaultId: string, item: Item<MemberKeyData>): Item<KeyData> | undefined {
+    const me = this.memberName(vaultId)
+    const serverId = this.entryOf(vaultId)?.serverId
+    if (!me || !serverId || item.data.username !== me || item.id !== `${memberTag(me)}-key`) return undefined
+    const account = this.accountOrNull(serverId)
+    if (!account) return undefined
+    const secret = JSON.parse(account.sealer.openText(item.data.sealedPrivate, memberKeyContext(vaultId))) as {
+      privateKey: string
+      passphrase?: string
+    }
+    const { sealedPrivate: _s, username: _u, ...rest } = item.data
+    return { ...item, type: 'key', data: { ...rest, ...secret } }
+  }
+
+  private sharedAsView(): Pick<VaultSnapshot, 'sharedAs'> {
+    const vaultId = this.activeId
+    const me = this.memberName(vaultId)
+    const vault = this.others.get(vaultId)
+    if (!me || !vault) return {}
+    const key = vault.get<MemberKeyData>(`${memberTag(me)}-key`)
+    return {
+      sharedAs: {
+        username: me,
+        admin: !this.readOnly(vaultId),
+        ...(key?.type === 'memberKey'
+          ? {
+              key: {
+                keyType: key.data.keyType,
+                publicKey: key.data.publicKey,
+                fingerprint: fingerprintOfPublicLine(key.data.publicKey),
+                ...(key.data.certificate ? { certificate: key.data.certificate } : {}),
+              },
+            }
+          : {}),
+      },
     }
   }
 
@@ -1655,6 +2204,7 @@ export class VaultService {
         needsSignIn: this.syncState.needsSignIn,
         ...(this.syncState.error ? { error: this.syncState.error } : {}),
         vaultIds: [PERSONAL_ID, ...vaultsOf(PERSONAL_ID)],
+        ...this.fingerprintOf(PERSONAL_ID),
       })
     }
     for (const x of this.index.servers ?? []) {
@@ -1668,6 +2218,7 @@ export class VaultService {
         needsSignIn: !!state?.needsSignIn,
         ...(state?.error ? { error: state.error } : {}),
         vaultIds: vaultsOf(x.id),
+        ...this.fingerprintOf(x.id),
       })
     }
     return out
@@ -1684,7 +2235,7 @@ export class VaultService {
       if (entry.serverId !== serverId) continue
       this.others.get(entry.id)?.clearSync()
     }
-    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.serverId === serverId ? { ...v, serverId: undefined } : v)) }
+    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.serverId === serverId ? unlinked(v) : v)) }
     this.saveIndex()
   }
 
@@ -1775,15 +2326,17 @@ export class VaultService {
     const account = this.account(id)
     await this.requireVaultsFeature(account.api)
     const remote = await account.api.vaults()
-    return remote.map((r) => {
+    const out: RemoteVaultView[] = []
+    for (const r of remote) {
       let name = 'Vault that cannot be read'
       try {
-        name = (JSON.parse(account.sealer.openText(r.meta, vaultMetaContext(r.id))) as { name: string }).name
+        name = (JSON.parse(await this.openRemoteText(account, r.meta, vaultMetaContext(r.id))) as { name: string }).name
       } catch {
         // sealed for another key (the account was made again): shown, but it cannot be added
       }
-      return { id: r.id, name, onDevice: this.others.has(r.id) }
-    })
+      out.push({ id: r.id, name, onDevice: this.others.has(r.id) })
+    }
+    return out
   }
 
   async addServerVault(serverId: string, vaultId: string): Promise<string> {
@@ -1797,8 +2350,8 @@ export class VaultService {
     let key: Uint8Array
     let name: string
     try {
-      key = fromBase64(account.sealer.openText(remote.wrappedKey, vaultKeyContext(vaultId)))
-      name = (JSON.parse(account.sealer.openText(remote.meta, vaultMetaContext(vaultId))) as { name: string }).name
+      key = fromBase64(await this.openRemoteText(account, remote.wrappedKey, vaultKeyContext(vaultId)))
+      name = (JSON.parse(await this.openRemoteText(account, remote.meta, vaultMetaContext(vaultId))) as { name: string }).name
     } catch {
       throw new Error('This vault cannot be opened with this account’s key')
     }
@@ -1806,7 +2359,8 @@ export class VaultService {
     const vault = Vault.createWithKey(key)
     vault.setSync(account.url, account.username, '', { remoteVaultId: vaultId })
     const label = this.freeName(typeof name === 'string' && name.trim() ? name.trim().slice(0, 64) : 'Vault')
-    this.index = { ...this.index, vaults: [...this.index.vaults, { id: vaultId, name: label, key: toBase64(key), serverId }] }
+    const entry: VaultEntry = { id: vaultId, name: label, key: toBase64(key), serverId, ...remoteState(remote) }
+    this.index = { ...this.index, vaults: [...this.index.vaults, entry] }
     key.fill(0)
     this.attach(vaultId, vault)
     this.saveOther(vaultId)
@@ -1846,7 +2400,10 @@ export class VaultService {
       if (!ours) throw e
     }
     vault.setSync(account.url, account.username, '', { newAccount: true, remoteVaultId: vaultId })
-    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === vaultId ? { ...v, serverId } : v)) }
+    this.index = {
+      ...this.index,
+      vaults: this.index.vaults.map((v) => (v.id === vaultId ? { ...v, serverId, role: 'admin' as const, epoch: 0, members: 1, lost: undefined } : v)),
+    }
     this.saveIndex()
     this.saveOther(vaultId)
     this.onSnapshot(this.snapshot())
@@ -1860,7 +2417,7 @@ export class VaultService {
     if (!vault || !entry?.serverId) return
     if (options.fromServer) await this.leaveRemote(vaultId)
     vault.clearSync()
-    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === vaultId ? { ...v, serverId: undefined } : v)) }
+    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === vaultId ? unlinked(v) : v)) }
     this.saveIndex()
     this.saveOther(vaultId)
     this.onSnapshot(this.snapshot())
@@ -1876,6 +2433,17 @@ export class VaultService {
       if (!(e instanceof SyncError && e.status === 404)) throw e // already gone there
     }
   }
+}
+
+/** A vault entry's server-side state, from the server's list of vaults. */
+function remoteState(r: RemoteVault): Partial<VaultEntry> {
+  return { role: r.role === 'member' ? 'member' : 'admin', epoch: r.epoch ?? 0, ...(r.members ? { members: r.members } : {}), lost: undefined }
+}
+
+/** A vault entry no longer synced. */
+function unlinked(v: VaultEntry): VaultEntry {
+  const { serverId: _s, role: _r, epoch: _e, members: _m, ...rest } = v
+  return rest
 }
 
 /** Commands typed in sessions to one host or shell, kept to suggest them again. */
