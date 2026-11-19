@@ -189,7 +189,7 @@ already been agreed as one.
   `SshConnector` used by terminals, forwards and files
 
 Releases, agreed 2026-11-18: batches 9, 10 and 11 go out together as one
-release (the PR of batch 11 carries the label); batch 13 (shared vaults) is a
+release (the PR of batch 11 carries the label); batches 13–15 (vaults) are a
 release of its own; Windows code signing waits on the back burner until a
 certificate is affordable.
 
@@ -225,9 +225,61 @@ FIDO2 security keys moved to the back burner (agreed 2026-11-18).
 - [x] Scans of the Android libraries and the server image (OSV-Scanner in CI
       and before every release; deferrals recorded in `osv-scanner.toml`)
 
-### Batch 13 — Shared vaults for teams (its own release)
+### Batches 13–15 — Multiple vaults, multiple sync servers, shared vaults (one release)
 
-- [ ] Per-vault keys wrapped to each member's public key (likely two PRs)
+Agreed with the owner on 2026-11-19. Three batches, one PR each, **released
+together only when all three are done** (the last PR carries the label).
+
+Rules for all three:
+
+- **One vault on screen at a time.** A vault switcher chooses the vault; every
+  page then shows that vault only. Shared and private items are never shown
+  together.
+- **One master password per device** unlocks every vault on it (each vault
+  still has its own key).
+- **No links between vaults.** A host can only use keys, identities, jump
+  hosts and snippets from its own vault. There is deliberately **no way in the
+  app to copy or move items between vaults** (no button, menu or drag).
+- **Switching vaults closes open tabs** by default, after a warning that says
+  so and names the setting that changes it. A setting keeps tabs open instead.
+- Each vault has its own known hosts.
+
+#### Batch 13 — Multiple private vaults
+
+- [ ] The vault file holds several vaults; the existing one becomes
+      "Personal" (old files and older app versions keep working: compat tests)
+- [ ] Create, rename and delete vaults; the vault switcher
+- [ ] Switching closes tabs, with the warning; the setting to keep them open
+
+#### Batch 14 — A sync server for each vault
+
+- [ ] Each vault syncs with its own server and account (or not at all);
+      several sync servers on one device
+- [ ] A Sync page that lists each sync server and the vaults synced with it
+- [ ] Connecting a vault to a server, or signing in on a new device, says
+      plainly what will happen ("this creates a new vault on this server";
+      "check this is the right server for the vault you want") and asks to
+      confirm
+
+#### Batch 15 — Shared vaults
+
+- [ ] A key pair per account; a shared vault's key wrapped to each member's
+      public key, so the server still sees only ciphertext
+- [ ] Adding a member by username on the same server, after comparing a
+      fingerprint; removing one makes a new vault key and re-encrypts (the
+      owner is told to change the passwords the member could see)
+- [ ] Every member has every permission for now (see Roles below)
+- [ ] Shared vaults hold hosts, identities (usernames and passwords),
+      snippets, known hosts and port forwards, **not SSH private keys**: each
+      member uses their own key
+
+#### Later: roles in shared vaults (not planned yet)
+
+- **Owner:** members, renaming and deleting the vault, plus everything below.
+- **Editor:** adds, changes and deletes items.
+- **User:** connects with the items but cannot change them. Note: a user can
+  still read passwords, because connecting needs them; only editing can be
+  prevented (by the server refusing their changes).
 
 ### Back burner (only when the owner asks)
 
@@ -407,7 +459,7 @@ queue above, which names the batch each open item belongs to.
         for a device test: whether long-idle sessions survive Doze without a wake
         lock, and how the prompt behaves on phones with face unlock only.
   - [x] Step 5: signed `termterm-<version>.apk` on each release, when the signing key secrets are set (README, "Android signing key"). Exercised since 0.3.x: every release carries a signed APK, checked against the release certificate, and the owner has installed one over another.
-- [ ] Shared vaults / teams (per-vault keys wrapped to each member's public key)
+- [ ] Multiple vaults, a sync server per vault, shared vaults (Batches 13–15)
 
 ## Working on the repo
 
