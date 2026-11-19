@@ -205,7 +205,25 @@ if (!app.requestSingleInstanceLock()) {
   handle('key:rename', (id: string, label: string) => vault.renameKey(id, label))
   handle('vault:add', (name: string) => vault.addVault(String(name)))
   handle('vault:rename', (id: string, name: string) => vault.renameVault(String(id), String(name)))
-  handle('vault:delete', (id: string) => vault.deleteVault(String(id)))
+  handle('vault:delete', (id: string, options?: { fromServer?: boolean }) =>
+    vault.deleteVault(String(id), { fromServer: options?.fromServer === true }),
+  )
+  handle('server:add', (input: { serverUrl: string; username: string; password: string; create: boolean }) =>
+    vault.addServer({
+      serverUrl: String(input?.serverUrl),
+      username: String(input?.username),
+      password: String(input?.password),
+      create: input?.create === true,
+    }),
+  )
+  handle('server:remove', (id: string) => vault.removeServer(String(id)))
+  handle('server:signIn', (id: string, password: string) => vault.serverSignIn(String(id), String(password)))
+  handle('server:vaults', (id: string) => vault.serverVaults(String(id)))
+  handle('server:addVault', (serverId: string, vaultId: string) => vault.addServerVault(String(serverId), String(vaultId)))
+  handle('vault:connect', (vaultId: string, serverId: string) => vault.connectVault(String(vaultId), String(serverId)))
+  handle('vault:disconnect', (vaultId: string, options?: { fromServer?: boolean }) =>
+    vault.disconnectVault(String(vaultId), { fromServer: options?.fromServer === true }),
+  )
   handle('vault:switch', (id: string) => vault.switchVault(String(id)))
   handle('key:certificate', (id: string, certificate: string | null) => vault.setKeyCertificate(String(id), certificate === null ? null : String(certificate)))
   handle('snippet:save', (id: string | null, input) => vault.saveSnippet(id, input))

@@ -25,6 +25,8 @@ const LIMITS = {
   blobChars: 512 * 1024,
   changesPerPush: 500,
   itemsPerUser: 20_000,
+  itemsPerVault: 20_000,
+  vaultsPerUser: 100,
   pullPage: 500,
   sessionsPerUser: 50,
   failedLogins: 10,
@@ -120,6 +122,36 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
        ON CONFLICT (user_id, id) DO UPDATE SET seq = excluded.seq, blob = excluded.blob`,
     ),
     bumpSeq: db.prepare('UPDATE users SET seq = seq + 1 WHERE id = ? RETURNING seq'),
+    // ---- further vaults ----
+    myVaults: db.prepare(
+      `SELECT v.id, v.seq, m.role, m.wrapped_key, m.meta FROM vault_members m JOIN vaults v ON v.id = m.vault_id
+       WHERE m.user_id = ? ORDER BY v.created_at`,
+    ),
+    membership: db.prepare(
+      'SELECT v.id, v.seq, m.role FROM vault_members m JOIN vaults v ON v.id = m.vault_id WHERE m.vault_id = ? AND m.user_id = ?',
+    ),
+    vaultExists: db.prepare('SELECT 1 FROM vaults WHERE id = ?'),
+    vaultCount: db.prepare('SELECT COUNT(*) AS n FROM vault_members WHERE user_id = ?'),
+    insertVault: db.prepare('INSERT INTO vaults (id, created_at) VALUES (?, ?)'),
+    insertMember: db.prepare('INSERT INTO vault_members (vault_id, user_id, role, wrapped_key, meta) VALUES (?, ?, ?, ?, ?)'),
+    updateMember: db.prepare(
+      'UPDATE vault_members SET wrapped_key = COALESCE(?, wrapped_key), meta = COALESCE(?, meta) WHERE vault_id = ? AND user_id = ?',
+    ),
+    removeMember: db.prepare('DELETE FROM vault_members WHERE vault_id = ? AND user_id = ?'),
+    // A vault nobody is a member of any more has no one to read it: it goes.
+    pruneVaults: db.prepare('DELETE FROM vaults WHERE id NOT IN (SELECT vault_id FROM vault_members)'),
+    vaultPull: db.prepare('SELECT id, seq, blob FROM vault_items WHERE vault_id = ? AND seq > ? ORDER BY seq LIMIT ?'),
+    vaultItem: db.prepare('SELECT id, seq, blob FROM vault_items WHERE vault_id = ? AND id = ?'),
+    vaultItemCount: db.prepare('SELECT COUNT(*) AS n FROM vault_items WHERE vault_id = ?'),
+    vaultUpsertItem: db.prepare(
+      `INSERT INTO vault_items (vault_id, id, seq, blob) VALUES (?, ?, ?, ?)
+       ON CONFLICT (vault_id, id) DO UPDATE SET seq = excluded.seq, blob = excluded.blob`,
+    ),
+    vaultBumpSeq: db.prepare('UPDATE vaults SET seq = seq + 1 WHERE id = ? RETURNING seq'),
+    vaultUsage: db.prepare(
+      `SELECT COUNT(*) AS items, COALESCE(SUM(LENGTH(i.blob)), 0) AS bytes FROM vault_items i
+       JOIN vault_members m ON m.vault_id = i.vault_id WHERE m.user_id = ? AND m.role = 'owner'`,
+    ),
   }
 
   // ---- brute-force throttling (in memory; resets on restart) -----------------
@@ -229,11 +261,67 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     return { user, tokenHash }
   }
 
+  /** The caller's membership of a vault; one they are not in might as well not exist. */
+  function memberOf(vaultId: string, userId: number): { id: string; seq: number; role: string } {
+    const row = q.membership.get(vaultId, userId) as { id: string; seq: number; role: string } | undefined
+    if (!row) throw new HttpError(404, 'Vault not found')
+    return row
+  }
+
+  type Change = { id: string; blob: string; baseSeq: number }
+  function parseChanges(changes: unknown): Change[] {
+    if (!Array.isArray(changes) || changes.length > LIMITS.changesPerPush) throw new HttpError(400, 'Invalid changes')
+    return changes.map((c: Record<string, unknown>) => {
+      const baseSeq = c?.baseSeq
+      if (typeof baseSeq !== 'number' || !Number.isSafeInteger(baseSeq) || baseSeq < 0) {
+        throw new HttpError(400, 'Invalid baseSeq')
+      }
+      return { id: str(c.id, 'id', 64, ID_RE), blob: str(c.blob, 'blob', LIMITS.blobChars, B64_RE), baseSeq }
+    })
+  }
+
+  /** Applies pushed changes in one transaction, with optimistic concurrency on each item. */
+  function applyChanges(
+    parsed: Change[],
+    store: {
+      count(): number
+      limit: number
+      item(id: string): { id: string; seq: number; blob: string } | undefined
+      bump(): number
+      upsert(id: string, seq: number, blob: string): void
+    },
+  ): { results: unknown[] } {
+    const results: unknown[] = []
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      let count = store.count()
+      for (const change of parsed) {
+        const current = store.item(change.id)
+        // Optimistic concurrency: reject if someone else changed it first.
+        if (current && current.seq !== change.baseSeq) {
+          results.push({ id: change.id, status: 'conflict', item: current })
+          continue
+        }
+        if (!current && ++count > store.limit) throw new HttpError(413, 'Vault item limit reached')
+        const seq = store.bump()
+        store.upsert(change.id, seq, change.blob)
+        results.push({ id: change.id, status: 'ok', seq })
+      }
+      db.exec('COMMIT')
+    } catch (e) {
+      db.exec('ROLLBACK')
+      throw e
+    }
+    return { results }
+  }
+
   // ---- routes -------------------------------------------------------------------
   type Handler = (req: IncomingMessage, url: URL) => Promise<unknown> | unknown
 
   const routes: Record<string, Handler> = {
-    'GET /v1/health': () => ({ ok: true, version, registration: allowRegistration }),
+    // features: what this server can do beyond the first release, so an app
+    // can tell an older server it must not ask for them.
+    'GET /v1/health': () => ({ ok: true, version, registration: allowRegistration, features: ['vaults'] }),
 
     // Returns the KDF parameters a client needs to derive its auth key. Unknown
     // usernames get stable fake parameters so accounts cannot be enumerated.
@@ -322,6 +410,7 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
         throw new HttpError(401, 'Incorrect master password')
       }
       q.deleteUser.run(user.id)
+      q.pruneVaults.run()
       return { ok: true }
     },
 
@@ -330,7 +419,9 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     'GET /v1/usage': (req) => {
       const { user } = authenticate(req)
       const { items, bytes } = q.usage.get(user.id) as { items: number; bytes: number }
-      return { items, bytes, maxItems: LIMITS.itemsPerUser }
+      // Further vaults this account made count separately; each has its own limit.
+      const other = q.vaultUsage.get(user.id) as { items: number; bytes: number }
+      return { items, bytes, maxItems: LIMITS.itemsPerUser, vaultItems: other.items, vaultBytes: other.bytes }
     },
 
     // Devices signed in to this account. A session's public id is its token
@@ -397,50 +488,93 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
       return { items, more, cursor: items.at(-1)?.seq ?? since, head: user.seq }
     },
 
-    'POST /v1/sync': async (req) => {
+    // ---- further vaults --------------------------------------------------------------
+    'GET /v1/vaults': (req) => {
       const { user } = authenticate(req)
-      const { changes } = await readJson(req)
-      if (!Array.isArray(changes) || changes.length > LIMITS.changesPerPush) {
-        throw new HttpError(400, 'Invalid changes')
-      }
-      const parsed = changes.map((c: Record<string, unknown>) => {
-        const baseSeq = c?.baseSeq
-        if (typeof baseSeq !== 'number' || !Number.isSafeInteger(baseSeq) || baseSeq < 0) {
-          throw new HttpError(400, 'Invalid baseSeq')
-        }
-        return {
-          id: str(c.id, 'id', 64, ID_RE),
-          blob: str(c.blob, 'blob', LIMITS.blobChars, B64_RE),
-          baseSeq,
-        }
-      })
+      const rows = q.myVaults.all(user.id) as Array<{ id: string; seq: number; role: string; wrapped_key: string; meta: string }>
+      return { vaults: rows.map((r) => ({ id: r.id, role: r.role, wrappedKey: r.wrapped_key, meta: r.meta, head: r.seq })) }
+    },
 
-      const results: unknown[] = []
+    'POST /v1/vaults': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const id = str(body.id, 'id', 64, ID_RE)
+      const wrappedKey = str(body.wrappedKey, 'wrappedKey', 1024, B64_RE)
+      const meta = str(body.meta, 'meta', 4096, B64_RE)
       db.exec('BEGIN IMMEDIATE')
       try {
-        let count = (q.itemCount.get(user.id) as { n: number }).n
-        for (const change of parsed) {
-          const current = q.item.get(user.id, change.id) as
-            | { id: string; seq: number; blob: string }
-            | undefined
-          // Optimistic concurrency: reject if someone else changed it first.
-          if (current && current.seq !== change.baseSeq) {
-            results.push({ id: change.id, status: 'conflict', item: current })
-            continue
-          }
-          if (!current && ++count > LIMITS.itemsPerUser) {
-            throw new HttpError(413, 'Vault item limit reached')
-          }
-          const { seq } = q.bumpSeq.get(user.id) as { seq: number }
-          q.upsertItem.run(user.id, change.id, seq, change.blob)
-          results.push({ id: change.id, status: 'ok', seq })
+        if (q.vaultExists.get(id)) throw new HttpError(409, 'That vault already exists')
+        if ((q.vaultCount.get(user.id) as { n: number }).n >= LIMITS.vaultsPerUser) {
+          throw new HttpError(413, 'Vault limit reached')
         }
+        q.insertVault.run(id, Date.now())
+        q.insertMember.run(id, user.id, 'owner', wrappedKey, meta)
         db.exec('COMMIT')
       } catch (e) {
         db.exec('ROLLBACK')
         throw e
       }
-      return { results }
+      return { ok: true }
+    },
+
+    // A member's own copy of the vault's key and name (renaming, or a new account password).
+    'POST /v1/vaults/update': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const vaultId = str(body.vaultId, 'vaultId', 64, ID_RE)
+      const wrappedKey = body.wrappedKey === undefined ? null : str(body.wrappedKey, 'wrappedKey', 1024, B64_RE)
+      const meta = body.meta === undefined ? null : str(body.meta, 'meta', 4096, B64_RE)
+      memberOf(vaultId, user.id)
+      q.updateMember.run(wrappedKey, meta, vaultId, user.id)
+      return { ok: true }
+    },
+
+    // Leaving a vault; the last member to leave deletes it.
+    'POST /v1/vaults/leave': async (req) => {
+      const { user } = authenticate(req)
+      const vaultId = str((await readJson(req)).vaultId, 'vaultId', 64, ID_RE)
+      memberOf(vaultId, user.id)
+      q.removeMember.run(vaultId, user.id)
+      q.pruneVaults.run()
+      return { ok: true }
+    },
+
+    'GET /v1/vaults/sync': (req, url) => {
+      const { user } = authenticate(req)
+      const vault = memberOf(str(url.searchParams.get('vault'), 'vault', 64, ID_RE), user.id)
+      const since = Number(url.searchParams.get('since') ?? '0')
+      if (!Number.isSafeInteger(since) || since < 0) throw new HttpError(400, 'Invalid since')
+      const rows = q.vaultPull.all(vault.id, since, LIMITS.pullPage + 1) as Array<{ id: string; seq: number; blob: string }>
+      const more = rows.length > LIMITS.pullPage
+      const items = more ? rows.slice(0, LIMITS.pullPage) : rows
+      return { items, more, cursor: items.at(-1)?.seq ?? since, head: vault.seq }
+    },
+
+    'POST /v1/vaults/sync': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const vault = memberOf(str(body.vaultId, 'vaultId', 64, ID_RE), user.id)
+      if (vault.role !== 'owner' && vault.role !== 'admin') throw new HttpError(403, 'Only the vault\'s admins can change it')
+      const parsed = parseChanges(body.changes)
+      return applyChanges(parsed, {
+        count: () => (q.vaultItemCount.get(vault.id) as { n: number }).n,
+        limit: LIMITS.itemsPerVault,
+        item: (id) => q.vaultItem.get(vault.id, id) as { id: string; seq: number; blob: string } | undefined,
+        bump: () => (q.vaultBumpSeq.get(vault.id) as { seq: number }).seq,
+        upsert: (id, seq, blob) => q.vaultUpsertItem.run(vault.id, id, seq, blob),
+      })
+    },
+
+    'POST /v1/sync': async (req) => {
+      const { user } = authenticate(req)
+      const parsed = parseChanges((await readJson(req)).changes)
+      return applyChanges(parsed, {
+        count: () => (q.itemCount.get(user.id) as { n: number }).n,
+        limit: LIMITS.itemsPerUser,
+        item: (id) => q.item.get(user.id, id) as { id: string; seq: number; blob: string } | undefined,
+        bump: () => (q.bumpSeq.get(user.id) as { seq: number }).seq,
+        upsert: (id, seq, blob) => q.upsertItem.run(user.id, id, seq, blob),
+      })
     },
   }
 

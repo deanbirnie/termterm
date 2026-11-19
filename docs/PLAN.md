@@ -254,35 +254,53 @@ Rules for all three:
 - [x] Switching closes tabs and stops forwards, after a warning naming the
       setting; the setting to keep them open (a kept tab uses its own vault)
 
-#### Batch 14 — A sync server for each vault (next)
+#### Batch 14 — A sync server for each vault (done; released with Batch 15)
 
-- [ ] Each vault syncs with its own server and account (or not at all);
-      several sync servers on one device
-- [ ] A Sync page that lists each sync server and the vaults synced with it
-- [ ] Connecting a vault to a server, or signing in on a new device, says
+- [x] Each vault syncs with its own server and account (or not at all);
+      several sync servers on one device; one account can hold several vaults
+- [x] Signing in to a further server uses that server's own username and
+      password (not kept: the account's key, which it unwraps, is kept
+      encrypted in the device's list of vaults), not the master password, so a
+      master password change touches no server but the Personal vault's.
+      Reusing a username and password on another server simply works; each
+      server account is independent (agreed 2026-11-19)
+- [x] A self-hosted server must be updated before it holds more than one
+      vault; an older server keeps syncing the Personal vault only
+- [x] A Sync page that lists each sync server and the vaults synced with it
+- [x] Connecting a vault to a server, or signing in on a new device, says
       plainly what will happen ("this creates a new vault on this server";
       "check this is the right server for the vault you want") and asks to
       confirm
 
-#### Batch 15 — Shared vaults
+#### Batch 15 — Shared vaults (next)
 
 - [ ] A key pair per account; a shared vault's key wrapped to each member's
       public key, so the server still sees only ciphertext
 - [ ] Adding a member by username on the same server, after comparing a
       fingerprint; removing one makes a new vault key and re-encrypts (the
       owner is told to change the passwords the member could see)
-- [ ] Every member has every permission for now (see Roles below)
-- [ ] Shared vaults hold hosts, identities (usernames and passwords),
-      snippets, known hosts and port forwards, **not SSH private keys**: each
-      member uses their own key
+- [ ] Two roles from the start (agreed 2026-11-19): **Admin** adds and
+      changes hosts, logins and members; **Member** connects only. The sync
+      server refuses changes from members
+- [ ] Shared logins (such as "admin", with a shared key or password) are
+      encrypted for every member
+- [ ] Personal logins (such as a member's own name) are assigned by an admin
+      to one member and encrypted for that member and the admins only, so no
+      other member can read or use them (no impersonation). A member made an
+      admin later is given access to them too: the promoting admin's app
+      encrypts them again for the new admin
+- [ ] For a personal login a member can use their own key: made on their
+      device, or an existing key (with its certificate, if they have one)
+      imported there; the admin only needs the public key
+- [ ] "Usable but not visible" (hiding a login's password or key from the
+      member who uses it) is screen-only: their device must decrypt it to
+      connect. Recommended instead: keys the member holds themselves, or SSH
+      certificates. Said plainly in the app and the guide
 
-#### Later: roles in shared vaults (not planned yet)
+#### Later: finer roles in shared vaults (not planned yet)
 
-- **Owner:** members, renaming and deleting the vault, plus everything below.
-- **Editor:** adds, changes and deletes items.
-- **User:** connects with the items but cannot change them. Note: a user can
-  still read passwords, because connecting needs them; only editing can be
-  prevented (by the server refusing their changes).
+- **Owner** (members, renaming and deleting the vault) apart from Admin, and
+  an **Editor** who changes items but not members.
 
 ### Back burner (only when the owner asks)
 

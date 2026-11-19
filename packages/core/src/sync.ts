@@ -28,6 +28,15 @@ export interface RemoteSession {
   current: boolean
 }
 
+/** A vault on the server that the account is a member of; key and name are sealed for the account. */
+export interface RemoteVault {
+  id: string
+  role: string
+  wrappedKey: string
+  meta: string
+  head: number
+}
+
 export class SyncError extends Error {
   constructor(
     message: string,
@@ -147,7 +156,7 @@ export class SyncApi {
   }
 
   /** What the account stores on the server: item count (deletions included) and ciphertext size. */
-  usage(): Promise<{ items: number; bytes: number; maxItems: number }> {
+  usage(): Promise<{ items: number; bytes: number; maxItems: number; vaultItems?: number; vaultBytes?: number }> {
     return this.call('GET', '/usage')
   }
 
@@ -176,6 +185,38 @@ export class SyncApi {
   push(changes: Change[]): Promise<{ results: PushResult[] }> {
     return this.call('POST', '/sync', { changes })
   }
+
+  /** What the server can do beyond the first release (`vaults`: more than one vault per account). */
+  async features(): Promise<string[]> {
+    const out = await this.call<{ features?: unknown }>('GET', '/health')
+    return Array.isArray(out.features) ? out.features.filter((f): f is string => typeof f === 'string') : []
+  }
+
+  async vaults(): Promise<RemoteVault[]> {
+    return (await this.call<{ vaults: RemoteVault[] }>('GET', '/vaults')).vaults
+  }
+
+  createVault(id: string, wrappedKey: string, meta: string): Promise<unknown> {
+    return this.call('POST', '/vaults', { id, wrappedKey, meta })
+  }
+
+  /** Replaces this account's sealed copy of a vault's key or name. */
+  updateVault(vaultId: string, change: { wrappedKey?: string; meta?: string }): Promise<unknown> {
+    return this.call('POST', '/vaults/update', { vaultId, ...change })
+  }
+
+  /** Leaves a vault; the server deletes it once no member is left. */
+  leaveVault(vaultId: string): Promise<unknown> {
+    return this.call('POST', '/vaults/leave', { vaultId })
+  }
+
+  vaultPull(vaultId: string, since: number): Promise<{ items: RemoteItem[]; cursor: number; more: boolean; head?: number }> {
+    return this.call('GET', `/vaults/sync?vault=${encodeURIComponent(vaultId)}&since=${since}`)
+  }
+
+  vaultPush(vaultId: string, changes: Change[]): Promise<{ results: PushResult[] }> {
+    return this.call('POST', '/vaults/sync', { vaultId, changes })
+  }
 }
 
 export interface SyncSummary {
@@ -198,10 +239,19 @@ const PUSH_BATCH = 200
  * changes. Push conflicts (another device got there first) are merged and
  * retried; the loop is bounded so a misbehaving server cannot spin us forever.
  */
-export async function syncVault(vault: Vault, fetchImpl?: typeof fetch): Promise<SyncSummary> {
+export async function syncVault(
+  vault: Vault,
+  fetchImpl?: typeof fetch,
+  /** The session token, for a vault that does not hold its own (see `SyncState.remoteVaultId`). */
+  token?: string,
+): Promise<SyncSummary> {
   const state = vault.sync
   if (!state) throw new Error('Sync is not configured')
-  const api = new SyncApi(state.serverUrl, vault.syncToken(), fetchImpl)
+  const client = new SyncApi(state.serverUrl, token ?? vault.syncToken(), fetchImpl)
+  const remote = state.remoteVaultId
+  const api = remote
+    ? { pull: (since: number) => client.vaultPull(remote, since), push: (c: Change[]) => client.vaultPush(remote, c) }
+    : client
   const summary: SyncSummary = { pulled: 0, pushed: 0, rolledBack: 0, serverBehind: false }
 
   let cursor = state.cursor

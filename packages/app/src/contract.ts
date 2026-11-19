@@ -177,8 +177,41 @@ export interface SyncStatus {
 export interface VaultView {
   id: string
   name: string
-  /** The vault the master password opens, and the one that syncs; it cannot be deleted. */
+  /** The vault the master password opens; it cannot be deleted. */
   personal: boolean
+  /** The sync server connection it syncs through (`ServerView.id`); none for a vault on this device only. */
+  serverId?: string
+  lastSyncAt?: number
+  /** Changes not yet sent to its server. */
+  pending?: number
+}
+
+/**
+ * A sync server account this device is signed in to. The Personal vault's
+ * account (id `personal`) is the one on the Sync page; further ones use
+ * their own username and password, never the master password.
+ */
+export interface ServerView {
+  id: string
+  serverUrl: string
+  username: string
+  /** The Personal vault's account. */
+  personal: boolean
+  /** plain http to a non-local server */
+  insecure: boolean
+  /** signed out by the server; needs this account's password again */
+  needsSignIn: boolean
+  error?: string
+  /** The vaults on this device that sync through it, Personal first. */
+  vaultIds: string[]
+}
+
+/** A vault the account holds on its server, for adding to this device. */
+export interface RemoteVaultView {
+  id: string
+  name: string
+  /** Already on this device. */
+  onDevice: boolean
 }
 
 export interface VaultSnapshot {
@@ -188,6 +221,8 @@ export interface VaultSnapshot {
   activeVaultId: string
   /** Whether this device can hold more than one vault. */
   multiVault: boolean
+  /** Every sync server account this device uses, the Personal vault's first. */
+  servers: ServerView[]
   hosts: HostView[]
   keys: KeyView[]
   identities: IdentityView[]
@@ -424,8 +459,29 @@ export interface TermtermApi {
   /** A new, empty vault on this device; returns its id. */
   addVault(name: string): Promise<string>
   renameVault(id: string, name: string): Promise<void>
-  /** Deletes a vault and everything in it from this device (not the Personal vault). */
-  deleteVault(id: string): Promise<void>
+  /**
+   * Deletes a vault and everything in it from this device (not the Personal
+   * vault). With `fromServer`, also from its sync server, and so from every
+   * device that syncs it.
+   */
+  deleteVault(id: string, options?: { fromServer?: boolean }): Promise<void>
+  /**
+   * Signs in to (or with `create`, makes) an account on a further sync server,
+   * with its own username and password. Returns the connection's id.
+   */
+  addServer(input: AccountInput & { create: boolean }): Promise<string>
+  /** Signs out of a further server. Its vaults stay on this device, unsynced. */
+  removeServer(id: string): Promise<void>
+  /** Signs in again after the server signed this device out (`ServerView.needsSignIn`). */
+  serverSignIn(id: string, password: string): Promise<void>
+  /** The vaults the account holds on that server. */
+  serverVaults(id: string): Promise<RemoteVaultView[]>
+  /** Adds a vault from the server to this device, and syncs it. Returns its id. */
+  addServerVault(serverId: string, vaultId: string): Promise<string>
+  /** Starts syncing a vault through a server account: it is copied there. */
+  connectVault(vaultId: string, serverId: string): Promise<void>
+  /** Stops syncing a vault. With `fromServer`, also deletes the server's copy. */
+  disconnectVault(vaultId: string, options?: { fromServer?: boolean }): Promise<void>
   /** Shows another vault; every page then lists that vault's items. */
   switchVault(id: string): Promise<void>
   /** Adds (or with null removes) the OpenSSH certificate a key logs in with. */

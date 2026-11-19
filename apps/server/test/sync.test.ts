@@ -651,7 +651,7 @@ describe('storage usage', () => {
     await syncVault(a)
     const usage = await new SyncApi(url, a.syncToken()).usage()
     const rows = app.db.prepare('SELECT blob FROM items').all() as Array<{ blob: string }>
-    expect(usage).toEqual({ items: 2, bytes: rows.reduce((n, r) => n + r.blob.length, 0), maxItems: 20_000 })
+    expect(usage).toMatchObject({ items: 2, bytes: rows.reduce((n, r) => n + r.blob.length, 0), maxItems: 20_000 })
     const other = await firstDevice('someone', 'master-pw')
     expect(await new SyncApi(url, other.syncToken()).usage()).toMatchObject({ items: 0, bytes: 0 })
     await expect(new SyncApi(url).usage()).rejects.toMatchObject({ status: 401 })

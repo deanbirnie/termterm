@@ -33,6 +33,8 @@ import type {
   ImportResult,
   KeyImportInput,
   ProxyInput,
+  RemoteVaultView,
+  ServerView,
   SshImportFiles,
   SshImportPreview,
   SshImportResult,
@@ -142,10 +144,39 @@ const vaultFile = (id: string) => `vault-${id}`
 /** The device's list of further vaults, as stored (sealed). */
 interface VaultIndex {
   personalName: string
-  vaults: Array<{ id: string; name: string; key: string }>
+  /** `serverId`: the server connection it syncs through (`PERSONAL_ID` for the Personal vault's account). */
+  vaults: Array<{ id: string; name: string; key: string; serverId?: string }>
   /** The vault shown last; the Personal vault when unset. */
   active?: string
+  /** Accounts on further sync servers. */
+  servers?: ServerEntry[]
 }
+
+/**
+ * An account on a further sync server, with its own username and password.
+ * Its password is not kept: `accountKey` (the account's own vault key, which
+ * the password unwraps) seals the keys and names of its vaults on the server.
+ */
+interface ServerEntry {
+  id: string
+  url: string
+  username: string
+  accountKey: string
+  token: string
+}
+
+/** What one server connection is: its API, and the key that seals vault keys and names for it. */
+interface Account {
+  id: string
+  url: string
+  username: string
+  api: SyncApi
+  sealer: Vault
+}
+
+const vaultKeyContext = (id: string) => `vault-key:${id}`
+const vaultMetaContext = (id: string) => `vault-meta:${id}`
+const OLD_SERVER = 'This sync server must be updated before it can hold more than one vault.'
 
 /** What a connection reads and writes in the vault it was made from. */
 export interface VaultScope {
@@ -183,6 +214,8 @@ export class VaultService {
   private interval: ReturnType<typeof setTimeout> | null = null
   private notifyQueued = false
   private changedVaults = new Set<string>()
+  /** Further servers' sync errors and sign-outs, by server id (the Personal account's are in `syncState`). */
+  private serverState = new Map<string, { error?: string; needsSignIn: boolean }>()
 
   /** Whether a vault file exists on this device; known once `ready` resolves. */
   private exists = false
@@ -360,6 +393,7 @@ export class VaultService {
     this.index = { personalName: PERSONAL_NAME, vaults: [] }
     this.activeId = PERSONAL_ID
     this.syncState = { state: 'idle', needsSignIn: false }
+    this.serverState.clear()
     this.onPhase('locked')
   }
 
@@ -487,7 +521,7 @@ export class VaultService {
         else this.saveOther(id)
       }
       this.onSnapshot(this.snapshot())
-      if (this.vault.dirtyItems().length) this.scheduleSync(SYNC_DEBOUNCE_MS)
+      if (this.syncing().some((v) => v.dirtyItems().length)) this.scheduleSync(SYNC_DEBOUNCE_MS)
     })
   }
 
@@ -566,17 +600,27 @@ export class VaultService {
     else {
       if (!this.others.has(id)) throw new Error('Vault not found')
       this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === id ? { ...v, name: label } : v)) }
+      // Its other devices see the new name when they next add vaults from the server; best effort.
+      const entry = this.index.vaults.find((v) => v.id === id)
+      const account = entry?.serverId ? this.accountOrNull(entry.serverId) : null
+      if (account) {
+        void account.api
+          .updateVault(id, { meta: account.sealer.sealText(JSON.stringify({ name: label }), vaultMetaContext(id)) })
+          .catch(() => undefined)
+      }
     }
     this.saveIndex()
     this.onSnapshot(this.snapshot())
   }
 
   /** Deletes a vault and everything in it from this device. The Personal vault stays. */
-  deleteVault(id: string): void {
+  async deleteVault(id: string, options: { fromServer?: boolean } = {}): Promise<void> {
     void this.p // throws when locked
     if (id === PERSONAL_ID) throw new Error('The Personal vault cannot be deleted')
     const vault = this.others.get(id)
     if (!vault) throw new Error('Vault not found')
+    // The server first: if that fails, nothing is deleted here either.
+    if (options.fromServer) await this.leaveRemote(id)
     vault.lock()
     this.others.delete(id)
     this.index = { ...this.index, vaults: this.index.vaults.filter((v) => v.id !== id) }
@@ -663,9 +707,13 @@ export class VaultService {
     const sync = this.p.sync
     return {
       vaults: [
-        { id: PERSONAL_ID, name: this.index.personalName, personal: true },
-        ...this.index.vaults.map((x) => ({ id: x.id, name: x.name, personal: false })),
+        { id: PERSONAL_ID, name: this.index.personalName, personal: true, ...this.syncView(PERSONAL_ID, this.p) },
+        ...this.index.vaults.map((x) => {
+          const vault = this.others.get(x.id)
+          return { id: x.id, name: x.name, personal: false, ...(vault ? this.syncView(x.serverId, vault) : {}) }
+        }),
       ],
+      servers: this.serverViews(),
       activeVaultId: this.activeId,
       multiVault: !!this.platform.storage.writeNamed,
       hosts: v
@@ -746,7 +794,7 @@ export class VaultService {
         username: sync?.username,
         lastSyncAt: sync?.lastSyncAt,
         insecure: sync ? isInsecureUrl(sync.serverUrl) : false,
-        pending: sync ? v.dirtyItems().length : 0,
+        pending: sync ? this.p.dirtyItems().length : 0,
         ...this.syncState,
         ...(this.rollback ? { rollback: this.rollback } : {}),
       },
@@ -1434,6 +1482,7 @@ export class VaultService {
     const authKey = await v.authKeyFor(password)
     await new SyncApi(v.sync.serverUrl, v.syncToken()).deleteAccount(authKey)
     v.clearSync()
+    this.unlinkVaults(PERSONAL_ID)
     this.syncState = { state: 'idle', needsSignIn: false }
     this.save()
     this.onSnapshot(this.snapshot())
@@ -1444,13 +1493,14 @@ export class VaultService {
     if (!v.sync) return
     const api = new SyncApi(v.sync.serverUrl, v.syncToken())
     v.clearSync()
+    this.unlinkVaults(PERSONAL_ID)
     this.syncState = { state: 'idle', needsSignIn: false }
     this.onSnapshot(this.snapshot())
     await api.logout().catch(() => undefined) // best effort; local state is already clean
   }
 
   private scheduleSync(delay: number): void {
-    if (!this.vault?.sync || this.syncState.needsSignIn) return
+    if (!this.vault || !this.syncing().length) return
     if (this.syncTimer) clearTimeout(this.syncTimer)
     this.syncTimer = setTimeout(() => {
       this.syncTimer = null
@@ -1480,20 +1530,27 @@ export class VaultService {
   }
 
   private async runSync(): Promise<void> {
-    const vault = this.vault
-    if (!vault?.sync) return
+    const personal = this.vault
+    if (!personal) return
+    if (personal.sync && !this.syncState.needsSignIn) {
+      try {
+        await this.syncPersonal(personal)
+      } catch (e) {
+        // Further vaults still sync; the error is shown, and syncNow's caller gets it.
+        await this.syncOthers(personal)
+        throw e
+      }
+    }
+    await this.syncOthers(personal)
+  }
+
+  private async syncPersonal(vault: Vault): Promise<void> {
+    if (!vault.sync) return
     this.syncState = { state: 'syncing', needsSignIn: false }
     this.onSnapshot(this.snapshot())
     try {
       await this.finishPasswordChange(vault)
-      const summary = await syncVault(vault)
-      if (summary.rolledBack || summary.serverBehind) {
-        this.rollback = {
-          at: Date.now(),
-          items: summary.rolledBack + (this.rollback?.items ?? 0),
-          serverBehind: summary.serverBehind || !!this.rollback?.serverBehind,
-        }
-      }
+      this.noteRollback(await syncVault(vault))
       this.syncState = { state: 'idle', needsSignIn: false }
     } catch (e) {
       const needsSignIn = e instanceof SyncError && e.status === 401
@@ -1508,6 +1565,315 @@ export class VaultService {
         this.save()
         this.onSnapshot(this.snapshot())
       }
+    }
+  }
+
+  /** Every further vault that syncs, each through its own server account. One failing does not stop the rest. */
+  private async syncOthers(personal: Vault): Promise<void> {
+    const failed = new Set<string>()
+    for (const entry of this.index.vaults) {
+      const vault = this.others.get(entry.id)
+      const serverId = entry.serverId
+      if (!vault?.sync || !serverId || failed.has(serverId)) continue
+      if (serverId === PERSONAL_ID ? this.syncState.needsSignIn : this.serverState.get(serverId)?.needsSignIn) continue
+      const token = this.tokenFor(serverId)
+      if (!token) continue
+      try {
+        this.noteRollback(await syncVault(vault, undefined, token))
+        if (serverId !== PERSONAL_ID) this.serverState.delete(serverId)
+      } catch (e) {
+        failed.add(serverId)
+        const needsSignIn = e instanceof SyncError && e.status === 401
+        const error = needsSignIn ? 'This device was signed out. Sign in again to resume syncing.' : (e as Error).message
+        if (serverId === PERSONAL_ID) this.syncState = { state: 'error', needsSignIn, error }
+        else this.serverState.set(serverId, { needsSignIn, error })
+      }
+      if (this.vault !== personal) return
+      this.saveOther(entry.id)
+    }
+    this.onSnapshot(this.snapshot())
+  }
+
+  private noteRollback(summary: { rolledBack: number; serverBehind: boolean }): void {
+    if (!summary.rolledBack && !summary.serverBehind) return
+    this.rollback = {
+      at: Date.now(),
+      items: summary.rolledBack + (this.rollback?.items ?? 0),
+      serverBehind: summary.serverBehind || !!this.rollback?.serverBehind,
+    }
+  }
+
+  // ---- further sync servers ----------------------------------------------------
+
+  /** Every vault on this device that syncs. */
+  private syncing(): Vault[] {
+    const out = this.vault?.sync ? [this.vault] : []
+    for (const v of this.others.values()) if (v.sync) out.push(v)
+    return out
+  }
+
+  private tokenFor(serverId: string): string | null {
+    if (serverId === PERSONAL_ID) return this.vault?.sync ? this.vault.syncToken() : null
+    return this.index.servers?.find((x) => x.id === serverId)?.token ?? null
+  }
+
+  private accountOrNull(serverId: string): Account | null {
+    if (serverId === PERSONAL_ID) {
+      const p = this.vault
+      if (!p?.sync) return null
+      return { id: PERSONAL_ID, url: p.sync.serverUrl, username: p.sync.username, api: new SyncApi(p.sync.serverUrl, p.syncToken()), sealer: p }
+    }
+    const entry = this.index.servers?.find((x) => x.id === serverId)
+    if (!entry) return null
+    const key = fromBase64(entry.accountKey)
+    const sealer = Vault.createWithKey(key)
+    key.fill(0)
+    return { id: entry.id, url: entry.url, username: entry.username, api: new SyncApi(entry.url, entry.token), sealer }
+  }
+
+  private account(serverId: string): Account {
+    const account = this.accountOrNull(serverId)
+    if (!account) throw new Error('That sync server is not connected')
+    return account
+  }
+
+  private async requireVaultsFeature(api: SyncApi): Promise<void> {
+    if (!(await api.features()).includes('vaults')) throw new Error(OLD_SERVER)
+  }
+
+  private serverViews(): ServerView[] {
+    const vaultsOf = (serverId: string) => this.index.vaults.filter((v) => v.serverId === serverId).map((v) => v.id)
+    const out: ServerView[] = []
+    const ps = this.vault?.sync
+    if (ps) {
+      out.push({
+        id: PERSONAL_ID,
+        serverUrl: ps.serverUrl,
+        username: ps.username,
+        personal: true,
+        insecure: isInsecureUrl(ps.serverUrl),
+        needsSignIn: this.syncState.needsSignIn,
+        ...(this.syncState.error ? { error: this.syncState.error } : {}),
+        vaultIds: [PERSONAL_ID, ...vaultsOf(PERSONAL_ID)],
+      })
+    }
+    for (const x of this.index.servers ?? []) {
+      const state = this.serverState.get(x.id)
+      out.push({
+        id: x.id,
+        serverUrl: x.url,
+        username: x.username,
+        personal: false,
+        insecure: isInsecureUrl(x.url),
+        needsSignIn: !!state?.needsSignIn,
+        ...(state?.error ? { error: state.error } : {}),
+        vaultIds: vaultsOf(x.id),
+      })
+    }
+    return out
+  }
+
+  private syncView(serverId: string | undefined, vault: Vault): { serverId?: string; lastSyncAt?: number; pending?: number } {
+    if (!serverId || !vault.sync) return {}
+    return { serverId, lastSyncAt: vault.sync.lastSyncAt, pending: vault.dirtyItems().length }
+  }
+
+  /** Stops syncing every vault that used a server account (signed out, or the account was deleted). */
+  private unlinkVaults(serverId: string): void {
+    for (const entry of this.index.vaults) {
+      if (entry.serverId !== serverId) continue
+      this.others.get(entry.id)?.clearSync()
+    }
+    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.serverId === serverId ? { ...v, serverId: undefined } : v)) }
+    this.saveIndex()
+  }
+
+  async addServer(input: AccountInput & { create: boolean }): Promise<string> {
+    void this.p // throws when locked
+    if (!this.platform.storage.writeNamed) throw new Error('This device keeps one vault only')
+    const serverUrl = normalizeServerUrl(input.serverUrl)
+    const username = checkUsername(input.username)
+    const known = [
+      ...(this.p.sync ? [{ url: this.p.sync.serverUrl, username: this.p.sync.username }] : []),
+      ...(this.index.servers ?? []),
+    ]
+    if (known.some((k) => k.url === serverUrl && k.username === username)) {
+      throw new Error('This device is already signed in to that account')
+    }
+    const api = new SyncApi(serverUrl)
+    await this.requireVaultsFeature(api)
+    let account: Vault
+    let token: string
+    if (input.create) {
+      this.checkNewPassword(input.password)
+      account = await Vault.create(input.password)
+      token = await api.register(username, account.kdf, await account.authKeyFor(input.password), account.wrappedVaultKey)
+    } else {
+      const kdf = await api.prelogin(username)
+      const { authKey } = await deriveKeys(input.password, kdf)
+      const login = await api.login(username, authKey)
+      token = login.token
+      account = await Vault.fromAccount(kdf, login.wrappedVaultKey, input.password)
+    }
+    const key = account.exportKey()
+    account.lock()
+    const id = randomId()
+    const entry: ServerEntry = { id, url: serverUrl, username, accountKey: toBase64(key), token }
+    key.fill(0)
+    this.index = { ...this.index, servers: [...(this.index.servers ?? []), entry] }
+    this.saveIndex()
+    this.onSnapshot(this.snapshot())
+    void this.labelServerSession(id)
+    return id
+  }
+
+  /** Names this device's session on a further server, as for the Personal account. */
+  private async labelServerSession(serverId: string): Promise<void> {
+    const account = this.accountOrNull(serverId)
+    if (!account) return
+    await account.api
+      .labelSession(account.sealer.sealText(this.platform.deviceName().slice(0, 64) || 'Unnamed device', 'device'))
+      .catch(() => undefined)
+  }
+
+  async removeServer(id: string): Promise<void> {
+    void this.p // throws when locked
+    if (id === PERSONAL_ID) throw new Error('Turn off sync for the Personal vault on the Sync page')
+    const account = this.account(id)
+    this.unlinkVaults(id)
+    this.index = { ...this.index, servers: (this.index.servers ?? []).filter((x) => x.id !== id) }
+    this.serverState.delete(id)
+    this.saveIndex()
+    this.onSnapshot(this.snapshot())
+    await account.api.logout().catch(() => undefined) // best effort; this device has already forgotten it
+  }
+
+  async serverSignIn(id: string, password: string): Promise<void> {
+    if (id === PERSONAL_ID) return this.syncReauth(password)
+    void this.p // throws when locked
+    const entry = this.index.servers?.find((x) => x.id === id)
+    if (!entry) throw new Error('That sync server is not connected')
+    const api = new SyncApi(entry.url)
+    const kdf = await api.prelogin(entry.username)
+    const { authKey } = await deriveKeys(password, kdf)
+    const { token, wrappedVaultKey } = await api.login(entry.username, authKey)
+    const account = await Vault.fromAccount(kdf, wrappedVaultKey, password)
+    const key = account.exportKey()
+    account.lock()
+    this.index = {
+      ...this.index,
+      servers: (this.index.servers ?? []).map((x) => (x.id === id ? { ...x, token, accountKey: toBase64(key) } : x)),
+    }
+    key.fill(0)
+    this.serverState.delete(id)
+    this.saveIndex()
+    void this.labelServerSession(id)
+    await this.syncNow()
+  }
+
+  async serverVaults(id: string): Promise<RemoteVaultView[]> {
+    const account = this.account(id)
+    await this.requireVaultsFeature(account.api)
+    const remote = await account.api.vaults()
+    return remote.map((r) => {
+      let name = 'Vault that cannot be read'
+      try {
+        name = (JSON.parse(account.sealer.openText(r.meta, vaultMetaContext(r.id))) as { name: string }).name
+      } catch {
+        // sealed for another key (the account was made again): shown, but it cannot be added
+      }
+      return { id: r.id, name, onDevice: this.others.has(r.id) }
+    })
+  }
+
+  async addServerVault(serverId: string, vaultId: string): Promise<string> {
+    void this.p // throws when locked
+    if (!this.platform.storage.writeNamed) throw new Error('This device keeps one vault only')
+    if (this.others.has(vaultId)) throw new Error('That vault is already on this device')
+    if (this.index.vaults.length >= MAX_VAULTS) throw new Error(`At most ${MAX_VAULTS + 1} vaults on a device`)
+    const account = this.account(serverId)
+    const remote = (await account.api.vaults()).find((r) => r.id === vaultId)
+    if (!remote) throw new Error('That vault is not on the server')
+    let key: Uint8Array
+    let name: string
+    try {
+      key = fromBase64(account.sealer.openText(remote.wrappedKey, vaultKeyContext(vaultId)))
+      name = (JSON.parse(account.sealer.openText(remote.meta, vaultMetaContext(vaultId))) as { name: string }).name
+    } catch {
+      throw new Error('This vault cannot be opened with this account’s key')
+    }
+    if (this.others.has(vaultId)) throw new Error('That vault is already on this device')
+    const vault = Vault.createWithKey(key)
+    vault.setSync(account.url, account.username, '', { remoteVaultId: vaultId })
+    const label = this.freeName(typeof name === 'string' && name.trim() ? name.trim().slice(0, 64) : 'Vault')
+    this.index = { ...this.index, vaults: [...this.index.vaults, { id: vaultId, name: label, key: toBase64(key), serverId }] }
+    key.fill(0)
+    this.attach(vaultId, vault)
+    this.saveOther(vaultId)
+    this.saveIndex()
+    this.onSnapshot(this.snapshot())
+    await this.syncNow().catch(() => undefined) // shown on the Sync page
+    return vaultId
+  }
+
+  /** A vault name not used on this device yet: "Work", else "Work (2)" and so on. */
+  private freeName(name: string): string {
+    const taken = new Set([this.index.personalName, ...this.index.vaults.map((v) => v.name)].map((n) => n.toLowerCase()))
+    if (!taken.has(name.toLowerCase())) return name
+    for (let i = 2; ; i++) {
+      const candidate = `${name.slice(0, 58)} (${i})`
+      if (!taken.has(candidate.toLowerCase())) return candidate
+    }
+  }
+
+  async connectVault(vaultId: string, serverId: string): Promise<void> {
+    void this.p // throws when locked
+    const vault = this.others.get(vaultId)
+    const entry = this.index.vaults.find((v) => v.id === vaultId)
+    if (!vault || !entry) throw new Error(vaultId === PERSONAL_ID ? 'The Personal vault syncs from the Sync page' : 'Vault not found')
+    if (entry.serverId) throw new Error('That vault already syncs')
+    const account = this.account(serverId)
+    await this.requireVaultsFeature(account.api)
+    const key = vault.exportKey()
+    const wrappedKey = account.sealer.sealText(toBase64(key), vaultKeyContext(vaultId))
+    key.fill(0)
+    const meta = account.sealer.sealText(JSON.stringify({ name: entry.name }), vaultMetaContext(vaultId))
+    try {
+      await account.api.createVault(vaultId, wrappedKey, meta)
+    } catch (e) {
+      // Sent before, with the answer lost: carry on if it is this account's.
+      const ours = e instanceof SyncError && e.status === 409 && (await account.api.vaults()).some((r) => r.id === vaultId)
+      if (!ours) throw e
+    }
+    vault.setSync(account.url, account.username, '', { newAccount: true, remoteVaultId: vaultId })
+    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === vaultId ? { ...v, serverId } : v)) }
+    this.saveIndex()
+    this.saveOther(vaultId)
+    this.onSnapshot(this.snapshot())
+    await this.syncNow().catch(() => undefined) // shown on the Sync page
+  }
+
+  async disconnectVault(vaultId: string, options: { fromServer?: boolean } = {}): Promise<void> {
+    void this.p // throws when locked
+    const vault = this.others.get(vaultId)
+    const entry = this.index.vaults.find((v) => v.id === vaultId)
+    if (!vault || !entry?.serverId) return
+    if (options.fromServer) await this.leaveRemote(vaultId)
+    vault.clearSync()
+    this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === vaultId ? { ...v, serverId: undefined } : v)) }
+    this.saveIndex()
+    this.saveOther(vaultId)
+    this.onSnapshot(this.snapshot())
+  }
+
+  /** Deletes a vault's copy on its server (for this account; the last member's leaving deletes it). */
+  private async leaveRemote(vaultId: string): Promise<void> {
+    const entry = this.index.vaults.find((v) => v.id === vaultId)
+    if (!entry?.serverId) return
+    try {
+      await this.account(entry.serverId).api.leaveVault(vaultId)
+    } catch (e) {
+      if (!(e instanceof SyncError && e.status === 404)) throw e // already gone there
     }
   }
 }

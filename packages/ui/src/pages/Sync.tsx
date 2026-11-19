@@ -1,14 +1,16 @@
 import { CloudOff, RefreshCw, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import type { DeviceView, SyncStatus } from '@termterm/app'
+import type { DeviceView, SyncStatus, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
+import { SyncServers } from '../SyncServers'
 import { Button, ErrorText, Field, InsecureUrlHint, PasswordInput, useAction } from '../ui'
 
-export function SyncPage({ sync }: { sync: SyncStatus }) {
+export function SyncPage({ sync, snapshot }: { sync: SyncStatus; snapshot: VaultSnapshot }) {
   return (
     <div className="split-main narrow-page">
-      <h2 className="section-title">Sync</h2>
+      <h2 className="section-title">{snapshot.multiVault ? 'Sync: the Personal vault' : 'Sync'}</h2>
       {sync.configured ? <Connected sync={sync} /> : <Setup />}
+      <SyncServers snapshot={snapshot} />
       {sync.configured && !sync.needsSignIn && <Devices lastSyncAt={sync.lastSyncAt} />}
       {sync.configured && !sync.needsSignIn && <DeleteAccount username={sync.username ?? ''} />}
       <p className="note">
