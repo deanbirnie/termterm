@@ -178,7 +178,16 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .dot-busy { background: var(--warn); }
 .dot-error { background: var(--danger); }
 
-.page { flex: 1; min-width: 0; display: flex; }
+.page { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.page > :not(.vault-bar) { flex: 1; min-height: 0; }
+/* Which vault is on screen, above every vault page. */
+.vault-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 18px; border-bottom: 1px solid var(--border); background: var(--bg-raised); }
+.vault-pick { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+.vault-pick select { min-width: 170px; font-weight: 500; }
+.vault-list { list-style: none; margin: 10px 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; }
+.vault-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; }
+.vault-list li + li { border-top: 1px solid var(--border); }
+.vault-actions { display: flex; gap: 2px; flex: none; }
 .split { flex: 1; min-width: 0; display: flex; }
 .split-main { flex: 1; min-width: 0; padding: 14px 18px 24px; overflow-y: auto; }
 .narrow-page > * { max-width: 580px; }

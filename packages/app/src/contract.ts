@@ -206,6 +206,11 @@ export interface Settings {
   autoCheckUpdates: boolean
   /** The local shell the Terminal button opens (a LocalShell id); unset for the system default. */
   defaultShell?: string
+  /**
+   * Keep tabs open (and forwards running) when switching to another vault.
+   * Off: switching closes them, after saying so.
+   */
+  keepTabsOnVaultSwitch: boolean
 }
 
 export interface AppInfo {

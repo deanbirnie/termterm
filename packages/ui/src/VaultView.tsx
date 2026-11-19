@@ -9,6 +9,7 @@ import { SettingsPage } from './pages/Settings'
 import { SnippetsPage } from './pages/Snippets'
 import { SyncPage } from './pages/Sync'
 import { useAppInfo } from './Update'
+import { VaultBar } from './Vaults'
 
 const PAGES = [
   { id: 'hosts', label: 'Hosts', icon: Server },
@@ -27,9 +28,11 @@ type PageId = (typeof PAGES)[number]['id']
 export function VaultView({
   snapshot,
   onConnect,
+  onSwitchVault,
 }: {
   snapshot: VaultSnapshot
   onConnect: (target: ConnectTarget, title: string, kind?: 'files') => void
+  onSwitchVault: (id: string) => void
 }) {
   const [page, setPage] = useState<PageId>('hosts')
   const { sync } = snapshot
@@ -62,13 +65,14 @@ export function VaultView({
         {info && <span className="sidebar-version">v{info.version}</span>}
       </nav>
       <section className="page">
+        <VaultBar snapshot={snapshot} onSwitch={onSwitchVault} onManage={() => setPage('settings')} />
         {page === 'hosts' && <HostsPage snapshot={snapshot} onConnect={onConnect} />}
         {page === 'keychain' && <KeychainPage snapshot={snapshot} />}
         {page === 'snippets' && <SnippetsPage snapshot={snapshot} />}
         {page === 'known' && <KnownHostsPage snapshot={snapshot} />}
         {page === 'forwarding' && <ForwardingPage snapshot={snapshot} />}
         {page === 'sync' && <SyncPage sync={sync} />}
-        {page === 'settings' && <SettingsPage synced={sync.configured} />}
+        {page === 'settings' && <SettingsPage synced={sync.configured} snapshot={snapshot} />}
       </section>
     </div>
   )

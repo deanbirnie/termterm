@@ -244,14 +244,17 @@ Rules for all three:
   so and names the setting that changes it. A setting keeps tabs open instead.
 - Each vault has its own known hosts.
 
-#### Batch 13 — Multiple private vaults
+#### Batch 13 — Multiple private vaults (done)
 
-- [ ] The vault file holds several vaults; the existing one becomes
-      "Personal" (old files and older app versions keep working: compat tests)
-- [ ] Create, rename and delete vaults; the vault switcher
-- [ ] Switching closes tabs, with the warning; the setting to keep them open
+- [x] Several vaults on a device. The existing vault is "Personal" and stays
+      exactly as it was (same file and format, still the one that syncs), so
+      older versions keep working; further vaults are files of their own, with
+      their names and keys in `vaults.json`, sealed with the Personal key
+- [x] Create, rename and delete vaults; the vault switcher above every page
+- [x] Switching closes tabs and stops forwards, after a warning naming the
+      setting; the setting to keep them open (a kept tab uses its own vault)
 
-#### Batch 14 — A sync server for each vault
+#### Batch 14 — A sync server for each vault (next)
 
 - [ ] Each vault syncs with its own server and account (or not at all);
       several sync servers on one device

@@ -49,7 +49,7 @@ class Emitter<Args extends unknown[]> {
 
 // ---- settings: not secret, so plain local storage --------------------------------
 
-const DEFAULT_SETTINGS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: true }
+const DEFAULT_SETTINGS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: true, keepTabsOnVaultSwitch: false }
 
 function loadSettings(): Settings {
   try {
@@ -59,6 +59,7 @@ function loadSettings(): Settings {
       ...DEFAULT_SETTINGS,
       rememberDevice: stored.rememberDevice === true,
       autoCheckUpdates: stored.autoCheckUpdates !== false,
+      keepTabsOnVaultSwitch: stored.keepTabsOnVaultSwitch === true,
       autoLockMinutes:
         Number.isFinite(minutes) && minutes >= 0 ? Math.floor(minutes) : DEFAULT_SETTINGS.autoLockMinutes,
     }

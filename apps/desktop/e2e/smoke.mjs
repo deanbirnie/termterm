@@ -1251,6 +1251,104 @@ try {
     step('another vault imported the file: hosts, group and identity arrived and logged in')
   }
 
+  // ---- several vaults, one shown at a time ---------------------------------------------
+  {
+    const g = await launch('device-g')
+    const page = g.page
+    const navG = (name) => page.getByRole('navigation').getByRole('button', { name, exact: true })
+    const vaultPick = page.getByRole('combobox', { name: 'Vault', exact: true })
+    await page.getByLabel('Master password', { exact: true }).fill(MASTER)
+    await page.getByLabel('Confirm master password').fill(MASTER)
+    await page.getByRole('button', { name: 'Create vault' }).click()
+    await page.getByText('No hosts yet').waitFor()
+    assert.equal(await vaultPick.inputValue(), 'personal')
+
+    const addHost = async (label) => {
+      await page.getByRole('button', { name: 'New host' }).click()
+      await page.getByLabel('Address', { exact: true }).fill('127.0.0.1')
+      await page.getByLabel('Label').fill(label)
+      await page.getByLabel('Username').fill('tester')
+      await page.getByLabel('Port', { exact: true }).fill(String(sshPort))
+      await page.getByLabel('Password', { exact: true }).fill(SSH_PASSWORD)
+      await page.getByRole('button', { name: 'Save host' }).click()
+      await page.getByRole('button', { name: 'Save changes' }).waitFor()
+      await page.getByRole('complementary', { name: 'Host details' }).getByRole('button', { name: 'Close' }).click()
+    }
+    await addHost('home box')
+
+    // A second vault, from the bar's Manage vaults.
+    await page.getByRole('button', { name: 'Manage vaults' }).click()
+    const vaults = page.getByRole('region', { name: 'Vaults' })
+    await vaults.getByRole('button', { name: 'New vault' }).click()
+    await page.getByRole('dialog', { name: 'New vault' }).getByLabel('Vault name').fill('Work')
+    await page.getByRole('dialog', { name: 'New vault' }).getByRole('button', { name: 'Create vault' }).click()
+    await vaults.getByText('Work', { exact: true }).waitFor()
+    // Nothing open: switching needs no warning.
+    await vaultPick.selectOption({ label: 'Work' })
+    await navG('Hosts').click()
+    await page.getByText('No hosts yet').waitFor()
+    await addHost('work box')
+    await assertCount(page.locator('.card'), 1)
+    step('a second vault starts empty; each vault lists only its own hosts')
+
+    // With a tab open, switching warns, then closes it.
+    await page.locator('.card', { hasText: 'work box' }).dblclick()
+    await page.getByRole('button', { name: 'Trust and connect' }).click()
+    await page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
+    await page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await vaultPick.selectOption({ label: 'Personal' })
+    const warn = page.getByRole('dialog', { name: 'Switch to Personal?' })
+    await warn.getByText('closes your 1 open tab').waitFor()
+    await warn.getByText('Keep tabs open when switching vaults').waitFor()
+    await shot(page, '26-switch-vault')
+    await warn.getByRole('button', { name: 'Cancel' }).click()
+    assert.notEqual(await vaultPick.inputValue(), 'personal')
+    await assertCount(page.getByRole('tab', { name: /work box/ }), 1)
+    await vaultPick.selectOption({ label: 'Personal' })
+    await warn.getByRole('button', { name: 'Close and switch' }).click()
+    await assertCount(page.getByRole('tab', { name: /work box/ }), 0)
+    await page.locator('.card', { hasText: 'home box' }).waitFor()
+    await assertCount(page.locator('.card', { hasText: 'work box' }), 0)
+    step('switching vaults with a tab open warns (naming the setting), then closes it')
+
+    // With the setting on, tabs stay open across a switch.
+    await navG('Settings').click()
+    await page.getByLabel('Keep tabs open when switching vaults').check()
+    await navG('Hosts').click()
+    await page.locator('.card', { hasText: 'home box' }).dblclick()
+    await page.getByRole('button', { name: 'Trust and connect' }).click()
+    await page.locator('.pane:not([hidden]) .xterm-rows').getByText('Welcome to the test box').waitFor()
+    await page.getByRole('button', { name: 'Vault', exact: true }).click()
+    await vaultPick.selectOption({ label: 'Work' })
+    assert.equal(await page.getByRole('dialog').count(), 0)
+    await page.locator('.card', { hasText: 'work box' }).waitFor()
+    await assertCount(page.getByRole('tab', { name: /home box/ }), 1)
+    step('with Keep tabs open on, a switch leaves tabs open')
+
+    // The vault shown last is shown again after unlocking.
+    await page.getByRole('button', { name: 'Lock vault' }).click()
+    await page.getByLabel('Master password').fill(MASTER)
+    await page.getByRole('button', { name: 'Unlock' }).click()
+    await page.locator('.card', { hasText: 'work box' }).waitFor()
+    assert.notEqual(await vaultPick.inputValue(), 'personal')
+    step('after unlocking, the vault shown last is shown again')
+
+    // Deleting a vault asks for its name.
+    await page.getByRole('button', { name: 'Manage vaults' }).click()
+    await vaults.getByRole('button', { name: 'Delete Work' }).click()
+    const del = page.getByRole('dialog', { name: 'Delete Work?' })
+    assert.ok(await del.getByRole('button', { name: 'Delete vault' }).isDisabled())
+    await del.getByLabel('Type Work to confirm').fill('Work')
+    await del.getByRole('button', { name: 'Delete vault' }).click()
+    await assertCount(vaults.locator('li'), 1)
+    assert.equal(await vaultPick.inputValue(), 'personal')
+    assert.equal(await vaults.getByRole('button', { name: 'Delete Personal' }).count(), 0)
+    const files = readdirSync(g.dataDir)
+    assert.ok(!files.some((f) => /^vault-.*\.json$/.test(f)), `vault files left: ${files}`)
+    step('a vault is deleted, file and all, after typing its name; the Personal vault cannot be')
+    await g.app.close()
+  }
+
   // ---- against a real OpenSSH: a certificate, a proxy, agent forwarding ------------
   // sshd trusts only a test CA; a SOCKS5 proxy beside it wants a login
   // (both from the Android SSH test's helper).
