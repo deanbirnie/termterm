@@ -37,6 +37,18 @@ const LIMITS = {
 const USERNAME_RE = /^[a-z0-9][a-z0-9._@+-]{2,63}$/
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/
+/** An X25519 public key, base64. */
+const PUBLIC_KEY_RE = /^[A-Za-z0-9+/]{43}=$/
+const ROLES = ['admin', 'member'] as const
+/** 'owner' is how the first builds named the vault's creator: an admin. */
+const isAdmin = (role: string) => role === 'admin' || role === 'owner'
+
+/**
+ * The id prefix of the items a member who is not an admin may write: their
+ * own known hosts and key. Worked out the same way in the app (`memberTag`).
+ */
+const memberTag = (username: string) =>
+  `m-${createHash('sha256').update(`termterm-member:${username}`).digest().subarray(0, 16).toString('hex')}`
 
 // The mobile app runs in a WebView, whose requests are cross-origin. Any
 // origin may call the API: it is authenticated by a bearer token the caller
@@ -74,6 +86,8 @@ interface UserRow {
   auth_hash: Uint8Array
   wrapped_vault_key: string
   seq: number
+  public_key: string | null
+  sealed_private_key: string | null
 }
 
 export function createApp(options: ServerOptions): { server: Server; db: DatabaseSync } {
@@ -124,12 +138,25 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     bumpSeq: db.prepare('UPDATE users SET seq = seq + 1 WHERE id = ? RETURNING seq'),
     // ---- further vaults ----
     myVaults: db.prepare(
-      `SELECT v.id, v.seq, m.role, m.wrapped_key, m.meta FROM vault_members m JOIN vaults v ON v.id = m.vault_id
+      `SELECT v.id, v.seq, v.epoch, m.role, m.wrapped_key, m.meta,
+         (SELECT COUNT(*) FROM vault_members o WHERE o.vault_id = v.id) AS member_count
+       FROM vault_members m JOIN vaults v ON v.id = m.vault_id
        WHERE m.user_id = ? ORDER BY v.created_at`,
     ),
     membership: db.prepare(
-      'SELECT v.id, v.seq, m.role FROM vault_members m JOIN vaults v ON v.id = m.vault_id WHERE m.vault_id = ? AND m.user_id = ?',
+      'SELECT v.id, v.seq, v.epoch, m.role FROM vault_members m JOIN vaults v ON v.id = m.vault_id WHERE m.vault_id = ? AND m.user_id = ?',
     ),
+    setKeys: db.prepare('UPDATE users SET public_key = ?, sealed_private_key = ? WHERE id = ?'),
+    members: db.prepare(
+      `SELECT u.id, u.username, u.public_key, m.role FROM vault_members m JOIN users u ON u.id = m.user_id
+       WHERE m.vault_id = ? ORDER BY u.username`,
+    ),
+    adminCount: db.prepare("SELECT COUNT(*) AS n FROM vault_members WHERE vault_id = ? AND role IN ('admin', 'owner')"),
+    memberCount: db.prepare('SELECT COUNT(*) AS n FROM vault_members WHERE vault_id = ?'),
+    setRole: db.prepare('UPDATE vault_members SET role = ? WHERE vault_id = ? AND user_id = ?'),
+    setMemberKey: db.prepare('UPDATE vault_members SET wrapped_key = ? WHERE vault_id = ? AND user_id = ?'),
+    bumpEpoch: db.prepare('UPDATE vaults SET epoch = epoch + 1 WHERE id = ? RETURNING epoch'),
+    vaultIds: db.prepare('SELECT id FROM vault_items WHERE vault_id = ?'),
     vaultExists: db.prepare('SELECT 1 FROM vaults WHERE id = ?'),
     vaultCount: db.prepare('SELECT COUNT(*) AS n FROM vault_members WHERE user_id = ?'),
     insertVault: db.prepare('INSERT INTO vaults (id, created_at) VALUES (?, ?)'),
@@ -150,7 +177,7 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     vaultBumpSeq: db.prepare('UPDATE vaults SET seq = seq + 1 WHERE id = ? RETURNING seq'),
     vaultUsage: db.prepare(
       `SELECT COUNT(*) AS items, COALESCE(SUM(LENGTH(i.blob)), 0) AS bytes FROM vault_items i
-       JOIN vault_members m ON m.vault_id = i.vault_id WHERE m.user_id = ? AND m.role = 'owner'`,
+       JOIN vault_members m ON m.vault_id = i.vault_id WHERE m.user_id = ? AND m.role IN ('admin', 'owner')`,
     ),
   }
 
@@ -262,10 +289,21 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
   }
 
   /** The caller's membership of a vault; one they are not in might as well not exist. */
-  function memberOf(vaultId: string, userId: number): { id: string; seq: number; role: string } {
-    const row = q.membership.get(vaultId, userId) as { id: string; seq: number; role: string } | undefined
+  function memberOf(vaultId: string, userId: number): { id: string; seq: number; epoch: number; role: string } {
+    const row = q.membership.get(vaultId, userId) as { id: string; seq: number; epoch: number; role: string } | undefined
     if (!row) throw new HttpError(404, 'Vault not found')
     return row
+  }
+
+  function adminOf(vaultId: string, userId: number): { id: string; seq: number; epoch: number; role: string } {
+    const row = memberOf(vaultId, userId)
+    if (!isAdmin(row.role)) throw new HttpError(403, 'Only the vault\'s admins can do that')
+    return row
+  }
+
+  function roleOf(v: unknown): (typeof ROLES)[number] {
+    if (!ROLES.includes(v as (typeof ROLES)[number])) throw new HttpError(400, 'Invalid role')
+    return v as (typeof ROLES)[number]
   }
 
   type Change = { id: string; blob: string; baseSeq: number }
@@ -321,7 +359,7 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
   const routes: Record<string, Handler> = {
     // features: what this server can do beyond the first release, so an app
     // can tell an older server it must not ask for them.
-    'GET /v1/health': () => ({ ok: true, version, registration: allowRegistration, features: ['vaults'] }),
+    'GET /v1/health': () => ({ ok: true, version, registration: allowRegistration, features: ['vaults', 'shared'] }),
 
     // Returns the KDF parameters a client needs to derive its auth key. Unknown
     // usernames get stable fake parameters so accounts cannot be enumerated.
@@ -491,8 +529,26 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     // ---- further vaults --------------------------------------------------------------
     'GET /v1/vaults': (req) => {
       const { user } = authenticate(req)
-      const rows = q.myVaults.all(user.id) as Array<{ id: string; seq: number; role: string; wrapped_key: string; meta: string }>
-      return { vaults: rows.map((r) => ({ id: r.id, role: r.role, wrappedKey: r.wrapped_key, meta: r.meta, head: r.seq })) }
+      const rows = q.myVaults.all(user.id) as Array<{
+        id: string
+        seq: number
+        epoch: number
+        role: string
+        wrapped_key: string
+        meta: string
+        member_count: number
+      }>
+      return {
+        vaults: rows.map((r) => ({
+          id: r.id,
+          role: isAdmin(r.role) ? 'admin' : 'member',
+          wrappedKey: r.wrapped_key,
+          meta: r.meta,
+          head: r.seq,
+          epoch: r.epoch,
+          members: r.member_count,
+        })),
+      }
     },
 
     'POST /v1/vaults': async (req) => {
@@ -508,7 +564,7 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
           throw new HttpError(413, 'Vault limit reached')
         }
         q.insertVault.run(id, Date.now())
-        q.insertMember.run(id, user.id, 'owner', wrappedKey, meta)
+        q.insertMember.run(id, user.id, 'admin', wrappedKey, meta)
         db.exec('COMMIT')
       } catch (e) {
         db.exec('ROLLBACK')
@@ -533,10 +589,149 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
     'POST /v1/vaults/leave': async (req) => {
       const { user } = authenticate(req)
       const vaultId = str((await readJson(req)).vaultId, 'vaultId', 64, ID_RE)
-      memberOf(vaultId, user.id)
+      const vault = memberOf(vaultId, user.id)
+      if (
+        isAdmin(vault.role) &&
+        (q.adminCount.get(vaultId) as { n: number }).n === 1 &&
+        (q.memberCount.get(vaultId) as { n: number }).n > 1
+      ) {
+        throw new HttpError(409, 'Make another member an admin before you leave')
+      }
       q.removeMember.run(vaultId, user.id)
       q.pruneVaults.run()
       return { ok: true }
+    },
+
+    // ---- shared vaults -------------------------------------------------------------
+    // The account's key pair: set once by its first device that needs it.
+    'GET /v1/account/keys': (req) => {
+      const { user } = authenticate(req)
+      return { publicKey: user.public_key, sealedPrivateKey: user.sealed_private_key }
+    },
+
+    'POST /v1/account/keys': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const publicKey = str(body.publicKey, 'publicKey', 44, PUBLIC_KEY_RE)
+      const sealedPrivateKey = str(body.sealedPrivateKey, 'sealedPrivateKey', 1024, B64_RE)
+      // Others have sealed vault keys to the public key: it can be sealed again, never replaced.
+      if (user.public_key && user.public_key !== publicKey) throw new HttpError(409, 'This account already has a key pair')
+      q.setKeys.run(publicKey, sealedPrivateKey, user.id)
+      return { ok: true }
+    },
+
+    // Another account's public key, to add them to a vault (after comparing its fingerprint).
+    'POST /v1/users/key': async (req) => {
+      authenticate(req)
+      const username = usernameOf((await readJson(req)).username)
+      const other = q.userByName.get(username) as UserRow | undefined
+      if (!other?.public_key) throw new HttpError(404, 'No account by that name can be added to a vault yet')
+      return { username, publicKey: other.public_key }
+    },
+
+    'GET /v1/vaults/members': (req, url) => {
+      const { user } = authenticate(req)
+      const vault = memberOf(str(url.searchParams.get('vault'), 'vault', 64, ID_RE), user.id)
+      const rows = q.members.all(vault.id) as Array<{ username: string; public_key: string | null; role: string }>
+      return {
+        members: rows.map((r) => ({ username: r.username, role: isAdmin(r.role) ? 'admin' : 'member', publicKey: r.public_key })),
+      }
+    },
+
+    // Adds an account, with the vault key and name sealed to its public key.
+    'POST /v1/vaults/members/add': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const vault = adminOf(str(body.vaultId, 'vaultId', 64, ID_RE), user.id)
+      const other = q.userByName.get(usernameOf(body.username)) as UserRow | undefined
+      const role = roleOf(body.role)
+      const wrappedKey = str(body.wrappedKey, 'wrappedKey', 1024, B64_RE)
+      const meta = str(body.meta, 'meta', 4096, B64_RE)
+      if (!other?.public_key) throw new HttpError(404, 'No account by that name can be added to a vault yet')
+      if (body.epoch !== vault.epoch) throw new HttpError(409, 'The vault key changed; try again')
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        if (q.membership.get(vault.id, other.id)) throw new HttpError(409, 'Already a member')
+        if ((q.vaultCount.get(other.id) as { n: number }).n >= LIMITS.vaultsPerUser) throw new HttpError(413, 'That account has too many vaults')
+        q.insertMember.run(vault.id, other.id, role, wrappedKey, meta)
+        db.exec('COMMIT')
+      } catch (e) {
+        db.exec('ROLLBACK')
+        throw e
+      }
+      return { ok: true }
+    },
+
+    'POST /v1/vaults/members/role': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const vault = adminOf(str(body.vaultId, 'vaultId', 64, ID_RE), user.id)
+      const other = q.userByName.get(usernameOf(body.username)) as UserRow | undefined
+      const role = roleOf(body.role)
+      const current = other && (q.membership.get(vault.id, other.id) as { role: string } | undefined)
+      if (!other || !current) throw new HttpError(404, 'Not a member')
+      if (isAdmin(current.role) && role === 'member' && (q.adminCount.get(vault.id) as { n: number }).n === 1) {
+        throw new HttpError(409, 'A vault needs at least one admin')
+      }
+      q.setRole.run(role, vault.id, other.id)
+      return { ok: true }
+    },
+
+    // Removes a member. Their app keeps what it already had, so the admin's
+    // app then makes a new vault key (POST /v1/vaults/rekey).
+    'POST /v1/vaults/members/remove': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const vault = adminOf(str(body.vaultId, 'vaultId', 64, ID_RE), user.id)
+      const other = q.userByName.get(usernameOf(body.username)) as UserRow | undefined
+      const current = other && (q.membership.get(vault.id, other.id) as { role: string } | undefined)
+      if (!other || !current) throw new HttpError(404, 'Not a member')
+      if (isAdmin(current.role) && (q.adminCount.get(vault.id) as { n: number }).n === 1) {
+        throw new HttpError(409, 'A vault needs at least one admin')
+      }
+      q.removeMember.run(vault.id, other.id)
+      return { ok: true }
+    },
+
+    // A new vault key: every member's sealed copy and every item, re-encrypted,
+    // replaced in one go. Each item gets a new sequence number, so every device
+    // reads them all again.
+    'POST /v1/vaults/rekey': async (req) => {
+      const { user } = authenticate(req)
+      const body = await readJson(req)
+      const vault = adminOf(str(body.vaultId, 'vaultId', 64, ID_RE), user.id)
+      if (body.epoch !== vault.epoch) throw new HttpError(409, 'The vault key changed; try again')
+      if (!Array.isArray(body.keys) || !Array.isArray(body.items)) throw new HttpError(400, 'Invalid rekey')
+      const keys = new Map<string, string>()
+      for (const k of body.keys as Array<Record<string, unknown>>) {
+        keys.set(usernameOf(k?.username), str(k?.wrappedKey, 'wrappedKey', 1024, B64_RE))
+      }
+      const items = new Map<string, string>()
+      for (const i of body.items as Array<Record<string, unknown>>) {
+        items.set(str(i?.id, 'id', 64, ID_RE), str(i?.blob, 'blob', LIMITS.blobChars, B64_RE))
+      }
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const members = q.members.all(vault.id) as Array<{ id: number; username: string }>
+        if (members.length !== keys.size || members.some((m) => !keys.has(m.username))) {
+          throw new HttpError(409, 'The members changed; try again')
+        }
+        const existing = (q.vaultIds.all(vault.id) as Array<{ id: string }>).map((r) => r.id)
+        if (existing.length !== items.size || existing.some((id) => !items.has(id))) {
+          throw new HttpError(409, 'The vault changed; try again')
+        }
+        for (const m of members) q.setMemberKey.run(keys.get(m.username)!, vault.id, m.id)
+        for (const [id, blob] of items) {
+          const seq = (q.vaultBumpSeq.get(vault.id) as { seq: number }).seq
+          q.vaultUpsertItem.run(vault.id, id, seq, blob)
+        }
+        const { epoch } = q.bumpEpoch.get(vault.id) as { epoch: number }
+        db.exec('COMMIT')
+        return { ok: true, epoch }
+      } catch (e) {
+        db.exec('ROLLBACK')
+        throw e
+      }
     },
 
     'GET /v1/vaults/sync': (req, url) => {
@@ -554,8 +749,12 @@ export function createApp(options: ServerOptions): { server: Server; db: Databas
       const { user } = authenticate(req)
       const body = await readJson(req)
       const vault = memberOf(str(body.vaultId, 'vaultId', 64, ID_RE), user.id)
-      if (vault.role !== 'owner' && vault.role !== 'admin') throw new HttpError(403, 'Only the vault\'s admins can change it')
       const parsed = parseChanges(body.changes)
+      // A member writes only their own items (known hosts they trusted, their key).
+      if (!isAdmin(vault.role)) {
+        const own = `${memberTag(user.username)}-`
+        if (parsed.some((c) => !c.id.startsWith(own))) throw new HttpError(403, 'Only the vault\'s admins can change it')
+      }
       return applyChanges(parsed, {
         count: () => (q.vaultItemCount.get(vault.id) as { n: number }).n,
         limit: LIMITS.itemsPerVault,

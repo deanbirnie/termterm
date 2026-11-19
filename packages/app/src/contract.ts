@@ -31,6 +31,8 @@ export interface HostView {
   proxy?: ProxyView
   /** Lets the server use this vault's keys onward (ssh -A). */
   agentForward?: boolean
+  /** Shared vault: each member logs in with their own personal login. */
+  personalLogin?: boolean
 }
 
 export interface ProxyView {
@@ -56,6 +58,8 @@ export interface IdentityView {
   username: string
   hasPassword: boolean
   keyId?: string
+  /** A personal login: the member (server username) it is for. */
+  assignee?: string
 }
 
 export interface IdentityInput {
@@ -64,6 +68,11 @@ export interface IdentityInput {
   keyId: string | null
   /** undefined = leave as is, null = remove, string = set */
   password?: string | null
+  /**
+   * Shared vault: makes it a personal login for this member, its password
+   * readable only by them and the admins (and no key: they bring their own).
+   */
+  assignee?: string | null
 }
 
 export interface ForwardView {
@@ -184,6 +193,23 @@ export interface VaultView {
   lastSyncAt?: number
   /** Changes not yet sent to its server. */
   pending?: number
+  /** Synced vault: whether you can change it (admin) or only connect (member). */
+  role?: 'admin' | 'member'
+  /** Synced vault: how many accounts share it. */
+  members?: number
+  /** You were removed from it, or it was deleted on the server: it no longer syncs. */
+  lost?: boolean
+}
+
+/** A member of a shared vault. */
+export interface MemberView {
+  username: string
+  role: 'admin' | 'member'
+  /** Of their account's public key; compare it with theirs before adding them. */
+  fingerprint: string | null
+  you: boolean
+  /** Their own key for this vault, for admins to put on servers. */
+  key?: { keyType: string; publicKey: string; certificate?: string }
 }
 
 /**
@@ -202,6 +228,8 @@ export interface ServerView {
   /** signed out by the server; needs this account's password again */
   needsSignIn: boolean
   error?: string
+  /** Of this account's public key: what others compare before adding you to a shared vault. */
+  fingerprint?: string
   /** The vaults on this device that sync through it, Personal first. */
   vaultIds: string[]
 }
@@ -223,6 +251,10 @@ export interface VaultSnapshot {
   multiVault: boolean
   /** Every sync server account this device uses, the Personal vault's first. */
   servers: ServerView[]
+  /** The vault shown is shared and you are a member there, not an admin: you can connect but not change it. */
+  readOnly: boolean
+  /** The vault shown is shared: your username there, and your own key for it, if you set one. */
+  sharedAs?: { username: string; admin: boolean; key?: { keyType: string; publicKey: string; fingerprint: string; certificate?: string } }
   hosts: HostView[]
   keys: KeyView[]
   identities: IdentityView[]
@@ -368,6 +400,8 @@ export interface HostInput {
   proxy?: ProxyInput | null
   /** undefined = leave as is */
   agentForward?: boolean
+  /** undefined = leave as is */
+  personalLogin?: boolean
 }
 
 /** What importing an export file did. */
@@ -482,6 +516,24 @@ export interface TermtermApi {
   connectVault(vaultId: string, serverId: string): Promise<void>
   /** Stops syncing a vault. With `fromServer`, also deletes the server's copy. */
   disconnectVault(vaultId: string, options?: { fromServer?: boolean }): Promise<void>
+  /** A synced vault's members. */
+  vaultMembers(vaultId: string): Promise<MemberView[]>
+  /** Finds an account on the vault's server to add: its fingerprint, to compare with theirs. */
+  lookupMember(vaultId: string, username: string): Promise<{ username: string; fingerprint: string }>
+  /** Adds a member; `fingerprint` is the one compared, refused if the key changed since. Admins only. */
+  addMember(vaultId: string, input: { username: string; role: 'admin' | 'member'; fingerprint: string }): Promise<void>
+  /** A new admin is given every personal login too. Admins only. */
+  setMemberRole(vaultId: string, username: string, role: 'admin' | 'member'): Promise<void>
+  /**
+   * Removes a member, then replaces the vault key so what they take with them
+   * goes no further. The passwords they could see should still be changed.
+   */
+  removeMember(vaultId: string, username: string): Promise<void>
+  /** Your own key for the shared vault shown: made here, or imported (with its certificate, if any). */
+  generateMemberKey(type: 'ed25519' | 'rsa'): Promise<void>
+  importMemberKey(input: KeyImportInput): Promise<void>
+  setMemberKeyCertificate(certificate: string | null): Promise<void>
+  removeMemberKey(): Promise<void>
   /** Shows another vault; every page then lists that vault's items. */
   switchVault(id: string): Promise<void>
   /** Adds (or with null removes) the OpenSSH certificate a key logs in with. */

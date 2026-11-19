@@ -501,6 +501,58 @@ it.
   before it can hold more than one vault. An older server keeps syncing the
   Personal vault as before.
 
+### Shared vaults (teams)
+
+A vault that syncs can be shared with other accounts on the same server.
+Everyone in it sees the same hosts, logins and known host keys.
+
+**Roles.**
+
+- **Admin:** adds and changes hosts, logins and members.
+- **Member:** connects with the vault's hosts, and cannot change them. The
+  server refuses changes from members. A member's app shows a note at the top
+  of the page.
+
+**Adding someone.**
+
+1. They make an account on the vault's server (Sync → Add a sync server, or
+   the Personal vault's account). Their **fingerprint** shows under that
+   account on their Sync page.
+2. You: **Settings → Vaults**, the people button next to the vault →
+   **Members**. Enter their username → **Find**.
+3. Compare the fingerprint on your screen with the one on theirs, by phone or
+   in person. Add them only if they are the same. This makes sure the server
+   gives you their real key.
+4. They: **Sync → Add vaults…** next to that account → **Add**.
+
+**Removing someone.** In **Members**, the remove button. The vault gets a new
+key, so changes made after that do not reach them. Their device keeps what it
+already had, so **change the passwords and keys they could use** on your
+servers. Their app shows that they no longer have access.
+
+**Shared and personal logins.** A login (an identity under **Keychain**) is
+for everyone, or for one member only:
+
+- **Shared login** (For: Everyone): every member can use it, for example a
+  common `admin` account.
+- **Personal login** (For: one member): its password is encrypted for that
+  member and the admins only. Other members cannot read or use it, so nobody
+  can log in as someone else. A member made admin later is given access to
+  personal logins too.
+- On a host, turn on **Each member logs in with their own personal login**.
+  Each member then connects with the personal login assigned to them.
+
+**Your own key.** In **Members**, under **Your own key**: make a new key, or
+import a key you already have (with its certificate, if your servers use
+one). Only your devices can use its private key. The admins see its public
+key, to put on the servers or to sign a certificate for it. It is used with
+your personal login.
+
+**Seeing versus using.** A member never sees a login's password on screen.
+But to connect, their device must read it. To keep a password from someone
+completely, give them a personal login with their own key, or an SSH
+certificate, instead of a shared password.
+
 **Changing your master password** (Settings) signs your other devices out.
 Each one shows **Sign in again** on its Sync page: enter the new password
 there, and from then on that device unlocks with it too.

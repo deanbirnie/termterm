@@ -70,7 +70,10 @@ for (const shell of shells) {
         }, 5_000)
       }
     })
-    setTimeout(() => pty.write(`${probe[shell.id] ?? posix}\r`), 1500)
+    // A shell still starting can drop what is typed (Git Bash sometimes does on
+    // a fresh CI machine), so the probe is typed again while no answer came.
+    const send = () => pty.write(`${probe[shell.id] ?? posix}\r`)
+    for (const at of [1500, 10_000, 20_000]) setTimeout(() => !passed && !exited && send(), at)
   })
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${shell.name}`)
   if (!ok) failed = true

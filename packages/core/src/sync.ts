@@ -35,6 +35,17 @@ export interface RemoteVault {
   wrappedKey: string
   meta: string
   head: number
+  /** Which vault key: it goes up each time the key is replaced (after removing a member). Servers before 0.14 omit it. */
+  epoch?: number
+  /** How many accounts are members (servers before 0.14 omit it). */
+  members?: number
+}
+
+export interface RemoteMember {
+  username: string
+  role: 'admin' | 'member'
+  /** null for an account that never made a key pair */
+  publicKey: string | null
 }
 
 export class SyncError extends Error {
@@ -216,6 +227,46 @@ export class SyncApi {
 
   vaultPush(vaultId: string, changes: Change[]): Promise<{ results: PushResult[] }> {
     return this.call('POST', '/vaults/sync', { vaultId, changes })
+  }
+
+  // ---- shared vaults ----
+
+  accountKeys(): Promise<{ publicKey: string | null; sealedPrivateKey: string | null }> {
+    return this.call('GET', '/account/keys')
+  }
+
+  setAccountKeys(publicKey: string, sealedPrivateKey: string): Promise<unknown> {
+    return this.call('POST', '/account/keys', { publicKey, sealedPrivateKey })
+  }
+
+  async userKey(username: string): Promise<string> {
+    return (await this.call<{ publicKey: string }>('POST', '/users/key', { username })).publicKey
+  }
+
+  async members(vaultId: string): Promise<RemoteMember[]> {
+    return (await this.call<{ members: RemoteMember[] }>('GET', `/vaults/members?vault=${encodeURIComponent(vaultId)}`)).members
+  }
+
+  addMember(vaultId: string, epoch: number, member: { username: string; role: 'admin' | 'member'; wrappedKey: string; meta: string }): Promise<unknown> {
+    return this.call('POST', '/vaults/members/add', { vaultId, epoch, ...member })
+  }
+
+  setMemberRole(vaultId: string, username: string, role: 'admin' | 'member'): Promise<unknown> {
+    return this.call('POST', '/vaults/members/role', { vaultId, username, role })
+  }
+
+  removeMember(vaultId: string, username: string): Promise<unknown> {
+    return this.call('POST', '/vaults/members/remove', { vaultId, username })
+  }
+
+  /** Replaces the vault key: every member's sealed copy and every item, at once. */
+  rekeyVault(
+    vaultId: string,
+    epoch: number,
+    keys: Array<{ username: string; wrappedKey: string }>,
+    items: Array<{ id: string; blob: string }>,
+  ): Promise<{ epoch: number }> {
+    return this.call('POST', '/vaults/rekey', { vaultId, epoch, keys, items })
   }
 }
 

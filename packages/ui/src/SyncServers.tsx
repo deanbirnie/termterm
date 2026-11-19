@@ -1,4 +1,4 @@
-import { Cloud, LogOut, Plus, TriangleAlert } from 'lucide-react'
+import { Cloud, LogOut, Plus, RefreshCw, TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { RemoteVaultView, ServerView, VaultSnapshot, VaultView } from '@termterm/app'
 import { api } from './api'
@@ -30,6 +30,11 @@ export function SyncServers({ snapshot }: { snapshot: VaultSnapshot }) {
                   {s.personal && <span className="muted"> · the Personal vault’s account</span>}
                 </span>
                 <span className="vault-actions">
+                  {!s.personal && (
+                    <button className="icon-btn" aria-label={`Sync ${serverName(s)} now`} title="Sync now" onClick={() => void api.syncNow().catch(() => undefined)}>
+                      <RefreshCw size={15} />
+                    </button>
+                  )}
                   <Button variant="ghost" onClick={() => setBrowsing(s)} disabled={s.needsSignIn}>
                     Add vaults…
                   </Button>
@@ -47,6 +52,12 @@ export function SyncServers({ snapshot }: { snapshot: VaultSnapshot }) {
                   <span className="muted">No vaults on this device sync here.</span>
                 )}
               </div>
+              {s.fingerprint && (
+                <p className="field-hint">
+                  Your fingerprint here: <span className="mono">{s.fingerprint}</span>. Read it out to an admin who adds
+                  you to a shared vault.
+                </p>
+              )}
               {s.insecure && (
                 <p className="field-hint">Plain HTTP: your sign-in can be read on the network.</p>
               )}

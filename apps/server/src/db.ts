@@ -62,6 +62,17 @@ export function openDb(path: string): DatabaseSync {
   if (!sessionColumns.some((c) => c.name === 'label')) {
     db.exec('ALTER TABLE sessions ADD COLUMN label TEXT')
   }
+  // Added for shared vaults: the account's key pair (its private key sealed by
+  // the account's devices), and each vault's key generation.
+  const userColumns = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>
+  if (!userColumns.some((c) => c.name === 'public_key')) {
+    db.exec('ALTER TABLE users ADD COLUMN public_key TEXT')
+    db.exec('ALTER TABLE users ADD COLUMN sealed_private_key TEXT')
+  }
+  const vaultColumns = db.prepare('PRAGMA table_info(vaults)').all() as Array<{ name: string }>
+  if (!vaultColumns.some((c) => c.name === 'epoch')) {
+    db.exec('ALTER TABLE vaults ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0')
+  }
   db.prepare('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)').run(
     'server_secret',
     randomBytes(32),

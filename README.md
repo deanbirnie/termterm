@@ -487,6 +487,16 @@ with **dry run** ticked.
 - Server host keys are trusted on first use and stored in the vault, so a
   changed key is flagged on all your devices. Credentials are not sent until
   the host key is accepted.
+- Shared vaults: each sync server account has an X25519 key pair. Its
+  private key is on the server sealed with the account's own key; its public
+  key can be fetched by anyone signed in there, to add the account to a
+  vault. A shared vault's key is sealed to each member's public key, so the
+  server still sees only ciphertext. Admins compare a member's key
+  fingerprint before adding them, so a dishonest server cannot slip in its
+  own key. The server enforces the roles: members cannot change a shared
+  vault, except for their own items (the host keys they trust, their own
+  key). Removing a member replaces the vault key and re-encrypts everything.
+  The server does learn which accounts share a vault, and their usernames.
 
 - The vault locks itself after 15 minutes without input (configurable) and
   when the computer sleeps or its screen is locked. Open SSH sessions keep

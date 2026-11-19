@@ -1,7 +1,8 @@
-import { Cloud, CloudOff, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Cloud, CloudOff, Pencil, Plus, Trash2, Users } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Settings, VaultSnapshot, VaultView } from '@termterm/app'
 import { api } from './api'
+import { MembersDialog } from './Members'
 import { ConnectVaultDialog, DisconnectVaultDialog } from './SyncServers'
 import { Button, ErrorText, Field, Modal, useAction } from './ui'
 
@@ -20,6 +21,7 @@ export function VaultBar({
 }) {
   if (!snapshot.multiVault) return null
   return (
+    <>
     <div className="vault-bar">
       <label className="vault-pick">
         <span>Vault</span>
@@ -35,6 +37,12 @@ export function VaultBar({
         Manage vaults
       </Button>
     </div>
+    {snapshot.readOnly && (
+      <p className="vault-note" role="note">
+        Shared vault: you can connect with its hosts. Only its admins can change them.
+      </p>
+    )}
+    </>
   )
 }
 
@@ -79,6 +87,7 @@ export function VaultsSettings({ snapshot }: { snapshot: VaultSnapshot }) {
   const [deleting, setDeleting] = useState<VaultView | null>(null)
   const [connecting, setConnecting] = useState<VaultView | null>(null)
   const [disconnecting, setDisconnecting] = useState<VaultView | null>(null)
+  const [membersOf, setMembersOf] = useState<VaultView | null>(null)
   const serverOf = (v: VaultView) => snapshot.servers.find((s) => s.id === v.serverId)
   const [settings, setSettings] = useState<Settings | null>(null)
   useEffect(() => {
@@ -99,9 +108,17 @@ export function VaultsSettings({ snapshot }: { snapshot: VaultSnapshot }) {
               <strong>{v.name}</strong>
               {v.personal && <span className="muted"> · opened with your master password</span>}
               {serverOf(v) && <span className="muted"> · syncs with {serverOf(v)!.serverUrl.replace(/^https?:\/\//, '')}</span>}
+              {(v.members ?? 1) > 1 && <span className="muted"> · shared, {v.members} members</span>}
+              {v.role === 'member' && <span className="muted"> · you connect only</span>}
+              {v.lost && <span className="muted"> · you no longer have access: it stopped syncing</span>}
               {v.id === snapshot.activeVaultId && <span className="muted"> · shown now</span>}
             </span>
             <span className="vault-actions">
+              {v.serverId && (
+                <button className="icon-btn" aria-label={`Members of ${v.name}`} title="Members" onClick={() => setMembersOf(v)}>
+                  <Users size={15} />
+                </button>
+              )}
               <button className="icon-btn" aria-label={`Rename ${v.name}`} title="Rename" onClick={() => setNaming({ vault: v })}>
                 <Pencil size={15} />
               </button>
@@ -149,6 +166,13 @@ export function VaultsSettings({ snapshot }: { snapshot: VaultSnapshot }) {
       {deleting && <DeleteVaultDialog vault={deleting} onClose={() => setDeleting(null)} />}
       {connecting && <ConnectVaultDialog vault={connecting} servers={snapshot.servers} onClose={() => setConnecting(null)} />}
       {disconnecting && <DisconnectVaultDialog vault={disconnecting} onClose={() => setDisconnecting(null)} />}
+      {membersOf && (
+        <MembersDialog
+          vault={snapshot.vaults.find((v) => v.id === membersOf.id) ?? membersOf}
+          snapshot={snapshot}
+          onClose={() => setMembersOf(null)}
+        />
+      )}
     </section>
   )
 }

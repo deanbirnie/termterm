@@ -25,11 +25,12 @@ const DELETED_LOG_AAD = 'termterm:deleted-log'
 /** Deletions remembered for rollback checks; the oldest are forgotten beyond this. */
 const DELETED_LOG_MAX = 20_000
 
-interface Payload {
+export interface ItemPayload {
   type: string
   updatedAt: number
   data: unknown
 }
+type Payload = ItemPayload
 
 /**
  * An unlocked vault. Holds the vault key and a decrypted view of the items in
@@ -400,6 +401,18 @@ export class Vault {
   private sealPayload(id: string, p: Payload): string {
     const { type, updatedAt, data } = p
     return seal(this.vaultKey, utf8(JSON.stringify({ type, updatedAt, data })), itemAad(id))
+  }
+
+  /** Opens an item's stored blob with a given vault key (for replacing a shared vault's key). */
+  static openBlob(key: Uint8Array, id: string, blob: string): ItemPayload {
+    const p = JSON.parse(fromUtf8(open(key, blob, itemAad(id)))) as ItemPayload
+    if (typeof p.type !== 'string' || typeof p.updatedAt !== 'number') throw new DecryptError('Malformed item')
+    return p
+  }
+
+  static sealBlob(key: Uint8Array, id: string, p: ItemPayload): string {
+    const { type, updatedAt, data } = p
+    return seal(key, utf8(JSON.stringify({ type, updatedAt, data })), itemAad(id))
   }
 
   private openPayload(id: string, blob: string): Payload {
