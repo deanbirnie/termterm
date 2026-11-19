@@ -14,7 +14,7 @@ procedure in [MAINTENANCE.md](MAINTENANCE.md).
 
 | Piece | Location | Stack |
 |---|---|---|
-| Vault crypto, item model, sync client | `packages/core` | TypeScript, `hash-wasm` (Argon2id), `@noble/ciphers` (XChaCha20-Poly1305). No Node or DOM specifics: the desktop and Android apps both use it. |
+| Vault crypto, item model, sync client | `packages/core` | TypeScript, `hash-wasm` (Argon2id), `@noble/ciphers` (XChaCha20-Poly1305), `@noble/curves` (X25519, for shared vaults). No Node or DOM specifics: the desktop and Android apps both use it. |
 | App logic shared by every client | `packages/app` | The UI-to-platform contract (`contract.ts`) and `VaultService`: unlock, edit, save, sync. Platform specifics (storage, OS credential store, SSH key handling) are injected as a `Platform`. |
 | Shared interface | `packages/ui` | React screens and terminal, used by desktop and mobile. Talks only to `window.termterm` (the contract). |
 | Sync server | `apps/server` | Node 22 `node:http` + `node:sqlite`, zero runtime dependencies, Docker image. |
@@ -272,27 +272,27 @@ Rules for all three:
       "check this is the right server for the vault you want") and asks to
       confirm
 
-#### Batch 15 — Shared vaults (next)
+#### Batch 15 — Shared vaults (done; this PR is the release)
 
-- [ ] A key pair per account; a shared vault's key wrapped to each member's
+- [x] A key pair per account; a shared vault's key wrapped to each member's
       public key, so the server still sees only ciphertext
-- [ ] Adding a member by username on the same server, after comparing a
+- [x] Adding a member by username on the same server, after comparing a
       fingerprint; removing one makes a new vault key and re-encrypts (the
       owner is told to change the passwords the member could see)
-- [ ] Two roles from the start (agreed 2026-11-19): **Admin** adds and
+- [x] Two roles from the start (agreed 2026-11-19): **Admin** adds and
       changes hosts, logins and members; **Member** connects only. The sync
       server refuses changes from members
-- [ ] Shared logins (such as "admin", with a shared key or password) are
+- [x] Shared logins (such as "admin", with a shared key or password) are
       encrypted for every member
-- [ ] Personal logins (such as a member's own name) are assigned by an admin
+- [x] Personal logins (such as a member's own name) are assigned by an admin
       to one member and encrypted for that member and the admins only, so no
       other member can read or use them (no impersonation). A member made an
       admin later is given access to them too: the promoting admin's app
       encrypts them again for the new admin
-- [ ] For a personal login a member can use their own key: made on their
+- [x] For a personal login a member can use their own key: made on their
       device, or an existing key (with its certificate, if they have one)
       imported there; the admin only needs the public key
-- [ ] "Usable but not visible" (hiding a login's password or key from the
+- [x] "Usable but not visible" (hiding a login's password or key from the
       member who uses it) is screen-only: their device must decrypt it to
       connect. Recommended instead: keys the member holds themselves, or SSH
       certificates. Said plainly in the app and the guide
@@ -480,7 +480,7 @@ queue above, which names the batch each open item belongs to.
         for a device test: whether long-idle sessions survive Doze without a wake
         lock, and how the prompt behaves on phones with face unlock only.
   - [x] Step 5: signed `termterm-<version>.apk` on each release, when the signing key secrets are set (README, "Android signing key"). Exercised since 0.3.x: every release carries a signed APK, checked against the release certificate, and the owner has installed one over another.
-- [ ] Multiple vaults, a sync server per vault, shared vaults (Batches 13–15)
+- [x] Multiple vaults, a sync server per vault, shared vaults (Batches 13–15)
 
 ## Working on the repo
 

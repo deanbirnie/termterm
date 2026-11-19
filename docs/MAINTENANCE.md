@@ -280,7 +280,7 @@ Every third run or so, check current guidance rather than assuming:
   the current OWASP password-storage recommendations. Raising them applies to
   new vaults and password changes only; existing vaults keep the parameters
   stored in the file. `KDF_LIMITS` must continue to accept the old values.
-- `@noble/ciphers`, `@noble/hashes` and `hash-wasm` for security advisories
+- `@noble/ciphers`, `@noble/curves`, `@noble/hashes` and `hash-wasm` for security advisories
   and audits.
 - Report findings to the owner; changing parameters is an "Ask first" item.
 

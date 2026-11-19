@@ -179,7 +179,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .dot-error { background: var(--danger); }
 
 .page { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.page > :not(.vault-bar) { flex: 1; min-height: 0; }
+.page > :not(.vault-bar):not(.vault-note) { flex: 1; min-height: 0; }
 /* Which vault is on screen, above every vault page. */
 .vault-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 18px; border-bottom: 1px solid var(--border); background: var(--bg-raised); }
 .vault-pick { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
@@ -498,3 +498,8 @@ a.btn, a.update-pill { text-decoration: none; }
 .server-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .server-vaults { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; background: var(--bg-raised); }
+.vault-note { flex: none; margin: 0; padding: 6px 18px; font-size: 13px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.member-list li { display: block; }
+.member-list details { margin-top: 6px; }
+.member-list textarea { width: 100%; margin-top: 4px; }
+.fingerprint { font-size: 16px; letter-spacing: 0.04em; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; }

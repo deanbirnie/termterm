@@ -141,12 +141,16 @@ export function HostsPage({
         </form>
 
         <div className="toolbar">
-          <Button onClick={() => setEditing({ id: null })}>
-            <Plus size={15} /> New host
-          </Button>
-          <Button onClick={() => setImporting(true)} title="Import hosts from ~/.ssh/config and known_hosts">
-            <FileInput size={15} /> Import
-          </Button>
+          {!snapshot.readOnly && (
+            <Button onClick={() => setEditing({ id: null })}>
+              <Plus size={15} /> New host
+            </Button>
+          )}
+          {!snapshot.readOnly && (
+            <Button onClick={() => setImporting(true)} title="Import hosts from ~/.ssh/config and known_hosts">
+              <FileInput size={15} /> Import
+            </Button>
+          )}
           {localTerminal && (
             <LocalTerminalButton onOpen={(shell, title) => onConnect({ local: shell?.id ?? null }, title)} />
           )}
@@ -297,7 +301,8 @@ function HostPanel({
   const [proxyPassword, setProxyPassword] = useState('')
   const [clearProxyPassword, setClearProxyPassword] = useState(false)
   const [agentForward, setAgentForward] = useState(!!host?.agentForward)
-  const identity = snapshot.identities.find((i) => i.id === identityId)
+  const [personalLogin, setPersonalLogin] = useState(!!host?.personalLogin)
+  const identity = personalLogin ? undefined : snapshot.identities.find((i) => i.id === identityId)
   const groups = [...new Set(snapshot.hosts.map((h) => h.group).filter((g): g is string => !!g))].sort()
   const [password, setPassword] = useState('')
   const [clearPassword, setClearPassword] = useState(false)
@@ -353,6 +358,7 @@ function HostPanel({
         }
       : null,
     agentForward,
+    ...(snapshot.sharedAs || host?.personalLogin ? { personalLogin } : {}),
   })
   const dirty =
     !host ||
@@ -377,7 +383,8 @@ function HostPanel({
     proxyUser !== (host.proxy?.username ?? '') ||
     !!proxyPassword ||
     clearProxyPassword ||
-    agentForward !== !!host.agentForward
+    agentForward !== !!host.agentForward ||
+    personalLogin !== !!host.personalLogin
 
   const save = async (): Promise<string | null> => {
     let id: string | null = null
@@ -432,6 +439,19 @@ function HostPanel({
         </Field>
 
         <h3 className="group-title">SSH</h3>
+        {snapshot.sharedAs && (
+          <div className="field">
+            <label className="check">
+              <input type="checkbox" checked={personalLogin} onChange={(e) => setPersonalLogin(e.target.checked)} />
+              Each member logs in with their own personal login
+            </label>
+            <span className="field-hint">
+              Each member connects as the personal login an admin assigned to them (Keychain → identity, For), with its
+              password and their own key, so nobody logs in as someone else.
+            </span>
+          </div>
+        )}
+        {!personalLogin && (
         <Field
           label="Login"
           hint={
@@ -451,8 +471,9 @@ function HostPanel({
             ))}
           </select>
         </Field>
+        )}
         <div className="row">
-          {!identity && (
+          {!identity && !personalLogin && (
             <Field label="Username">
               <input placeholder="root" value={username} onChange={(e) => setUsername(e.target.value)} />
             </Field>
@@ -461,7 +482,7 @@ function HostPanel({
             <input inputMode="numeric" className="narrow" value={port} onChange={(e) => setPort(e.target.value)} />
           </Field>
         </div>
-        {!identity && (
+        {!identity && !personalLogin && (
           <Field label="Key">
             <select value={keyId} onChange={(e) => setKeyId(e.target.value)}>
               <option value="">No key</option>
@@ -545,7 +566,7 @@ function HostPanel({
             </div>
           </>
         )}
-        {!identity && (
+        {!identity && !personalLogin && (
           <Field
             label="Password"
             hint={
@@ -648,7 +669,8 @@ function HostPanel({
           </span>
         </div>
         <ErrorText error={error} />
-        <div className="panel-actions">
+        {snapshot.readOnly && <p className="field-hint">Only this vault’s admins can change it.</p>}
+        <div className="panel-actions" hidden={snapshot.readOnly}>
           <Button type="submit" disabled={busy || !dirty || !address.trim()}>
             {host ? 'Save changes' : 'Save host'}
           </Button>

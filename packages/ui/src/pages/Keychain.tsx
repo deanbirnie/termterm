@@ -1,5 +1,5 @@
 import { Check, Copy, KeyRound, Plus, Upload, UserRound, X } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { certificateProblem, parseCertificate, type IdentityView, type KeyView, type VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import { useAppInfo } from '../Update'
@@ -13,7 +13,8 @@ type Mode =
 
 export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
   const [mode, setMode] = useState<Mode | null>(null)
-  const canManage = useAppInfo()?.capabilities.keys ?? true
+  // A member of a shared vault can connect with it, but not change it.
+  const canManage = (useAppInfo()?.capabilities.keys ?? true) && !snapshot.readOnly
   const viewed = mode?.kind === 'view' ? snapshot.keys.find((k) => k.id === mode.id) : undefined
   const identity = mode?.kind === 'identity' && mode.id ? snapshot.identities.find((i) => i.id === mode.id) : undefined
 
@@ -31,9 +32,11 @@ export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
               </Button>
             </>
           )}
-          <Button onClick={() => setMode({ kind: 'identity', id: null })} title="A login that several hosts can share">
-            <UserRound size={15} /> New identity
-          </Button>
+          {!snapshot.readOnly && (
+            <Button onClick={() => setMode({ kind: 'identity', id: null })} title="A login that several hosts can share">
+              <UserRound size={15} /> New identity
+            </Button>
+          )}
         </div>
         {snapshot.keys.length === 0 ? (
           <Empty icon={<KeyRound size={28} />} title="No keys yet">
@@ -80,7 +83,9 @@ export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
                     <span className="card-text">
                       <strong>{i.label}</strong>
                       <small>
-                        {[i.username, i.keyId && 'key', i.hasPassword && 'password'].filter(Boolean).join(', ')}
+                        {[i.assignee && `personal login for ${i.assignee}`, i.username, i.keyId && 'key', i.hasPassword && 'password']
+                          .filter(Boolean)
+                          .join(', ')}
                       </small>
                     </span>
                   </button>
@@ -95,6 +100,7 @@ export function KeychainPage({ snapshot }: { snapshot: VaultSnapshot }) {
           key={mode.id ?? 'new'}
           item={identity}
           keys={snapshot.keys}
+          shared={snapshot.sharedAs ? { vaultId: snapshot.activeVaultId, admin: snapshot.sharedAs.admin } : undefined}
           usedBy={identity ? snapshot.hosts.filter((h) => h.identityId === identity.id).map((h) => h.label) : []}
           onClose={() => setMode(null)}
           onSaved={(id) => setMode({ kind: 'identity', id })}
@@ -335,16 +341,29 @@ function CertificateSection({ item }: { item: KeyView }) {
 function IdentityPanel({
   item,
   keys,
+  shared,
   usedBy,
   onClose,
   onSaved,
 }: {
   item?: IdentityView
   keys: KeyView[]
+  /** In a shared vault: logins can be personal, for one member. */
+  shared?: { vaultId: string; admin: boolean }
   usedBy: string[]
   onClose: () => void
   onSaved: (id: string) => void
 }) {
+  const [assignee, setAssignee] = useState(item?.assignee ?? '')
+  const [members, setMembers] = useState<string[]>([])
+  useEffect(() => {
+    if (!shared?.admin) return
+    let live = true
+    api.vaultMembers(shared.vaultId).then((m) => live && setMembers(m.map((x) => x.username)), () => undefined)
+    return () => {
+      live = false
+    }
+  }, [shared?.vaultId, shared?.admin])
   const [label, setLabel] = useState(item?.label ?? '')
   const [username, setUsername] = useState(item?.username ?? '')
   const [keyId, setKeyId] = useState(item?.keyId ?? '')
@@ -357,16 +376,19 @@ function IdentityPanel({
     label !== item.label ||
     username !== item.username ||
     keyId !== (item.keyId ?? '') ||
+    assignee !== (item.assignee ?? '') ||
     !!password ||
     clearPassword
+  const readOnly = !!shared && !shared.admin
   const submit = (e: FormEvent) => {
     e.preventDefault()
     void run(async () => {
       const id = await api.saveIdentity(item?.id ?? null, {
         label,
         username,
-        keyId: keyId || null,
+        keyId: assignee ? null : keyId || null,
         password: password ? password : clearPassword ? null : undefined,
+        ...(shared ? { assignee: assignee || null } : {}),
       })
       setPassword('')
       setClearPassword(false)
@@ -386,16 +408,43 @@ function IdentityPanel({
         <Field label="Label">
           <input placeholder={username || 'Ops login'} value={label} onChange={(e) => setLabel(e.target.value)} />
         </Field>
-        <Field label="Key">
-          <select value={keyId} onChange={(e) => setKeyId(e.target.value)}>
-            <option value="">No key</option>
-            {keys.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {shared?.admin && (
+          <Field
+            label="For"
+            hint={
+              assignee
+                ? `A personal login: its password is sealed for ${assignee} and this vault’s admins only. ${assignee} can add their own key for it. Hosts marked “Each member logs in with their own personal login” use it for them.`
+                : 'A shared login: every member of the vault can use it.'
+            }
+          >
+            <select aria-label="For" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">Everyone (shared login)</option>
+              {[...new Set([...members, ...(assignee ? [assignee] : [])])].map((m) => (
+                <option key={m} value={m}>
+                  {m} only (personal login)
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {shared && (
+          <p className="field-hint">
+            Members can use a login without seeing it on screen, but their device must read it to connect. To keep a
+            password from someone, give them a personal login with their own key, or an SSH certificate, instead.
+          </p>
+        )}
+        {!assignee && (
+          <Field label="Key">
+            <select value={keyId} onChange={(e) => setKeyId(e.target.value)}>
+              <option value="">No key</option>
+              {keys.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Field
           label="Password"
           hint={
@@ -427,7 +476,8 @@ function IdentityPanel({
           </dl>
         )}
         <ErrorText error={error} />
-        <div className="panel-actions">
+        {readOnly && <p className="field-hint">Only this vault’s admins can change it.</p>}
+        <div className="panel-actions" hidden={readOnly}>
           <Button type="submit" disabled={busy || !dirty || !username.trim()}>
             {item ? 'Save changes' : 'Save identity'}
           </Button>

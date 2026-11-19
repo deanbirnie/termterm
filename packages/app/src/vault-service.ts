@@ -2273,6 +2273,9 @@ export class VaultService {
     key.fill(0)
     this.index = { ...this.index, servers: [...(this.index.servers ?? []), entry] }
     this.saveIndex()
+    // A key pair from the start, so others can add this account to shared vaults.
+    const made = this.accountOrNull(id)
+    if (made) await this.ensureKeyPair(made).catch(() => undefined)
     this.onSnapshot(this.snapshot())
     void this.labelServerSession(id)
     return id
