@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Settings } from '@termterm/app'
 
-const DEFAULTS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: true }
+const DEFAULTS: Settings = { autoLockMinutes: 15, rememberDevice: false, autoCheckUpdates: true, keepTabsOnVaultSwitch: false }
 
 /** Device-local preferences. Nothing secret lives here, so it is plain JSON outside the vault. */
 export class SettingsStore {
@@ -40,6 +40,7 @@ export class SettingsStore {
           ? raw.defaultShell
           : undefined,
       autoCheckUpdates: raw?.autoCheckUpdates !== false,
+      keepTabsOnVaultSwitch: raw?.keepTabsOnVaultSwitch === true,
       autoLockMinutes:
         Number.isFinite(minutes) && minutes >= 0 && minutes <= 24 * 60
           ? Math.floor(minutes)

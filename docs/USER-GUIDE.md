@@ -77,6 +77,32 @@ Every password field has an eye button to show what you are typing.
 
 ---
 
+## Vaults
+
+You can keep several vaults on a device, for example **Personal** and
+**Work**. Each vault has its own hosts, keys, identities, snippets, known hosts
+and port forwards. The app shows one vault at a time: the **Vault** list at the
+top of every page shows which one, and changes it.
+
+- **Make a vault:** **Manage vaults** (or **Settings → Vaults**) → **New
+  vault**. A new vault is empty.
+- **Rename or delete a vault:** in **Settings → Vaults**. To delete a vault you
+  type its name. Deleting removes everything in it from this device. The
+  Personal vault cannot be deleted.
+- **One master password** opens all your vaults.
+- **Nothing crosses between vaults.** A host can only use keys, identities,
+  jump hosts and snippets from its own vault, and the app has no way to copy
+  or move items from one vault to another.
+- **Switching closes your tabs.** When you change vault, open tabs close and
+  running port forwards stop, after a warning. To keep them open instead, turn
+  on **Keep tabs open when switching vaults** in **Settings → Vaults**. A tab
+  that stays open keeps using the vault it was opened from.
+- The app opens on the vault you used last.
+- **Sync:** for now only the Personal vault syncs. Other vaults stay on the
+  device where you made them.
+
+---
+
 ## Hosts
 
 The **Hosts** page lists the servers you have saved.

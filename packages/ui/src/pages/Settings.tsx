@@ -1,6 +1,6 @@
 import { TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
-import type { Settings, LocalShell } from '@termterm/app'
+import type { Settings, LocalShell, VaultSnapshot } from '@termterm/app'
 import { api } from '../api'
 import {
   DEFAULT_LINE_HEIGHT,
@@ -15,6 +15,7 @@ import { notePasswordUsed, REMINDER_DAYS } from '../password-reminder'
 import { FONT_CHOICES, fontStack, TERMINAL_THEMES, themeById } from '../terminal-themes'
 import { AboutCard, useAppInfo } from '../Update'
 import { Button, ErrorText, Field, PasswordInput, useAction } from '../ui'
+import { VaultsSettings } from '../Vaults'
 
 const AUTO_LOCK = [
   { minutes: 5, label: 'After 5 minutes' },
@@ -24,11 +25,17 @@ const AUTO_LOCK = [
   { minutes: 0, label: 'Never' },
 ]
 
-export function SettingsPage({ synced }: { synced: boolean }) {
+export function SettingsPage({ synced, snapshot }: { synced: boolean; snapshot: VaultSnapshot }) {
   return (
     <div className="split-main narrow-page">
       <h2 className="section-title">Settings</h2>
       <AutoLock />
+      {snapshot.multiVault && (
+        <>
+          <h2 className="section-title spaced">Vaults</h2>
+          <VaultsSettings snapshot={snapshot} />
+        </>
+      )}
       <h2 className="section-title spaced">Terminal</h2>
       <TerminalAppearance />
       <DefaultShell />

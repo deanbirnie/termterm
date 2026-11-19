@@ -14,6 +14,9 @@ import {
   type Item,
   decryptExport,
   encryptExport,
+  fromBase64,
+  randomId,
+  toBase64,
   type KeyData,
   type KnownHostData,
   type ProxyConfig,
@@ -127,13 +130,48 @@ function checkUsername(username: string): string {
   return u
 }
 
+/** The Personal vault's id among the vaults on a device. */
+export const PERSONAL_ID = 'personal'
+const PERSONAL_NAME = 'Personal'
+/** The list of further vaults (names and keys), sealed with the Personal vault's key. */
+const INDEX_FILE = 'vaults'
+const INDEX_CONTEXT = 'vault-index'
+const MAX_VAULTS = 50
+const vaultFile = (id: string) => `vault-${id}`
+
+/** The device's list of further vaults, as stored (sealed). */
+interface VaultIndex {
+  personalName: string
+  vaults: Array<{ id: string; name: string; key: string }>
+  /** The vault shown last; the Personal vault when unset. */
+  active?: string
+}
+
+/** What a connection reads and writes in the vault it was made from. */
+export interface VaultScope {
+  vaultId: string
+  host(id: string): Item<HostData> | undefined
+  key(id: string): Item<KeyData> | undefined
+  /** Every key in the vault (for agent forwarding). */
+  keys(): KeyData[]
+  forward(id: string): Item<ForwardData> | undefined
+  knownHostsFor(host: string, port: number): Item<KnownHostData>[]
+  trustHostKey(entry: KnownHostData, replace: boolean): void
+}
+
 /**
  * Owns the vault file and the unlocked vault: unlocking, editing, saving and
  * syncing. It is the same on every platform; what differs (storage, the OS
  * credential store, SSH key handling) is supplied as a `Platform`.
  */
 export class VaultService {
+  /** The Personal vault: opened with the master password, and the one that syncs. */
   private vault: Vault | null = null
+  /** Further vaults on this device, by id; their keys are in the (encrypted) list of vaults. */
+  private others = new Map<string, Vault>()
+  private index: VaultIndex = { personalName: PERSONAL_NAME, vaults: [] }
+  /** The vault every page shows, and new items go into. */
+  private activeId = PERSONAL_ID
   private rollback: SyncStatus['rollback'] = undefined
   private syncState: Pick<SyncStatus, 'state' | 'error' | 'needsSignIn'> = {
     state: 'idle',
@@ -144,6 +182,7 @@ export class VaultService {
   private syncTimer: ReturnType<typeof setTimeout> | null = null
   private interval: ReturnType<typeof setTimeout> | null = null
   private notifyQueued = false
+  private changedVaults = new Set<string>()
 
   /** Whether a vault file exists on this device; known once `ready` resolves. */
   private exists = false
@@ -196,7 +235,7 @@ export class VaultService {
   async create(password: string): Promise<void> {
     await this.assertNoVault()
     this.checkNewPassword(password)
-    this.adopt(await Vault.create(password))
+    await this.adopt(await Vault.create(password))
   }
 
   async signIn(input: AccountInput): Promise<void> {
@@ -209,7 +248,7 @@ export class VaultService {
     const { token, wrappedVaultKey } = await api.login(username, authKey)
     const vault = await Vault.fromAccount(kdf, wrappedVaultKey, input.password)
     vault.setSync(serverUrl, username, token)
-    this.adopt(vault)
+    await this.adopt(vault)
     void this.labelDevice()
     await this.syncNow()
   }
@@ -229,7 +268,7 @@ export class VaultService {
       }
       throw e
     }
-    if (!this.vault) this.adopt(vault)
+    if (!this.vault) await this.adopt(vault)
   }
 
   /**
@@ -244,7 +283,7 @@ export class VaultService {
     if (!key || this.vault) return
     try {
       const vault = Vault.unlockWithKey(await this.readFile(), key)
-      if (!this.vault) this.adopt(vault)
+      if (!this.vault) await this.adopt(vault)
     } catch {
       await this.deviceKey.clear()
     } finally {
@@ -270,7 +309,7 @@ export class VaultService {
     if (!key) throw new Error('Fingerprint unlock is not set up. Use your master password.')
     try {
       const vault = Vault.unlockWithKey(await this.readFile(), key)
-      if (!this.vault) this.adopt(vault)
+      if (!this.vault) await this.adopt(vault)
     } catch {
       // The stored key is for a different vault key (the vault was re-keyed).
       await this.deviceKey.clear()
@@ -313,14 +352,19 @@ export class VaultService {
     if (this.syncTimer) clearTimeout(this.syncTimer)
     if (this.interval) clearInterval(this.interval)
     this.syncTimer = this.interval = null
+    for (const id of this.others.keys()) this.saveOther(id)
     this.vault.lock()
     this.vault = null
+    for (const other of this.others.values()) other.lock()
+    this.others.clear()
+    this.index = { personalName: PERSONAL_NAME, vaults: [] }
+    this.activeId = PERSONAL_ID
     this.syncState = { state: 'idle', needsSignIn: false }
     this.onPhase('locked')
   }
 
   async changePassword(current: string, next: string): Promise<void> {
-    const v = this.v
+    const v = this.p
     this.checkNewPassword(next)
     if (next === current) throw new Error('The new password is the same as the current one')
     const rekey = await v.prepareRekey(current, next)
@@ -371,10 +415,20 @@ export class VaultService {
     this.save()
   }
 
-  private adopt(vault: Vault): void {
+  private async adopt(vault: Vault): Promise<void> {
     this.vault = vault
-    vault.onChange(() => this.changed())
+    this.activeId = PERSONAL_ID
+    vault.onChange(() => this.changed(PERSONAL_ID))
     this.save()
+    // The other vaults open before the app shows as unlocked, so it opens on
+    // the vault shown last (and starts that vault's forwards). A vault that
+    // cannot be read must not keep the Personal one shut.
+    try {
+      await this.openOthers(vault)
+    } catch (e) {
+      console.error('Could not open the other vaults:', e)
+    }
+    if (this.vault !== vault) return // locked meanwhile
     // If the credential store has gone away, unlocking still works with the password.
     void this.applyRememberDevice().catch(() => undefined)
     this.interval = setInterval(() => this.scheduleSync(0), SYNC_INTERVAL_MS)
@@ -388,7 +442,14 @@ export class VaultService {
     }
   }
 
+  /** The vault on screen. */
   private get v(): Vault {
+    if (!this.vault) throw new Error('Vault is locked')
+    return this.others.get(this.activeId) ?? this.vault
+  }
+
+  /** The Personal vault: the master password, the sync account. */
+  private get p(): Vault {
     if (!this.vault) throw new Error('Vault is locked')
     return this.vault
   }
@@ -411,25 +472,202 @@ export class VaultService {
     return this.writes
   }
 
-  private changed(): void {
+  private changed(vaultId: string): void {
+    this.changedVaults.add(vaultId)
     // Coalesce bursts (e.g. a sync applying many items) into one save + notify.
     if (this.notifyQueued) return
     this.notifyQueued = true
     queueMicrotask(() => {
       this.notifyQueued = false
+      const ids = [...this.changedVaults]
+      this.changedVaults.clear()
       if (!this.vault) return
-      this.save()
+      for (const id of ids) {
+        if (id === PERSONAL_ID) this.save()
+        else this.saveOther(id)
+      }
       this.onSnapshot(this.snapshot())
       if (this.vault.dirtyItems().length) this.scheduleSync(SYNC_DEBOUNCE_MS)
     })
+  }
+
+  // ---- several vaults ------------------------------------------------------------
+
+  /** Opens the vaults in the device's list (after the Personal vault opened). */
+  private async openOthers(personal: Vault): Promise<void> {
+    const storage = this.platform.storage
+    if (!storage.readNamed) return
+    await this.writes
+    const raw = await storage.readNamed(INDEX_FILE)
+    if (!raw || this.vault !== personal) return
+    const index = JSON.parse(personal.openText((JSON.parse(raw) as { box: string }).box, INDEX_CONTEXT)) as VaultIndex
+    for (const entry of index.vaults) {
+      const data = await storage.readNamed(vaultFile(entry.id))
+      if (this.vault !== personal) return
+      const key = fromBase64(entry.key)
+      // A vault whose file is missing (lost, or not copied with the rest) opens empty rather than not at all.
+      const vault = data ? Vault.unlockWithKey(JSON.parse(data) as VaultFile, key) : Vault.createWithKey(key)
+      key.fill(0)
+      this.attach(entry.id, vault)
+      if (!data) this.saveOther(entry.id)
+    }
+    this.index = index
+    if (index.active && this.others.has(index.active)) this.activeId = index.active
+    this.onSnapshot(this.snapshot())
+  }
+
+  private attach(id: string, vault: Vault): void {
+    this.others.set(id, vault)
+    vault.onChange(() => this.changed(id))
+  }
+
+  private saveOther(id: string): void {
+    const vault = this.others.get(id)
+    const write = this.platform.storage.writeNamed
+    if (!vault || !write) return
+    const data = JSON.stringify(vault.toFile())
+    this.writes = this.writes
+      .then(() => write.call(this.platform.storage, vaultFile(id), data))
+      .catch((err: unknown) => console.error('Could not save a vault:', err))
+  }
+
+  /** The list of vaults, sealed with the Personal vault's key (which a password change does not alter). */
+  private saveIndex(): void {
+    const write = this.platform.storage.writeNamed
+    if (!this.vault || !write) return
+    const data = JSON.stringify({ format: 1, box: this.vault.sealText(JSON.stringify(this.index), INDEX_CONTEXT) })
+    this.writes = this.writes
+      .then(() => write.call(this.platform.storage, INDEX_FILE, data))
+      .catch((err: unknown) => console.error('Could not save the list of vaults:', err))
+  }
+
+  addVault(name: string): string {
+    void this.p // throws when locked
+    const storage = this.platform.storage
+    if (!storage.readNamed || !storage.writeNamed) throw new Error('This device keeps one vault only')
+    const label = this.checkVaultName(name)
+    if (this.index.vaults.length >= MAX_VAULTS) throw new Error(`At most ${MAX_VAULTS + 1} vaults on a device`)
+    const id = randomId()
+    const vault = Vault.createWithKey()
+    const key = vault.exportKey()
+    this.index = { ...this.index, vaults: [...this.index.vaults, { id, name: label, key: toBase64(key) }] }
+    key.fill(0)
+    this.attach(id, vault)
+    this.saveOther(id)
+    this.saveIndex()
+    this.onSnapshot(this.snapshot())
+    return id
+  }
+
+  renameVault(id: string, name: string): void {
+    void this.p // throws when locked
+    const label = this.checkVaultName(name, id)
+    if (id === PERSONAL_ID) this.index = { ...this.index, personalName: label }
+    else {
+      if (!this.others.has(id)) throw new Error('Vault not found')
+      this.index = { ...this.index, vaults: this.index.vaults.map((v) => (v.id === id ? { ...v, name: label } : v)) }
+    }
+    this.saveIndex()
+    this.onSnapshot(this.snapshot())
+  }
+
+  /** Deletes a vault and everything in it from this device. The Personal vault stays. */
+  deleteVault(id: string): void {
+    void this.p // throws when locked
+    if (id === PERSONAL_ID) throw new Error('The Personal vault cannot be deleted')
+    const vault = this.others.get(id)
+    if (!vault) throw new Error('Vault not found')
+    vault.lock()
+    this.others.delete(id)
+    this.index = { ...this.index, vaults: this.index.vaults.filter((v) => v.id !== id) }
+    if (this.activeId === id) this.activeId = PERSONAL_ID
+    if (this.index.active === id) this.index = { ...this.index, active: undefined }
+    this.saveIndex()
+    const remove = this.platform.storage.removeNamed
+    if (remove) {
+      this.writes = this.writes
+        .then(() => remove.call(this.platform.storage, vaultFile(id)))
+        .catch((err: unknown) => console.error('Could not delete a vault file:', err))
+    }
+    this.onSnapshot(this.snapshot())
+  }
+
+  /** Shows another vault; it stays the one shown the next time the app opens. */
+  switchVault(id: string): void {
+    void this.p // throws when locked
+    if (id !== PERSONAL_ID && !this.others.has(id)) throw new Error('Vault not found')
+    this.activeId = id
+    this.index = { ...this.index, active: id === PERSONAL_ID ? undefined : id }
+    this.saveIndex()
+    this.onSnapshot(this.snapshot())
+  }
+
+  /** The id of the vault on screen. */
+  get activeVault(): string {
+    return this.activeId
+  }
+
+  private checkVaultName(name: string, id?: string): string {
+    const label = required(name, 'Vault name', 64)
+    const names = [
+      ...(id === PERSONAL_ID ? [] : [this.index.personalName]),
+      ...this.index.vaults.filter((v) => v.id !== id).map((v) => v.name),
+    ]
+    if (names.some((n) => n.toLowerCase() === label.toLowerCase())) throw new Error(`There is already a vault called "${label}"`)
+    return label
+  }
+
+  /**
+   * The items of one vault, for a connection made from it: its hosts, keys,
+   * known hosts and forwards, whichever vault is on screen later. Without an
+   * id, the vault on screen now.
+   */
+  scope(vaultId?: string): VaultScope {
+    void this.p // throws when locked
+    const id = vaultId ?? this.activeId
+    const vault = () => {
+      if (!this.vault) throw new Error('Vault is locked')
+      const found = id === PERSONAL_ID ? this.vault : this.others.get(id)
+      if (!found) throw new Error('That vault is no longer on this device')
+      return found
+    }
+    return {
+      vaultId: id,
+      host: (hostId) => this.hostIn(vault(), hostId),
+      key: (keyId) => vault().get<KeyData>(keyId),
+      keys: () => vault().list<KeyData>('key').map((k) => k.data),
+      forward: (forwardId) => {
+        const item = vault().get<ForwardData>(forwardId)
+        return item?.type === 'forward' ? item : undefined
+      },
+      knownHostsFor: (host, port) =>
+        vault()
+          .list<KnownHostData>('knownHost')
+          .filter((k) => k.data.host === host && k.data.port === port),
+      trustHostKey: (entry, replace) => {
+        const v = vault()
+        if (replace) {
+          for (const old of v.list<KnownHostData>('knownHost')) {
+            if (old.data.host === entry.host && old.data.port === entry.port) v.delete(old.id)
+          }
+        }
+        v.put('knownHost', entry)
+      },
+    }
   }
 
   // ---- views ---------------------------------------------------------------
 
   snapshot(): VaultSnapshot {
     const v = this.v
-    const sync = v.sync
+    const sync = this.p.sync
     return {
+      vaults: [
+        { id: PERSONAL_ID, name: this.index.personalName, personal: true },
+        ...this.index.vaults.map((x) => ({ id: x.id, name: x.name, personal: false })),
+      ],
+      activeVaultId: this.activeId,
+      multiVault: !!this.platform.storage.writeNamed,
       hosts: v
         .list<HostData>('host')
         .map(({ id, data }) => ({
@@ -522,9 +760,14 @@ export class VaultService {
    * key in place of its own when it uses one.
    */
   host(id: string): Item<HostData> | undefined {
-    const host = this.v.get<HostData>(id)
+    return this.hostIn(this.v, id)
+  }
+
+  /** A host as connected to, from a given vault: its identity's login in place of its own. */
+  private hostIn(vault: Vault, id: string): Item<HostData> | undefined {
+    const host = vault.get<HostData>(id)
     if (host?.type !== 'host' || !host.data.identityId) return host
-    const identity = this.v.get<IdentityData>(host.data.identityId)
+    const identity = vault.get<IdentityData>(host.data.identityId)
     if (identity?.type !== 'identity') return host
     const { password: _p, keyId: _k, ...own } = host.data
     const { username, password, keyId } = identity.data
@@ -1076,7 +1319,7 @@ export class VaultService {
   // ---- sync ------------------------------------------------------------------
 
   async syncRegister(input: AccountInput): Promise<void> {
-    const v = this.v
+    const v = this.p
     if (v.sync) throw new Error('Sync is already set up')
     const serverUrl = normalizeServerUrl(input.serverUrl)
     const username = checkUsername(input.username)
@@ -1093,7 +1336,7 @@ export class VaultService {
    * into an account. Local items are kept; see `Vault.joinAccount`.
    */
   async syncSignIn(input: AccountInput): Promise<void> {
-    const v = this.v
+    const v = this.p
     if (v.sync) throw new Error('Sync is already set up')
     const serverUrl = normalizeServerUrl(input.serverUrl)
     const username = checkUsername(input.username)
@@ -1120,7 +1363,7 @@ export class VaultService {
    * from now on.
    */
   async syncReauth(password: string): Promise<void> {
-    const v = this.v
+    const v = this.p
     if (!v.sync) throw new Error('Sync is not set up')
     const api = new SyncApi(v.sync.serverUrl)
     const kdf = await api.prelogin(v.sync.username)
@@ -1149,7 +1392,7 @@ export class VaultService {
 
   /** How much the account stores on the sync server. Null from servers that do not say (before 0.11). */
   async syncUsage(): Promise<{ items: number; bytes: number; maxItems: number } | null> {
-    const v = this.v
+    const v = this.p
     if (!v.sync) return null
     try {
       return await new SyncApi(v.sync.serverUrl, v.syncToken()).usage()
@@ -1160,7 +1403,7 @@ export class VaultService {
   }
 
   async syncDevices(): Promise<DeviceView[]> {
-    const v = this.v
+    const v = this.p
     if (!v.sync) return []
     const sessions = await new SyncApi(v.sync.serverUrl, v.syncToken()).sessions()
     return sessions.map((s) => {
@@ -1175,7 +1418,7 @@ export class VaultService {
   }
 
   async syncRevokeDevice(id: string): Promise<void> {
-    const v = this.v
+    const v = this.p
     if (!v.sync) throw new Error('Sync is not set up')
     await new SyncApi(v.sync.serverUrl, v.syncToken()).revokeSession(String(id))
   }
@@ -1186,7 +1429,7 @@ export class VaultService {
    * devices keep theirs too and are told they are signed out.
    */
   async syncDeleteAccount(password: string): Promise<void> {
-    const v = this.v
+    const v = this.p
     if (!v.sync) throw new Error('Sync is not set up')
     const authKey = await v.authKeyFor(password)
     await new SyncApi(v.sync.serverUrl, v.syncToken()).deleteAccount(authKey)
@@ -1197,7 +1440,7 @@ export class VaultService {
   }
 
   async syncDisconnect(): Promise<void> {
-    const v = this.v
+    const v = this.p
     if (!v.sync) return
     const api = new SyncApi(v.sync.serverUrl, v.syncToken())
     v.clearSync()

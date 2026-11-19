@@ -38,6 +38,7 @@ import { FilesTab } from './FilesTab'
 import { TerminalTab } from './TerminalTab'
 import { UpdateCard, UpdatePill, useAppInfo } from './Update'
 import { VaultView } from './VaultView'
+import { SwitchVaultDialog } from './Vaults'
 
 /** One terminal session: an SSH connection or a shell on this computer. */
 export interface SessionTab {
@@ -77,6 +78,10 @@ const pct = (r: Rect) => ({
 
 export function Workspace({ locked }: { locked: boolean }) {
   const [snapshot, setSnapshot] = useState<VaultSnapshot | null>(null)
+  const snapshotRef = useRef(snapshot)
+  snapshotRef.current = snapshot
+  // A vault switch that would close tabs, waiting for the user to agree.
+  const [switching, setSwitching] = useState<{ id: string; name: string; tabs: number; forwards: string[] } | null>(null)
   const [sessions, setSessions] = useState<Record<string, SessionTab>>({})
   const [tabs, setTabs] = useState<Tab[]>([])
   const [active, setActive] = useState('vault')
@@ -141,6 +146,9 @@ export function Workspace({ locked }: { locked: boolean }) {
   // ---- tabs and panes ----------------------------------------------------------
 
   const newSession = (target: ConnectTarget, title: string, kind?: 'files'): SessionTab => {
+    // A connection keeps to the vault it was opened from, whichever is shown later.
+    const vaultId = snapshotRef.current?.activeVaultId
+    if (!('local' in target) && !target.vaultId && vaultId) target = { ...target, vaultId }
     const session: SessionTab = { id: crypto.randomUUID(), title, target, ...(kind ? { kind } : {}) }
     setSessions((s) => ({ ...s, [session.id]: session }))
     return session
@@ -189,6 +197,25 @@ export function Workspace({ locked }: { locked: boolean }) {
     },
     [tabs],
   )
+
+  /**
+   * Shows another vault. Unless the setting keeps them, open tabs close and
+   * running forwards stop, after the user agrees.
+   */
+  const switchVault = async (id: string) => {
+    const current = snapshotRef.current
+    if (!current || id === current.activeVaultId) return
+    const [settings, states] = await Promise.all([api.settings(), api.forwardStates()])
+    const forwards = Object.entries(states)
+      .filter(([, s]) => s.state === 'starting' || s.state === 'active')
+      .map(([fid]) => fid)
+    if (settings.keepTabsOnVaultSwitch || (tabs.length === 0 && forwards.length === 0)) {
+      await api.switchVault(id)
+      return
+    }
+    const name = current.vaults.find((v) => v.id === id)?.name ?? 'that vault'
+    setSwitching({ id, name, tabs: tabs.length, forwards })
+  }
 
   /** Takes a pane out of its tab: the tab closes with its last pane. */
   const detach = (tab: Tab, sessionId: string): Tab | null => {
@@ -558,7 +585,24 @@ export function Workspace({ locked }: { locked: boolean }) {
 
         <main className="content" ref={mainRef}>
           <div className="pane" hidden={active !== 'vault'}>
-            {snapshot && <VaultView snapshot={snapshot} onConnect={connect} />}
+            {snapshot && <VaultView snapshot={snapshot} onConnect={connect} onSwitchVault={switchVault} />}
+            {switching && (
+              <SwitchVaultDialog
+                to={switching.name}
+                tabs={switching.tabs}
+                forwards={switching.forwards.length}
+                onCancel={() => setSwitching(null)}
+                onConfirm={() => {
+                  const { id, forwards } = switching
+                  setSwitching(null)
+                  forget(Object.keys(sessions))
+                  setTabs([])
+                  setActive('vault')
+                  for (const f of forwards) void api.forwardStop(f).catch(() => undefined)
+                  void api.switchVault(id)
+                }}
+              />
+            )}
           </div>
 
           {/* Every session is rendered once, here, and only placed by its tab's

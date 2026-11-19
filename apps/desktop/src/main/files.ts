@@ -14,7 +14,7 @@ import { basename, dirname, join, posix, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Client, FileEntry as SftpDirEntry, SFTPWrapper, Stats } from 'ssh2'
 import type { ConnectTarget, FileEntry, FolderListing, TextFile, TransferState, VaultService } from '@termterm/app'
-import { openConnection, planConnection, type Prompts } from './ssh-connect'
+import { openConnection, planConnection, type Prompts, vaultIdOf } from './ssh-connect'
 
 interface FileSession {
   clients: Client[]
@@ -81,7 +81,7 @@ export class FileSessions {
     this.sessions.set(sessionId, session)
     try {
       const client = await openConnection(
-        this.vault,
+        this.vault.scope(vaultIdOf(target)),
         hops,
         (host, body) => (session.closed ? Promise.resolve(null) : this.prompts.ask(sessionId, host, body, session.prompts)),
         (c) => session.clients.push(c),

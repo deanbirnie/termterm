@@ -219,6 +219,20 @@ try {
   await a.getByRole('button', { name: 'Done' }).click()
   await a.locator('.card', { hasText: 'pasted-pi' }).waitFor()
   step('hosts can be imported from a pasted ~/.ssh/config')
+
+  // Vaults on a phone: the bar on top says which; switching shows only that vault's hosts.
+  const pick = a.getByRole('combobox', { name: 'Vault', exact: true })
+  await a.getByRole('button', { name: 'Manage vaults' }).click()
+  await a.getByRole('region', { name: 'Vaults' }).getByRole('button', { name: 'New vault' }).click()
+  await a.getByRole('dialog', { name: 'New vault' }).getByLabel('Vault name').fill('Work')
+  await a.getByRole('dialog', { name: 'New vault' }).getByRole('button', { name: 'Create vault' }).click()
+  await pick.selectOption({ label: 'Work' })
+  await nav(a, 'Hosts').click()
+  await a.getByText('No hosts yet').waitFor()
+  await a.screenshot({ path: join(shots, '04-vault-bar.png') })
+  await pick.selectOption({ label: 'Personal' })
+  await a.locator('.card', { hasText: 'pasted-pi' }).waitFor()
+  step('a second vault on the phone starts empty; switching back shows the Personal hosts')
   await a.screenshot({ path: join(shots, '03-settings.png') })
   console.log('\nMobile E2E smoke test passed')
 } finally {

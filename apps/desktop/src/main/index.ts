@@ -203,6 +203,10 @@ if (!app.requestSingleInstanceLock()) {
   handle('key:generate', (label: string, type: 'ed25519' | 'rsa') => vault.generateKey(label, type))
   handle('key:import', (input) => vault.importKey(input))
   handle('key:rename', (id: string, label: string) => vault.renameKey(id, label))
+  handle('vault:add', (name: string) => vault.addVault(String(name)))
+  handle('vault:rename', (id: string, name: string) => vault.renameVault(String(id), String(name)))
+  handle('vault:delete', (id: string) => vault.deleteVault(String(id)))
+  handle('vault:switch', (id: string) => vault.switchVault(String(id)))
   handle('key:certificate', (id: string, certificate: string | null) => vault.setKeyCertificate(String(id), certificate === null ? null : String(certificate)))
   handle('snippet:save', (id: string | null, input) => vault.saveSnippet(id, input))
   // Export files. The tests stand in a fixed path for the file pickers, which

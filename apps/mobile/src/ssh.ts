@@ -20,9 +20,10 @@ import {
   type SshPrompt,
   type SshPromptReply,
   type TransferState,
+  type VaultScope,
   type VaultService,
 } from '@termterm/app'
-import { DEFAULT_KEEPALIVE_SECONDS, fromBase64, toBase64, type KeyData, type ProxyConfig } from '@termterm/core'
+import { DEFAULT_KEEPALIVE_SECONDS, fromBase64, toBase64, type ProxyConfig } from '@termterm/core'
 
 interface NativeKey {
   privateKey: string
@@ -169,7 +170,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
   /** What to do with the interface's answer to a prompt it is showing. */
   const pending = new Map<string, (reply: SshPromptReply) => void>()
   /** Where each session connects, hop by hop (0 is the target), for host key decisions and prompt titles. */
-  const targets = new Map<string, { hops: Array<{ address: string; port: number; label: string }>; failure?: string }>()
+  // Each connection's hops and the vault it was opened from (its known hosts).
+  const targets = new Map<string, { hops: Array<{ address: string; port: number; label: string }>; scope: VaultScope; failure?: string }>()
   const forwardStates = new Map<string, ForwardState>()
 
   /** Plugin calls reject with the native message; pass it on as a plain Error. */
@@ -201,6 +203,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
       keepAlive: number
     }
     let agentKeys: ConnectOptions['agentKeys']
+    // The vault it was opened from, whichever one is shown later.
+    const scope = vault.scope('vaultId' in target ? target.vaultId : undefined)
     let env: Record<string, string> | undefined
     // The target first, then each jump host it is reached through.
     const hops: Hop[] = []
@@ -211,7 +215,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         if (seen.has(id)) throw new Error('A host cannot be reached through itself')
         if (hops.length > MAX_JUMPS) throw new Error(`At most ${MAX_JUMPS} jump hosts in a row`)
         seen.add(id)
-        const host = vault.host(id)
+        const host = scope.host(id)
         if (host?.type !== 'host') throw new Error(hops.length ? 'Jump host not found' : 'Host not found')
         const hop: Hop = {
           address: host.data.address,
@@ -223,10 +227,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         // Environment variables are for the target's shell only.
         if (hops.length === 0) env = host.data.env
         if (hops.length === 0 && forwardAgent && host.data.agentForward) {
-          agentKeys = vault
-            .snapshot()
-            .keys.map((k) => vault.key(k.id)?.data)
-            .filter((k): k is KeyData => !!k)
+          agentKeys = scope
+            .keys()
             .map((k) => ({
               name: k.label,
               privateKey: k.privateKey,
@@ -236,7 +238,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
         }
         if (host.data.proxy) hop.proxy = host.data.proxy
         if (host.data.keyId) {
-          const key = vault.key(host.data.keyId)
+          const key = scope.key(host.data.keyId)
           if (key?.type === 'key') {
             hop.privateKey = key.data.privateKey
             hop.passphrase = key.data.passphrase
@@ -263,6 +265,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
     hops.forEach((h, i) => i < hops.length - 1 && delete h.proxy)
     const [first, ...jumps] = hops
     return {
+      scope,
       labels: hops.map((h, i) => ({ address: h.address, port: h.port, label: label(h, i) })),
       options: {
         host: first!.address,
@@ -332,7 +335,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
       // until this is answered.
       const blob = fromBase64(p.publicKey)
       const publicKey = toBase64(blob)
-      const known = vault.knownHostsFor(target.address, target.port)
+      const known = session.scope.knownHostsFor(target.address, target.port)
       if (known.some((k) => k.data.publicKey === publicKey)) {
         void Ssh.promptReply({ promptId: p.promptId, accepted: true })
         return
@@ -347,7 +350,7 @@ export function createSsh(vault: VaultService, events: SshEvents) {
       const changed = known.length > 0
       pending.set(p.promptId, (reply) => {
         if (reply === true) {
-          vault.trustHostKey(entry, changed)
+          session.scope.trustHostKey(entry, changed)
         } else {
           session.failure = changed
             ? 'Host key mismatch: connection refused'
@@ -395,8 +398,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
 
   return {
     async connect(sessionId: string, target: ConnectTarget, cols: number, rows: number): Promise<void> {
-      const { options, labels } = plan(target, true)
-      targets.set(sessionId, { hops: labels })
+      const { options, labels, scope } = plan(target, true)
+      targets.set(sessionId, { hops: labels, scope })
       try {
         await Ssh.connect({
           sessionId,
@@ -413,10 +416,12 @@ export function createSsh(vault: VaultService, events: SshEvents) {
     // ---- port forwards ----
 
     async forwardStart(forwardId: string): Promise<void> {
-      const forward = vault.forward(forwardId)
+      // Started from the vault on screen (or, at unlock, the one shown last).
+      const shown = vault.scope()
+      const forward = shown.forward(forwardId)
       if (!forward) throw new Error('Port forward not found')
-      const { options, labels } = plan({ hostId: forward.data.hostId })
-      targets.set(forwardId, { hops: labels })
+      const { options, labels, scope } = plan({ hostId: forward.data.hostId, vaultId: shown.vaultId })
+      targets.set(forwardId, { hops: labels, scope })
       forwardStates.set(forwardId, { state: 'starting' })
       events.forwardState(forwardId, { state: 'starting' })
       const { kind, bindHost, bindPort, destHost, destPort } = forward.data
@@ -451,8 +456,8 @@ export function createSsh(vault: VaultService, events: SshEvents) {
     // ---- files (SFTP) ----
 
     async sftpOpen(sessionId: string, target: ConnectTarget): Promise<{ home: string }> {
-      const { options, labels } = plan(target)
-      targets.set(sessionId, { hops: labels })
+      const { options, labels, scope } = plan(target)
+      targets.set(sessionId, { hops: labels, scope })
       try {
         return await Ssh.sftpOpen({ sessionId, ...options })
       } catch (e) {

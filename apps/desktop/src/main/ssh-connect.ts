@@ -9,8 +9,8 @@ import type { Socket } from 'node:net'
 import { userInfo } from 'node:os'
 import { Client, utils, type ClientChannel, type NextAuthHandler } from 'ssh2'
 import type { ConnectTarget, SshPrompt, SshPromptReply } from '@termterm/app'
-import { fingerprintOf, MAX_JUMPS, type VaultService } from '@termterm/app'
-import { DEFAULT_KEEPALIVE_SECONDS, type KeyData, type ProxyConfig } from '@termterm/core'
+import { fingerprintOf, MAX_JUMPS, type VaultScope, type VaultService } from '@termterm/app'
+import { DEFAULT_KEEPALIVE_SECONDS, type ProxyConfig } from '@termterm/core'
 import { keyTypeOfBlob } from './keys'
 import { connectThroughProxy } from './proxy'
 import { certificateKey, useCertificates, VaultAgent } from './ssh-auth'
@@ -93,8 +93,12 @@ export interface Hop {
  * target last. Throws at once for anything the vault cannot supply (a
  * missing host, an unreadable key, a loop), before any connection is made.
  */
-export function planConnection(vault: VaultService, target: ConnectTarget): Hop[] {
+/** The vault a target was opened from (unset: the one on screen). */
+export const vaultIdOf = (target: ConnectTarget): string | undefined => ('vaultId' in target ? target.vaultId : undefined)
+
+export function planConnection(service: VaultService, target: ConnectTarget): Hop[] {
   if ('local' in target) throw new Error('Not an SSH target')
+  const vault = service.scope(vaultIdOf(target))
   if (!('hostId' in target)) {
     const { address, port } = target
     return [{ address, port, username: target.username || userInfo().username, label: label(address, port), keepAlive: DEFAULT_KEEPALIVE_SECONDS }]
@@ -142,13 +146,11 @@ export function planConnection(vault: VaultService, target: ConnectTarget): Hop[
  * it: every key in the vault (and its certificate), so the server can log in
  * onward with any of them.
  */
-export function agentFor(vault: VaultService, target: ConnectTarget): VaultAgent | undefined {
-  if (!('hostId' in target) || !vault.host(target.hostId)?.data.agentForward) return undefined
-  const keys = vault
-    .snapshot()
-    .keys.map((k) => vault.key(k.id)?.data)
-    .filter((k): k is KeyData => !!k)
-  return new VaultAgent(keys)
+export function agentFor(service: VaultService, target: ConnectTarget): VaultAgent | undefined {
+  if (!('hostId' in target)) return undefined
+  const vault = service.scope(vaultIdOf(target))
+  if (!vault.host(target.hostId)?.data.agentForward) return undefined
+  return new VaultAgent(vault.keys())
 }
 
 const label = (address: string, port: number) => (port === 22 ? address : `${address}:${port}`)
@@ -162,7 +164,7 @@ export type Ask = (host: string, body: PromptBody) => Promise<SshPromptReply>
  * also ends everything reached through it.
  */
 export async function openConnection(
-  vault: VaultService,
+  vault: VaultScope,
   hops: Hop[],
   ask: Ask,
   track: (client: Client) => void,
@@ -172,7 +174,7 @@ export async function openConnection(
   return via!
 }
 
-function connectHop(vault: VaultService, hop: Hop, ask: Ask, track: (c: Client) => void, via?: Client): Promise<Client> {
+function connectHop(vault: VaultScope, hop: Hop, ask: Ask, track: (c: Client) => void, via?: Client): Promise<Client> {
   return new Promise((resolve, reject) => {
     const client = new Client()
     track(client)

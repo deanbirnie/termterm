@@ -1,7 +1,7 @@
 import type { Client, ClientChannel } from 'ssh2'
 import type { ConnectTarget, SessionStatus } from '@termterm/app'
 import type { VaultService } from '@termterm/app'
-import { agentFor, friendlyError, LOST, openConnection, planConnection, type Prompts } from './ssh-connect'
+import { agentFor, friendlyError, LOST, openConnection, planConnection, vaultIdOf, type Prompts } from './ssh-connect'
 
 interface Session {
   /** Every connection opened for it: jump hosts first, the target last. */
@@ -51,7 +51,7 @@ export class SshManager {
 
     this.events.status(sessionId, { state: 'connecting' })
     openConnection(
-      this.vault,
+      this.vault.scope(vaultIdOf(target)),
       hops,
       (host, body) => (session.closed ? Promise.resolve(null) : this.prompts.ask(sessionId, host, body, session.prompts)),
       (client) => session.clients.push(client),

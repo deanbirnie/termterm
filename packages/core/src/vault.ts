@@ -79,6 +79,16 @@ export class Vault {
     return new Vault(file, vaultKey)
   }
 
+  /**
+   * A vault opened with its key alone, never with a password: a further vault
+   * on a device, whose key is kept (encrypted) in the device's list of vaults.
+   * Its file has no password-wrapped key; `unlockWithKey` opens it.
+   */
+  static createWithKey(key?: Uint8Array): Vault {
+    const file: VaultFile = { format: 1, kdf: newKdfParams(), wrappedVaultKey: '', items: {}, sync: null }
+    return new Vault(file, key ? key.slice() : generateVaultKey())
+  }
+
   static async unlock(file: VaultFile, password: string): Promise<Vault> {
     if (file.format !== 1) throw new Error(`Unsupported vault format: ${String(file.format)}`)
     const { wrapKey } = await deriveKeys(password, file.kdf)
