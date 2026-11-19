@@ -11,7 +11,18 @@ export interface VaultStorage {
   read(): Promise<string | null>
   /** Must not leave a half-written file behind if interrupted. */
   write(data: string): Promise<void>
+  /**
+   * Further files beside the vault (other vaults, and their list), by name:
+   * lowercase letters, digits and dashes. A platform without them holds one
+   * vault only.
+   */
+  readNamed?(name: string): Promise<string | null>
+  writeNamed?(name: string, data: string): Promise<void>
+  removeNamed?(name: string): Promise<void>
 }
+
+/** A name `VaultStorage` accepts for a further file. */
+export const STORAGE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/
 
 /** The operating system's credential store, holding the vault key for "open unlocked". */
 export interface DeviceKeyStore {

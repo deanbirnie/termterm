@@ -174,7 +174,20 @@ export interface SyncStatus {
   rollback?: { at: number; items: number; serverBehind: boolean }
 }
 
+export interface VaultView {
+  id: string
+  name: string
+  /** The vault the master password opens, and the one that syncs; it cannot be deleted. */
+  personal: boolean
+}
+
 export interface VaultSnapshot {
+  /** Every vault on this device; one is shown at a time. */
+  vaults: VaultView[]
+  /** The vault shown, which the lists below are of. */
+  activeVaultId: string
+  /** Whether this device can hold more than one vault. */
+  multiVault: boolean
   hosts: HostView[]
   keys: KeyView[]
   identities: IdentityView[]
@@ -399,6 +412,13 @@ export interface TermtermApi {
   generateKey(label: string, type: 'ed25519' | 'rsa'): Promise<string>
   importKey(input: KeyImportInput): Promise<string>
   renameKey(id: string, label: string): Promise<void>
+  /** A new, empty vault on this device; returns its id. */
+  addVault(name: string): Promise<string>
+  renameVault(id: string, name: string): Promise<void>
+  /** Deletes a vault and everything in it from this device (not the Personal vault). */
+  deleteVault(id: string): Promise<void>
+  /** Shows another vault; every page then lists that vault's items. */
+  switchVault(id: string): Promise<void>
   /** Adds (or with null removes) the OpenSSH certificate a key logs in with. */
   setKeyCertificate(id: string, certificate: string | null): Promise<void>
   saveSnippet(id: string | null, input: { label: string; script: string }): Promise<string>

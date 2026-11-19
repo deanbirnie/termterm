@@ -600,3 +600,151 @@ describe('proxies, agent forwarding and certificates', () => {
     expect(s.key(key)?.data.certificate).toBeUndefined()
   })
 })
+
+describe('several vaults on a device', () => {
+  /** A device whose storage also keeps named files (other vaults, their list). */
+  function multiDevice() {
+    const files = new Map<string, string>()
+    const platform: Platform = {
+      storage: {
+        read: async () => files.get('vault') ?? null,
+        write: async (data) => void files.set('vault', data),
+        readNamed: async (name) => files.get(name) ?? null,
+        writeNamed: async (name, data) => void files.set(name, data),
+        removeNamed: async (name) => void files.delete(name),
+      },
+      deviceKey: { available: async () => false, has: async () => false, save: async () => {}, load: async () => null, clear: () => {} },
+      keys: { generate: () => Promise.reject(new Error('unused')), import: () => Promise.reject(new Error('unused')) },
+      deviceName: () => 'test',
+      rememberDevice: () => false,
+    }
+    const open = () => new VaultService(platform, () => undefined, () => undefined)
+    return { files, open }
+  }
+  const host = (label: string) => ({ label, address: `${label}.test`, port: 22, username: 'u', tags: [], keyId: null })
+  const opened = async (s: VaultService) => {
+    for (let i = 0; i < 50 && s.snapshot().vaults.length === 1; i++) await new Promise((r) => setTimeout(r, 5))
+  }
+
+  it('keeps each vault to itself, and shows one at a time', async () => {
+    const { open } = multiDevice()
+    const s = open()
+    await s.create('master-password')
+    expect(s.snapshot()).toMatchObject({ vaults: [{ name: 'Personal', personal: true }], activeVaultId: 'personal', multiVault: true })
+    s.saveHost(null, host('home'))
+    const work = s.addVault('Work')
+    expect(s.snapshot().activeVaultId).toBe('personal') // adding does not switch
+    s.switchVault(work)
+    expect(s.snapshot().hosts).toEqual([])
+    const workHost = s.saveHost(null, host('office'))
+    s.saveSnippet(null, { label: 'up', script: 'uptime' })
+    expect(s.snapshot().hosts.map((h) => h.label)).toEqual(['office'])
+    s.switchVault('personal')
+    expect(s.snapshot().hosts.map((h) => h.label)).toEqual(['home'])
+    expect(s.snapshot().snippets).toEqual([])
+    expect(s.host(workHost)).toBeUndefined() // not from another vault
+    expect(() => s.addVault('work')).toThrow('already a vault called')
+    expect(() => s.addVault(' ')).toThrow('Vault name is required')
+  })
+
+  it('refuses links to another vault, so nothing can be borrowed across', async () => {
+    const { open } = multiDevice()
+    const s = open()
+    await s.create('master-password')
+    const personalHost = s.saveHost(null, host('home'))
+    const personalSnippet = s.saveSnippet(null, { label: 'up', script: 'uptime' })
+    s.switchVault(s.addVault('Work'))
+    expect(() => s.saveHost(null, { ...host('x'), jumpHostId: personalHost })).toThrow('Jump host not found')
+    expect(() => s.saveHost(null, { ...host('x'), startupSnippetId: personalSnippet })).toThrow('Snippet not found')
+    expect(() => s.saveForward(null, { hostId: personalHost, kind: 'dynamic', bindPort: 1080 })).toThrow('Choose a host')
+  })
+
+  it('reopens every vault after a lock, showing the one shown last; the Personal file stays as older versions read it', async () => {
+    const { files, open } = multiDevice()
+    const s = open()
+    await s.create('master-password')
+    s.saveHost(null, host('home'))
+    const work = s.addVault('Work stuff')
+    s.switchVault(work)
+    s.saveHost(null, host('office'))
+    await s.flush()
+    s.lock()
+    await s.flush()
+
+    // The Personal vault's file is the old format, with only its own item.
+    const personal = JSON.parse(files.get('vault')!)
+    expect(personal.format).toBe(1)
+    expect(Object.keys(personal.items)).toHaveLength(1)
+    // The list of vaults gives nothing away.
+    expect(files.get('vaults')).not.toContain('Work stuff')
+    expect(files.has(`vault-${work}`)).toBe(true)
+
+    const again = open()
+    await again.unlock('master-password')
+    await opened(again)
+    expect(again.snapshot().vaults.map((v) => v.name)).toEqual(['Personal', 'Work stuff'])
+    expect(again.snapshot().activeVaultId).toBe(work)
+    expect(again.snapshot().hosts.map((h) => h.label)).toEqual(['office'])
+  })
+
+  it('still opens the other vaults after a master password change', async () => {
+    const { open } = multiDevice()
+    const s = open()
+    await s.create('master-password')
+    const work = s.addVault('Work')
+    s.switchVault(work)
+    s.saveHost(null, host('office'))
+    await s.changePassword('master-password', 'a new password')
+    await s.flush()
+    s.lock()
+    const again = open()
+    await again.unlock('a new password')
+    await opened(again)
+    expect(again.snapshot().hosts.map((h) => h.label)).toEqual(['office'])
+  })
+
+  it('renames vaults, and deletes all but the Personal one, files and all', async () => {
+    const { files, open } = multiDevice()
+    const s = open()
+    await s.create('master-password')
+    const work = s.addVault('Work')
+    s.renameVault(work, 'Clients')
+    s.renameVault('personal', 'Mine')
+    expect(s.snapshot().vaults.map((v) => v.name)).toEqual(['Mine', 'Clients'])
+    expect(() => s.renameVault(work, 'mine')).toThrow('already a vault called')
+    s.switchVault(work)
+    expect(() => s.deleteVault('personal')).toThrow('cannot be deleted')
+    s.deleteVault(work)
+    await s.flush()
+    expect(s.snapshot().vaults.map((v) => v.id)).toEqual(['personal'])
+    expect(s.snapshot().activeVaultId).toBe('personal')
+    expect(files.has(`vault-${work}`)).toBe(false)
+    expect(() => s.switchVault(work)).toThrow('Vault not found')
+  })
+
+  it('a connection keeps to the vault it was made from, whichever is shown later', async () => {
+    const { open } = multiDevice()
+    const s = open()
+    await s.create('master-password')
+    const work = s.addVault('Work')
+    s.switchVault(work)
+    const office = s.saveHost(null, host('office'))
+    const scope = s.scope()
+    expect(scope.vaultId).toBe(work)
+    s.switchVault('personal')
+    expect(scope.host(office)?.data.label).toBe('office')
+    scope.trustHostKey({ host: 'office.test', port: 22, keyType: 'ssh-ed25519', publicKey: 'AAAA', fingerprint: 'SHA256:x' }, false)
+    expect(s.snapshot().knownHosts).toEqual([]) // known to the Work vault, not Personal
+    s.switchVault(work)
+    expect(s.snapshot().knownHosts.map((k) => k.host)).toEqual(['office.test'])
+    s.deleteVault(work)
+    expect(() => scope.host(office)).toThrow('no longer on this device')
+  })
+
+  it('a device without named files keeps one vault', async () => {
+    const s = device('none').open()
+    await s.create('master-password')
+    expect(s.snapshot().multiVault).toBe(false)
+    expect(() => s.addVault('Work')).toThrow('keeps one vault only')
+  })
+})
