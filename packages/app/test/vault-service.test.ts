@@ -713,8 +713,8 @@ describe('several vaults on a device', () => {
     expect(s.snapshot().vaults.map((v) => v.name)).toEqual(['Mine', 'Clients'])
     expect(() => s.renameVault(work, 'mine')).toThrow('already a vault called')
     s.switchVault(work)
-    expect(() => s.deleteVault('personal')).toThrow('cannot be deleted')
-    s.deleteVault(work)
+    await expect(s.deleteVault('personal')).rejects.toThrow('cannot be deleted')
+    await s.deleteVault(work)
     await s.flush()
     expect(s.snapshot().vaults.map((v) => v.id)).toEqual(['personal'])
     expect(s.snapshot().activeVaultId).toBe('personal')
@@ -737,7 +737,7 @@ describe('several vaults on a device', () => {
     expect(s.snapshot().knownHosts).toEqual([]) // known to the Work vault, not Personal
     s.switchVault(work)
     expect(s.snapshot().knownHosts.map((k) => k.host)).toEqual(['office.test'])
-    s.deleteVault(work)
+    await s.deleteVault(work)
     expect(() => scope.host(office)).toThrow('no longer on this device')
   })
 
