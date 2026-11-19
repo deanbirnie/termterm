@@ -422,12 +422,18 @@ export class Vault {
    * the account's copies by time like any other change. A brand-new account
    * (`newAccount`) has nothing to delete, so those are dropped instead.
    */
-  setSync(serverUrl: string, username: string, token: string, options: { newAccount?: boolean } = {}): void {
+  setSync(
+    serverUrl: string,
+    username: string,
+    token: string,
+    options: { newAccount?: boolean; remoteVaultId?: string } = {},
+  ): void {
     this.file.sync = {
       serverUrl,
       username,
       tokenBlob: seal(this.vaultKey, utf8(token), 'termterm:token'),
       cursor: 0,
+      ...(options.remoteVaultId ? { remoteVaultId: options.remoteVaultId } : {}),
     }
     for (const [id, stored] of Object.entries(this.file.items)) {
       if (stored.deleted && options.newAccount) {

@@ -34,6 +34,12 @@ export interface SyncState {
    */
   seenSeq?: number
   lastSyncAt?: number
+  /**
+   * For a vault other than the Personal one: its id on the server. Its
+   * session token is the server connection's (kept in the device's list of
+   * vaults), so `tokenBlob` holds an empty one.
+   */
+  remoteVaultId?: string
 }
 
 export interface VaultFile {
