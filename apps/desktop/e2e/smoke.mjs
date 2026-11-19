@@ -1397,7 +1397,7 @@ try {
       await hp.getByRole('button', { name: 'Add vaults…' }).click()
       const remote = hp.getByRole('dialog', { name: /^Vaults of henry/ })
       await remote.getByRole('button', { name: 'Add Work' }).click()
-      await remote.getByText('On this device').waitFor()
+      await remote.getByText('On this device', { exact: true }).waitFor()
       await remote.getByRole('button', { name: 'Done' }).click()
       await hp.getByRole('combobox', { name: 'Vault', exact: true }).selectOption({ label: 'Work' })
       await navH('Hosts').click()
