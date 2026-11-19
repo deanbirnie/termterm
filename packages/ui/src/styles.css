@@ -494,3 +494,7 @@ a.btn, a.update-pill { text-decoration: none; }
   display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 0 6px; height: 16px;
   border-radius: 8px; font-size: 10.5px; font-weight: 600; color: #fff; background: #b45309; flex: none;
 }
+.server-list li { display: block; }
+.server-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.server-vaults { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; background: var(--bg-raised); }

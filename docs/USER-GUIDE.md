@@ -98,8 +98,8 @@ top of every page shows which one, and changes it.
   on **Keep tabs open when switching vaults** in **Settings → Vaults**. A tab
   that stays open keeps using the vault it was opened from.
 - The app opens on the vault you used last.
-- **Sync:** for now only the Personal vault syncs. Other vaults stay on the
-  device where you made them.
+- **Sync:** each vault syncs on its own, or not at all. See
+  [Syncing other vaults](#syncing-other-vaults).
 
 ---
 
@@ -468,6 +468,38 @@ until every device has caught up with the deletion.
 when each was last active. **Sign out** stops a device from syncing; it keeps
 its own copy of the vault. If a device is lost, sign it out and also change
 your master password.
+
+### Syncing other vaults
+
+A vault other than Personal syncs through a **sync server account**: the
+Personal vault's account, or an account on a further server. The Sync page
+lists each account, under **Sync servers**, with the vaults that sync through
+it.
+
+- **Add a further server:** **Sync → Add a sync server**. Sign in, or create
+  an account. A further server has its own username and password, not your
+  master password. This device does not keep that password. You can use the
+  same username and password on several servers; each account is separate.
+- **Sync a vault:** **Settings → Vaults**, the cloud button next to the vault.
+  Choose the account. The app tells you that the vault is copied (encrypted)
+  to that server, and that every device signed in to that account can then
+  add it.
+- **Get a vault on another device:** sign in to the same account on that
+  device (for the Personal vault's account, use the master password as
+  usual). Then **Sync → Add vaults…** next to the account, and **Add** the
+  vault. The app tells you that this puts the vault's hosts, passwords and
+  keys on the device.
+- **Stop syncing a vault:** **Settings → Vaults**, the crossed-out cloud
+  button. The vault stays on the device. To also delete it from the server
+  (for every device), tick the box. When you delete a synced vault, you can
+  delete it from the server too.
+- **Sign out of a further server:** the sign-out button next to it on the
+  Sync page. Its vaults stay on the device but stop syncing.
+- **Signed out by the server:** the account shows a password field. Enter
+  that account's password to sign in again.
+- **Older servers:** a server must be updated (to the release that adds this)
+  before it can hold more than one vault. An older server keeps syncing the
+  Personal vault as before.
 
 **Changing your master password** (Settings) signs your other devices out.
 Each one shows **Sign in again** on its Sync page: enter the new password

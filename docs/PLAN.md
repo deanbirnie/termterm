@@ -254,24 +254,25 @@ Rules for all three:
 - [x] Switching closes tabs and stops forwards, after a warning naming the
       setting; the setting to keep them open (a kept tab uses its own vault)
 
-#### Batch 14 — A sync server for each vault (next)
+#### Batch 14 — A sync server for each vault (done; released with Batch 15)
 
-- [ ] Each vault syncs with its own server and account (or not at all);
+- [x] Each vault syncs with its own server and account (or not at all);
       several sync servers on one device; one account can hold several vaults
-- [ ] Signing in to a further server uses that server's own username and
-      password (kept encrypted in the vault), not the master password, so a
+- [x] Signing in to a further server uses that server's own username and
+      password (not kept: the account's key, which it unwraps, is kept
+      encrypted in the device's list of vaults), not the master password, so a
       master password change touches no server but the Personal vault's.
       Reusing a username and password on another server simply works; each
       server account is independent (agreed 2026-11-19)
-- [ ] A self-hosted server must be updated before it holds more than one
+- [x] A self-hosted server must be updated before it holds more than one
       vault; an older server keeps syncing the Personal vault only
-- [ ] A Sync page that lists each sync server and the vaults synced with it
-- [ ] Connecting a vault to a server, or signing in on a new device, says
+- [x] A Sync page that lists each sync server and the vaults synced with it
+- [x] Connecting a vault to a server, or signing in on a new device, says
       plainly what will happen ("this creates a new vault on this server";
       "check this is the right server for the vault you want") and asks to
       confirm
 
-#### Batch 15 — Shared vaults
+#### Batch 15 — Shared vaults (next)
 
 - [ ] A key pair per account; a shared vault's key wrapped to each member's
       public key, so the server still sees only ciphertext

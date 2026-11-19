@@ -37,7 +37,16 @@ export function VaultView({
   const [page, setPage] = useState<PageId>('hosts')
   const { sync } = snapshot
   const info = useAppInfo()
-  const syncDot = !sync.configured ? 'off' : sync.state === 'error' || sync.rollback ? 'error' : sync.state === 'syncing' ? 'busy' : 'ok'
+  // Any account in trouble (the Personal vault's, or a further server's) shows.
+  const otherError = snapshot.servers.some((x) => !x.personal && (x.error || x.needsSignIn))
+  const anySync = sync.configured || snapshot.servers.length > 0
+  const syncDot = !anySync
+    ? 'off'
+    : (sync.configured && sync.state === 'error') || sync.rollback || otherError
+      ? 'error'
+      : sync.state === 'syncing'
+        ? 'busy'
+        : 'ok'
 
   return (
     <div className="vault">
@@ -71,7 +80,7 @@ export function VaultView({
         {page === 'snippets' && <SnippetsPage snapshot={snapshot} />}
         {page === 'known' && <KnownHostsPage snapshot={snapshot} />}
         {page === 'forwarding' && <ForwardingPage snapshot={snapshot} />}
-        {page === 'sync' && <SyncPage sync={sync} />}
+        {page === 'sync' && <SyncPage sync={sync} snapshot={snapshot} />}
         {page === 'settings' && <SettingsPage synced={sync.configured} snapshot={snapshot} />}
       </section>
     </div>

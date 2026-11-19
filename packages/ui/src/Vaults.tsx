@@ -1,7 +1,8 @@
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Cloud, CloudOff, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Settings, VaultSnapshot, VaultView } from '@termterm/app'
 import { api } from './api'
+import { ConnectVaultDialog, DisconnectVaultDialog } from './SyncServers'
 import { Button, ErrorText, Field, Modal, useAction } from './ui'
 
 /**
@@ -76,6 +77,9 @@ export function SwitchVaultDialog({
 export function VaultsSettings({ snapshot }: { snapshot: VaultSnapshot }) {
   const [naming, setNaming] = useState<{ vault: VaultView | null } | null>(null)
   const [deleting, setDeleting] = useState<VaultView | null>(null)
+  const [connecting, setConnecting] = useState<VaultView | null>(null)
+  const [disconnecting, setDisconnecting] = useState<VaultView | null>(null)
+  const serverOf = (v: VaultView) => snapshot.servers.find((s) => s.id === v.serverId)
   const [settings, setSettings] = useState<Settings | null>(null)
   useEffect(() => {
     void api.settings().then(setSettings)
@@ -85,20 +89,32 @@ export function VaultsSettings({ snapshot }: { snapshot: VaultSnapshot }) {
     <section aria-label="Vaults">
       <p className="field-hint">
         Each vault keeps its own hosts, keys, identities, snippets, known hosts and port forwards, and one is shown at a
-        time. Nothing in one vault can use or see another. Only the Personal vault syncs for now.
+        time. Nothing in one vault can use or see another. Each vault syncs on its own: the Personal vault from the
+        Sync page, others through any sync server account here.
       </p>
       <ul className="vault-list">
         {snapshot.vaults.map((v) => (
           <li key={v.id}>
             <span>
               <strong>{v.name}</strong>
-              {v.personal && <span className="muted"> · opened with your master password; syncs</span>}
+              {v.personal && <span className="muted"> · opened with your master password</span>}
+              {serverOf(v) && <span className="muted"> · syncs with {serverOf(v)!.serverUrl.replace(/^https?:\/\//, '')}</span>}
               {v.id === snapshot.activeVaultId && <span className="muted"> · shown now</span>}
             </span>
             <span className="vault-actions">
               <button className="icon-btn" aria-label={`Rename ${v.name}`} title="Rename" onClick={() => setNaming({ vault: v })}>
                 <Pencil size={15} />
               </button>
+              {!v.personal &&
+                (v.serverId ? (
+                  <button className="icon-btn" aria-label={`Stop syncing ${v.name}`} title="Stop syncing" onClick={() => setDisconnecting(v)}>
+                    <CloudOff size={15} />
+                  </button>
+                ) : (
+                  <button className="icon-btn" aria-label={`Sync ${v.name}`} title="Sync" onClick={() => setConnecting(v)}>
+                    <Cloud size={15} />
+                  </button>
+                ))}
               {!v.personal && (
                 <button className="icon-btn" aria-label={`Delete ${v.name}`} title="Delete" onClick={() => setDeleting(v)}>
                   <Trash2 size={15} />
@@ -131,6 +147,8 @@ export function VaultsSettings({ snapshot }: { snapshot: VaultSnapshot }) {
       </p>
       {naming && <VaultNameDialog vault={naming.vault} onClose={() => setNaming(null)} />}
       {deleting && <DeleteVaultDialog vault={deleting} onClose={() => setDeleting(null)} />}
+      {connecting && <ConnectVaultDialog vault={connecting} servers={snapshot.servers} onClose={() => setConnecting(null)} />}
+      {disconnecting && <DisconnectVaultDialog vault={disconnecting} onClose={() => setDisconnecting(null)} />}
     </section>
   )
 }
@@ -166,6 +184,7 @@ function VaultNameDialog({ vault, onClose }: { vault: VaultView | null; onClose:
 
 function DeleteVaultDialog({ vault, onClose }: { vault: VaultView; onClose: () => void }) {
   const [typed, setTyped] = useState('')
+  const [fromServer, setFromServer] = useState(false)
   const { busy, error, run } = useAction()
   return (
     <Modal title={`Delete ${vault.name}?`} tone="danger" onClose={onClose}>
@@ -173,6 +192,12 @@ function DeleteVaultDialog({ vault, onClose }: { vault: VaultView; onClose: () =
         Everything in it (hosts, keys, identities, snippets, known hosts and port forwards) is deleted from this device.
         This cannot be undone.
       </p>
+      {vault.serverId && (
+        <label className="check">
+          <input type="checkbox" checked={fromServer} onChange={(e) => setFromServer(e.target.checked)} />
+          Also delete it from the sync server, for every device
+        </label>
+      )}
       <Field label={`Type ${vault.name} to confirm`}>
         <input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} />
       </Field>
@@ -184,7 +209,7 @@ function DeleteVaultDialog({ vault, onClose }: { vault: VaultView; onClose: () =
           disabled={busy || typed.trim() !== vault.name}
           onClick={() =>
             void run(async () => {
-              await api.deleteVault(vault.id)
+              await api.deleteVault(vault.id, { fromServer })
               onClose()
             })
           }
